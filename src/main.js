@@ -1,0 +1,2797 @@
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { spawn, spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+app.setName("Aimashi");
+
+const OFFICIAL_ENGINE_PACKAGE = process.env.AIMASHI_ENGINE_PACKAGE || "hermes-agent";
+const OFFICIAL_ENGINE_REPO_URL = process.env.AIMASHI_ENGINE_REPO || "https://github.com/NousResearch/hermes-agent";
+const OFFICIAL_ENGINE_REF = process.env.AIMASHI_ENGINE_REF || "main";
+const OFFICIAL_ENGINE_URL = process.env.AIMASHI_ENGINE_URL || "";
+const OFFICIAL_ENGINE_EXTRAS = process.env.AIMASHI_ENGINE_EXTRAS || "web";
+const OFFICIAL_ENGINE_PYTHON = process.env.AIMASHI_PYTHON || "";
+const DEV_ENGINE_SOURCE = process.env.AIMASHI_ENGINE_SOURCE || "";
+const CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_DEVICE_URL = "https://auth.openai.com/codex/device";
+const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const AIMASHI_GATEWAY_SERVICE_LABEL = "ai.aimashi.hermes.gateway";
+let engineProcess = null;
+let engineState = {
+  running: false,
+  starting: false,
+  baseUrl: "",
+  port: 0,
+  managedBy: "",
+  lastError: "",
+  logs: []
+};
+let authProcess = null;
+let codexOAuthCancelled = false;
+let authState = {
+  codexStarting: false,
+  codexLoggedIn: false,
+  oauthProvider: "",
+  oauthProviderLabel: "",
+  codexLastError: "",
+  codexUserCode: "",
+  codexVerificationUrl: CODEX_DEVICE_URL,
+  logs: []
+};
+let activeChatAbortController = null;
+
+function writeFileIfMissing(filePath, content, mode) {
+  if (fs.existsSync(filePath)) return false;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, { mode });
+  return true;
+}
+
+function readJson(filePath, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function defaultModelSettings() {
+  return {
+    provider: "xai",
+    model: "grok-4.1-fast",
+    apiKeyEnv: "XAI_API_KEY",
+    apiKey: "",
+    baseUrl: "",
+    apiMode: ""
+  };
+}
+
+function runtimePaths() {
+  const root = app.getPath("userData");
+  const runtime = path.join(root, "runtime");
+  const engine = path.join(runtime, "hermes-engine");
+  const home = path.join(runtime, "engine-home");
+  return {
+    root,
+    runtime,
+    engine,
+    home,
+    config: path.join(home, "config.yaml"),
+    soul: path.join(home, "SOUL.md"),
+    fellowManifest: path.join(home, "fellows", "manifest.json"),
+    fellowDir: path.join(home, "fellows"),
+    legacyPersonaManifest: path.join(home, "personas", "manifest.json"),
+    legacyPersonaDir: path.join(home, "personas", "accounts"),
+    personaManifest: path.join(home, "fellows", "manifest.json"),
+    personaDir: path.join(home, "fellows"),
+    compatSoulsDir: path.join(home, "souls"),
+    apiKey: path.join(home, "api-server.key"),
+    authJson: path.join(home, "auth.json"),
+    userProfile: path.join(home, "aimashi-user.json"),
+    modelSettings: path.join(home, "aimashi-model.json"),
+    providerConnections: path.join(home, "aimashi-providers.json"),
+    appearanceSettings: path.join(home, "aimashi-appearance.json"),
+    chatSessions: path.join(home, "aimashi-sessions.json"),
+    logsDir: path.join(home, "logs"),
+    launchAgent: path.join(app.getPath("home"), "Library", "LaunchAgents", `${AIMASHI_GATEWAY_SERVICE_LABEL}.plist`)
+  };
+}
+
+function venvPythonPath() {
+  return path.join(runtimePaths().engine, ".venv", "bin", "python");
+}
+
+function engineMarkerPath() {
+  return path.join(runtimePaths().engine, "aimashi-runtime.json");
+}
+
+function officialEngineUrl() {
+  if (String(OFFICIAL_ENGINE_URL || "").trim()) return OFFICIAL_ENGINE_URL.trim();
+  const repo = String(OFFICIAL_ENGINE_REPO_URL || "https://github.com/NousResearch/hermes-agent").replace(/\/+$/, "");
+  const ref = encodeURIComponent(String(OFFICIAL_ENGINE_REF || "main").trim());
+  return `${repo}/archive/${ref}.tar.gz`;
+}
+
+function officialEngineRequirement(extras = "") {
+  const name = String(OFFICIAL_ENGINE_PACKAGE || "hermes-agent").trim();
+  const extraPart = extras ? `[${extras}]` : "";
+  return `${name}${extraPart} @ ${officialEngineUrl()}`;
+}
+
+function pythonVersion(command) {
+  const result = spawnSync(command, [
+    "-c",
+    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+  ], {
+    encoding: "utf8"
+  });
+  if (result.error || result.status !== 0) return null;
+  const version = String(result.stdout || "").trim();
+  const [major, minor] = version.split(".").map((part) => Number(part));
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+  return { version, major, minor };
+}
+
+function selectOfficialEnginePython() {
+  const candidates = [
+    OFFICIAL_ENGINE_PYTHON,
+    "python3.13",
+    "python3.12",
+    "python3.11",
+    "python3"
+  ].filter(Boolean);
+  for (const command of candidates) {
+    const info = pythonVersion(command);
+    if (info && (info.major > 3 || (info.major === 3 && info.minor >= 11))) {
+      return command;
+    }
+  }
+  throw new Error("Official Hermes requires Python 3.11+. Set AIMASHI_PYTHON=/path/to/python3.11 or newer.");
+}
+
+function isEngineInstalled() {
+  const p = runtimePaths();
+  const sourceEntrypoint = path.join(p.engine, "hermes_cli", "main.py");
+  const venvPython = venvPythonPath();
+  const marker = readJson(engineMarkerPath(), {});
+  if (marker?.source === "official-github-archive" || marker?.source === "official-python-package") {
+    return fs.existsSync(venvPython);
+  }
+  if (marker?.source === "maintained-local-source") {
+    return fs.existsSync(sourceEntrypoint);
+  }
+  return false;
+}
+
+function defaultUserProfile() {
+  return {
+    displayName: "Boss",
+    avatarText: "B",
+    avatarColor: "#111827",
+    avatarImage: ""
+  };
+}
+
+function defaultAppearanceSettings() {
+  return {
+    theme: "light",
+    fontPreset: "system",
+    customFont: ""
+  };
+}
+
+function appearanceSettings() {
+  const p = runtimePaths();
+  const saved = readJson(p.appearanceSettings, {});
+  return { ...defaultAppearanceSettings(), ...saved };
+}
+
+function defaultFellowManifest() {
+  return {
+    schema_version: 1,
+    product: "aimashi",
+    default_fellow: "aimashi",
+    fellows: [
+      {
+        key: "aimashi",
+        name: "Aimashi",
+        account_id: "aimashi",
+        route_profile: "aimashi",
+      platform: "api_server",
+      color: "#0f766e",
+      avatarImage: "",
+      avatarCrop: { x: 50, y: 50, offsetX: 0, offsetY: 0, zoom: 1 },
+      bio: "Aimashi App 里的第一个本地伙伴"
+      }
+    ]
+  };
+}
+
+function defaultManifest() {
+  const manifest = defaultFellowManifest();
+  return {
+    schema_version: manifest.schema_version,
+    product: manifest.product,
+    default_persona: manifest.default_fellow,
+    personas: manifest.fellows
+  };
+}
+
+function normalizeFellow(item) {
+  const key = String(item?.key || item?.account_id || "").trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_");
+  const name = String(item?.name || item?.display_name || key || "Aimashi").trim();
+  if (!key || !name) return null;
+  return {
+    key,
+    name,
+    account_id: String(item?.account_id || key).trim() || key,
+    route_profile: String(item?.route_profile || item?.account_id || key).trim() || key,
+    platform: String(item?.platform || "api_server").trim() || "api_server",
+    color: String(item?.color || item?.accent_color || "#0f766e").trim() || "#0f766e",
+    avatarImage: String(item?.avatarImage || item?.avatar_image || "").trim(),
+    avatarCrop: normalizeAvatarCrop(item?.avatarCrop || item?.avatar_crop),
+    bio: String(item?.bio || item?.description || "").trim()
+  };
+}
+
+function normalizeAvatarCrop(input = {}) {
+  const value = input && typeof input === "object" ? input : {};
+  const num = (raw, fallback, min, max) => {
+    const next = Number(raw);
+    if (!Number.isFinite(next)) return fallback;
+    return Math.max(min, Math.min(max, next));
+  };
+  return {
+    x: num(value.x, 50, 0, 100),
+    y: num(value.y, 50, 0, 100),
+    offsetX: num(value.offsetX, 0, -320, 320),
+    offsetY: num(value.offsetY, 0, -320, 320),
+    zoom: num(value.zoom, 1, 1, 2.4)
+  };
+}
+
+function normalizeFellowManifest(input) {
+  const source = input && typeof input === "object" ? input : defaultFellowManifest();
+  const rawFellows = Array.isArray(source.fellows)
+    ? source.fellows
+    : Array.isArray(source.personas)
+      ? source.personas
+      : defaultFellowManifest().fellows;
+  const fellows = rawFellows.map(normalizeFellow).filter(Boolean);
+  if (!fellows.some((fellow) => fellow.key === "aimashi")) {
+    fellows.unshift(defaultFellowManifest().fellows[0]);
+  }
+  return {
+    schema_version: 1,
+    product: "aimashi",
+    default_fellow: String(source.default_fellow || source.default_persona || fellows[0]?.key || "aimashi"),
+    fellows
+  };
+}
+
+function loadFellowManifest() {
+  const p = runtimePaths();
+  if (fs.existsSync(p.fellowManifest)) {
+    return normalizeFellowManifest(readJson(p.fellowManifest, defaultFellowManifest()));
+  }
+  if (fs.existsSync(p.legacyPersonaManifest)) {
+    return normalizeFellowManifest(readJson(p.legacyPersonaManifest, defaultManifest()));
+  }
+  return defaultFellowManifest();
+}
+
+function saveFellowManifest(manifest) {
+  const p = runtimePaths();
+  const normalized = normalizeFellowManifest(manifest);
+  fs.mkdirSync(path.dirname(p.fellowManifest), { recursive: true });
+  fs.writeFileSync(p.fellowManifest, JSON.stringify(normalized, null, 2) + "\n");
+  return normalized;
+}
+
+function defaultChatStore() {
+  return {
+    schema_version: 1,
+    readAt: {},
+    sessions: {}
+  };
+}
+
+function cleanSessionTitle(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["'“”‘’]+|["'“”‘’。.!！?？:：]+$/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 32);
+}
+
+function fallbackSessionTitle(messages = []) {
+  const firstUser = messages.find((message) => message.role === "user" && String(message.content || "").trim());
+  return cleanSessionTitle(firstUser?.content || "新对话") || "新对话";
+}
+
+function normalizeChatStore(input) {
+  const store = input && typeof input === "object" ? input : defaultChatStore();
+  const sessions = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
+  const readAt = store.readAt && typeof store.readAt === "object" ? store.readAt : {};
+  const normalized = { schema_version: 1, readAt: {}, sessions: {} };
+  for (const [personaKey, value] of Object.entries(readAt)) {
+    if (typeof value === "string" && value.trim()) {
+      normalized.readAt[String(personaKey)] = value;
+    }
+  }
+  for (const [personaKey, list] of Object.entries(sessions)) {
+    if (!Array.isArray(list)) continue;
+    normalized.sessions[personaKey] = list
+      .filter((session) => session && typeof session === "object" && session.id)
+      .map((session) => ({
+        id: String(session.id),
+        personaKey: String(session.personaKey || personaKey),
+        title: cleanSessionTitle(session.title) || "新对话",
+        titleGenerated: Boolean(session.titleGenerated),
+        createdAt: session.createdAt || new Date().toISOString(),
+        updatedAt: session.updatedAt || session.createdAt || new Date().toISOString(),
+        messages: Array.isArray(session.messages)
+          ? session.messages
+            .filter((message) => message && ["user", "assistant", "system"].includes(message.role))
+            .map((message) => ({
+              role: message.role,
+              content: String(message.content || ""),
+              createdAt: message.createdAt || session.updatedAt || new Date().toISOString()
+            }))
+          : []
+      }))
+      .filter((session) => session.id);
+  }
+  return normalized;
+}
+
+function loadChatStore() {
+  return normalizeChatStore(readJson(runtimePaths().chatSessions, defaultChatStore()));
+}
+
+function saveChatStore(store) {
+  const p = runtimePaths();
+  fs.mkdirSync(path.dirname(p.chatSessions), { recursive: true });
+  const normalized = normalizeChatStore(store);
+  fs.writeFileSync(p.chatSessions, JSON.stringify(normalized, null, 2) + "\n", { mode: 0o600 });
+  return normalized;
+}
+
+function createChatSession(personaKey) {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    personaKey,
+    title: "新对话",
+    titleGenerated: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: []
+  };
+}
+
+function ensurePersonaSession(store, personaKey) {
+  if (!store.sessions[personaKey]) store.sessions[personaKey] = [];
+  if (!store.sessions[personaKey].length) {
+    store.sessions[personaKey].push(createChatSession(personaKey));
+  }
+  store.sessions[personaKey].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  return store.sessions[personaKey][0];
+}
+
+function fellowPersonaBody(name, description = "") {
+  return [
+    `# ${name}`,
+    "",
+    `你是 ${name}，Aimashi App 中的一位本地伙伴。`,
+    description ? String(description).trim() : "请保持清楚、可靠、可执行的沟通风格。",
+    ""
+  ].join("\n");
+}
+
+function fellowMetadata(fellow) {
+  return {
+    account_id: fellow.key,
+    display_name: fellow.name,
+    accent_color: fellow.color || "#0f766e",
+    avatar_image: fellow.avatarImage || "",
+    avatar_crop: fellow.avatarCrop || { x: 50, y: 50, offsetX: 0, offsetY: 0, zoom: 1 },
+    bio: fellow.bio || "",
+    created_at: new Date().toISOString()
+  };
+}
+
+function fellowKeyFromName(name) {
+  const slug = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+  if (slug) return slug;
+  const hash = crypto.createHash("sha1").update(String(name || "fellow")).digest("hex").slice(0, 10);
+  return `fellow_${hash}`;
+}
+
+function migrateLegacyPersonas(created) {
+  const p = runtimePaths();
+  const manifest = loadFellowManifest();
+  const hadFellowManifest = fs.existsSync(p.fellowManifest);
+  saveFellowManifest(manifest);
+  if (!hadFellowManifest) {
+    created.push("runtime/engine-home/fellows/manifest.json");
+  }
+
+  for (const fellow of manifest.fellows) {
+    const mdPath = path.join(p.fellowDir, `${fellow.key}.md`);
+    const metaPath = path.join(p.fellowDir, `${fellow.key}.fellow.json`);
+    const legacyMdPath = path.join(p.legacyPersonaDir, `${fellow.key}.md`);
+    const compatSoulPath = path.join(p.compatSoulsDir, `${fellow.key}.md`);
+    let body = "";
+    if (fs.existsSync(mdPath)) {
+      body = fs.readFileSync(mdPath, "utf8");
+    } else if (fs.existsSync(legacyMdPath)) {
+      body = fs.readFileSync(legacyMdPath, "utf8");
+    } else if (fs.existsSync(compatSoulPath)) {
+      body = fs.readFileSync(compatSoulPath, "utf8");
+    } else {
+      body = fellowPersonaBody(fellow.name, fellow.bio);
+    }
+    if (writeFileIfMissing(mdPath, body)) {
+      created.push(`runtime/engine-home/fellows/${fellow.key}.md`);
+    }
+    if (writeFileIfMissing(metaPath, JSON.stringify(fellowMetadata(fellow), null, 2) + "\n")) {
+      created.push(`runtime/engine-home/fellows/${fellow.key}.fellow.json`);
+    }
+    writeFileIfMissing(compatSoulPath, body);
+  }
+}
+
+function initializeRuntime() {
+  const p = runtimePaths();
+  const created = [];
+  fs.mkdirSync(p.engine, { recursive: true });
+  fs.mkdirSync(p.home, { recursive: true });
+  fs.mkdirSync(p.fellowDir, { recursive: true });
+  fs.mkdirSync(p.compatSoulsDir, { recursive: true });
+
+  if (writeFileIfMissing(path.join(p.engine, "README.md"), [
+    "# Aimashi Hermes Engine",
+    "",
+    "This directory is reserved for Aimashi's bundled or downloaded Hermes engine.",
+    "The demo intentionally does not inspect or modify any user-installed Hermes checkout.",
+    ""
+  ].join("\n"))) {
+    created.push("runtime/hermes-engine/README.md");
+  }
+
+  let apiKey = "";
+  if (!fs.existsSync(p.apiKey)) {
+    apiKey = crypto.randomBytes(32).toString("hex");
+    writeFileIfMissing(p.apiKey, `${apiKey}\n`, 0o600);
+    created.push("runtime/engine-home/api-server.key");
+  } else {
+    apiKey = fs.readFileSync(p.apiKey, "utf8").trim();
+  }
+
+  if (!fs.existsSync(p.config)) {
+    writeRuntimeConfig(8642);
+    created.push("runtime/engine-home/config.yaml");
+  }
+
+  if (writeFileIfMissing(p.modelSettings, JSON.stringify({
+    ...defaultModelSettings()
+  }, null, 2) + "\n", 0o600)) {
+    created.push("runtime/engine-home/aimashi-model.json");
+  }
+
+  if (writeFileIfMissing(p.providerConnections, JSON.stringify(defaultProviderStore(), null, 2) + "\n", 0o600)) {
+    created.push("runtime/engine-home/aimashi-providers.json");
+  }
+
+  if (writeFileIfMissing(p.userProfile, JSON.stringify(defaultUserProfile(), null, 2) + "\n")) {
+    created.push("runtime/engine-home/aimashi-user.json");
+  }
+
+  if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(defaultAppearanceSettings(), null, 2) + "\n")) {
+    created.push("runtime/engine-home/aimashi-appearance.json");
+  }
+
+  if (writeFileIfMissing(p.chatSessions, JSON.stringify(defaultChatStore(), null, 2) + "\n", 0o600)) {
+    created.push("runtime/engine-home/aimashi-sessions.json");
+  }
+
+  if (writeFileIfMissing(p.soul, [
+    "# Aimashi Shared Soul",
+    "",
+    "你是 Aimashi 应用中的本地伙伴。这里是所有 Fellow 共享的基础语气。",
+    "具体名字、身份和关系写在 fellows/<fellow_id>.md。",
+    "",
+    "## Style",
+    "- 直接、清楚、少客套",
+    "- 不假装已经连接外部账号",
+    "- 优先说明当前可执行的下一步",
+    ""
+  ].join("\n"))) {
+    created.push("runtime/engine-home/SOUL.md");
+  }
+
+  migrateLegacyPersonas(created);
+
+  return getRuntimeStatus(created);
+}
+
+function apiKey() {
+  const p = runtimePaths();
+  if (!fs.existsSync(p.apiKey)) {
+    fs.mkdirSync(path.dirname(p.apiKey), { recursive: true });
+    fs.writeFileSync(p.apiKey, `${crypto.randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
+  }
+  return fs.readFileSync(p.apiKey, "utf8").trim();
+}
+
+function modelSettings() {
+  const p = runtimePaths();
+  const saved = readJson(p.modelSettings, {});
+  if (!saved.provider && !saved.model && !saved.apiKey) return defaultModelSettings();
+  return { ...defaultModelSettings(), ...saved };
+}
+
+function defaultProviderStore() {
+  return {
+    schema_version: 1,
+    providers: {}
+  };
+}
+
+function normalizeProviderConnection(provider, input = {}) {
+  const id = String(input.provider || provider || "").trim();
+  if (!id) return null;
+  return {
+    provider: id,
+    providerLabel: String(input.providerLabel || input.label || id).trim() || id,
+    authType: String(input.authType || "api_key").trim() || "api_key",
+    apiKeyEnv: String(input.apiKeyEnv || "").trim(),
+    apiKey: String(input.apiKey || "").trim(),
+    baseUrl: String(input.baseUrl || "").trim(),
+    apiMode: String(input.apiMode || "").trim(),
+    connectedAt: String(input.connectedAt || new Date().toISOString())
+  };
+}
+
+function providerConnectionStore() {
+  const raw = readJson(runtimePaths().providerConnections, defaultProviderStore());
+  const providers = raw?.providers && typeof raw.providers === "object" ? raw.providers : {};
+  const normalized = defaultProviderStore();
+  for (const [provider, value] of Object.entries(providers)) {
+    const next = normalizeProviderConnection(provider, value);
+    if (next) normalized.providers[next.provider] = next;
+  }
+  return normalized;
+}
+
+function saveProviderConnection(connection) {
+  const p = runtimePaths();
+  const store = providerConnectionStore();
+  const next = normalizeProviderConnection(connection.provider, connection);
+  if (!next) return store;
+  store.providers[next.provider] = next;
+  fs.mkdirSync(path.dirname(p.providerConnections), { recursive: true });
+  fs.writeFileSync(p.providerConnections, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
+  return store;
+}
+
+function removeProviderConnection(provider) {
+  const id = String(provider || "").trim();
+  if (!id) return providerConnectionStore();
+  const p = runtimePaths();
+  const store = providerConnectionStore();
+  delete store.providers[id];
+  fs.mkdirSync(path.dirname(p.providerConnections), { recursive: true });
+  fs.writeFileSync(p.providerConnections, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
+  return store;
+}
+
+function providerConnection(provider) {
+  const id = String(provider || "").trim();
+  if (!id) return null;
+  return providerConnectionStore().providers[id] || null;
+}
+
+function connectedProviderSummaries(codexAuth = getCodexAuthStatus()) {
+  const store = providerConnectionStore();
+  const summaries = Object.values(store.providers)
+    .filter((entry) => entry.provider && (entry.apiKey || entry.authType !== "api_key" || entry.provider === "lmstudio"))
+    .map((entry) => ({
+      provider: entry.provider,
+      providerLabel: entry.providerLabel || entry.provider,
+      authType: entry.authType || "api_key",
+      apiKeyEnv: entry.apiKeyEnv || "",
+      baseUrl: entry.baseUrl || "",
+      apiMode: entry.apiMode || "",
+      connectedAt: entry.connectedAt || "",
+      hasApiKey: Boolean(entry.apiKey) || entry.authType !== "api_key" || entry.provider === "lmstudio"
+    }));
+  if (codexAuth.codexLoggedIn && !summaries.some((entry) => entry.provider === "openai-codex")) {
+    summaries.push({
+      provider: "openai-codex",
+      providerLabel: "OpenAI Codex",
+      authType: "oauth_external",
+      apiKeyEnv: "",
+      baseUrl: "",
+      apiMode: "codex_responses",
+      connectedAt: "",
+      hasApiKey: true
+    });
+  }
+  const current = modelSettings();
+  if (current.provider && current.apiKey && !summaries.some((entry) => entry.provider === current.provider)) {
+    summaries.push({
+      provider: current.provider,
+      providerLabel: current.provider,
+      authType: current.provider === "openai-codex" ? "oauth_external" : "api_key",
+      apiKeyEnv: current.apiKeyEnv || "",
+      baseUrl: current.baseUrl || "",
+      apiMode: current.apiMode || "",
+      connectedAt: "",
+      hasApiKey: true
+    });
+  }
+  return summaries.sort((a, b) => String(a.providerLabel).localeCompare(String(b.providerLabel)));
+}
+
+function writeRuntimeConfig(port) {
+  const p = runtimePaths();
+  const settings = modelSettings();
+  const provider = String(settings.provider || "").trim();
+  const model = String(settings.model || "").trim();
+  const baseUrl = String(settings.baseUrl || "").trim();
+  const apiMode = String(settings.apiMode || "").trim();
+  fs.mkdirSync(p.home, { recursive: true });
+  const lines = [
+    "model:",
+    `  provider: ${JSON.stringify(provider)}`,
+    `  default: ${JSON.stringify(model)}`,
+  ];
+  if (baseUrl) lines.push(`  base_url: ${JSON.stringify(baseUrl)}`);
+  if (apiMode) lines.push(`  api_mode: ${JSON.stringify(apiMode)}`);
+  lines.push(
+    "",
+    "platforms:",
+    "  api_server:",
+    "    enabled: true",
+    "    host: 127.0.0.1",
+    `    port: ${port}`,
+    `    key: ${apiKey()}`,
+    "  feishu:",
+    "    enabled: false",
+    "  telegram:",
+    "    enabled: false",
+    "  discord:",
+    "    enabled: false",
+    "",
+    "aimashi:",
+    "  runtime_schema: 1",
+    "  fellows_manifest: fellows/manifest.json",
+    ""
+  );
+  fs.writeFileSync(p.config, lines.join("\n"), { mode: 0o600 });
+}
+
+function getRuntimeStatus(created = []) {
+  const p = runtimePaths();
+  const manifest = loadFellowManifest();
+  const codexAuth = getCodexAuthStatus();
+  const settings = settingsWithoutSecret();
+  const connectedProviders = connectedProviderSummaries(codexAuth);
+  const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : defaultFellowManifest().fellows;
+  return {
+    appData: p.root,
+    runtimeRoot: p.runtime,
+    engineRoot: p.engine,
+    hermesHome: p.home,
+    manifestPath: p.fellowManifest,
+    configPath: p.config,
+    created,
+    engineInstalled: isEngineInstalled(),
+    engineRunning: engineState.running,
+    engineStarting: engineState.starting,
+    engineBaseUrl: engineState.baseUrl,
+    enginePort: engineState.port,
+    engineManagedBy: engineState.managedBy,
+    engineServiceLabel: AIMASHI_GATEWAY_SERVICE_LABEL,
+    engineLastError: engineState.lastError,
+    engineLogs: engineState.logs.slice(-80),
+    auth: codexAuth,
+    user: { ...defaultUserProfile(), ...readJson(p.userProfile, {}) },
+    appearance: appearanceSettings(),
+    model: {
+      provider: settings.provider,
+      model: settings.model,
+      apiKeyEnv: settings.apiKeyEnv,
+      baseUrl: settings.baseUrl,
+      apiMode: settings.apiMode,
+      hasApiKey: connectedProviders.some((entry) => entry.provider === settings.provider && entry.hasApiKey)
+    },
+    connectedProviders,
+    fellows,
+    personas: fellows
+  };
+}
+
+function getCodexAuthStatus() {
+  const p = runtimePaths();
+  const auth = readJson(p.authJson, {});
+  const providers = auth && typeof auth.providers === "object" ? auth.providers : {};
+  const codexState = providers ? providers["openai-codex"] : null;
+  let poolCount = 0;
+  const pool = auth && typeof auth.credential_pool === "object" ? auth.credential_pool : {};
+  const codexPool = pool ? pool["openai-codex"] : null;
+  if (Array.isArray(codexPool?.entries)) poolCount = codexPool.entries.length;
+  else if (Array.isArray(codexPool)) poolCount = codexPool.length;
+
+  const providerTokens = Boolean(codexState?.tokens?.access_token);
+  const loggedIn = providerTokens || poolCount > 0;
+  authState.codexLoggedIn = loggedIn;
+  return {
+    codexStarting: authState.codexStarting,
+    codexLoggedIn: loggedIn,
+    oauthProvider: authState.oauthProvider,
+    oauthProviderLabel: authState.oauthProviderLabel,
+    codexAuthPath: p.authJson,
+    codexVerificationUrl: authState.codexVerificationUrl,
+    codexUserCode: authState.codexUserCode,
+    codexLastError: authState.codexLastError,
+    codexLogs: authState.logs.slice(-120)
+  };
+}
+
+function settingsWithoutSecret() {
+  const settings = modelSettings();
+  return {
+    provider: settings.provider || "",
+    model: settings.model || "",
+    apiKeyEnv: settings.apiKeyEnv || "OPENAI_API_KEY",
+    baseUrl: settings.baseUrl || "",
+    apiMode: settings.apiMode || ""
+  };
+}
+
+function fallbackModelCatalog() {
+  return [
+    {
+      id: "openai-codex::gpt-5.3-codex",
+      provider: "openai-codex",
+      providerLabel: "OpenAI Codex",
+      model: "gpt-5.3-codex",
+      label: "gpt-5.3-codex",
+      authType: "oauth_external",
+      apiKeyEnv: "",
+      baseUrl: "",
+      apiMode: "codex_responses"
+    },
+    {
+      id: "xai::grok-4.1-fast",
+      provider: "xai",
+      providerLabel: "xAI",
+      model: "grok-4.1-fast",
+      label: "grok-4.1-fast",
+      authType: "api_key",
+      apiKeyEnv: "XAI_API_KEY",
+      baseUrl: "",
+      apiMode: "chat_completions"
+    },
+    {
+      id: "openrouter::anthropic/claude-sonnet-4.6",
+      provider: "openrouter",
+      providerLabel: "OpenRouter",
+      model: "anthropic/claude-sonnet-4.6",
+      label: "anthropic/claude-sonnet-4.6",
+      authType: "api_key",
+      apiKeyEnv: "OPENROUTER_API_KEY",
+      baseUrl: "",
+      apiMode: "chat_completions"
+    },
+    {
+      id: "anthropic::claude-sonnet-4-6",
+      provider: "anthropic",
+      providerLabel: "Anthropic",
+      model: "claude-sonnet-4-6",
+      label: "claude-sonnet-4-6",
+      authType: "api_key",
+      apiKeyEnv: "ANTHROPIC_API_KEY",
+      baseUrl: "",
+      apiMode: "anthropic_messages"
+    },
+    {
+      id: "deepseek::deepseek-chat",
+      provider: "deepseek",
+      providerLabel: "DeepSeek",
+      model: "deepseek-chat",
+      label: "deepseek-chat",
+      authType: "api_key",
+      apiKeyEnv: "DEEPSEEK_API_KEY",
+      baseUrl: "",
+      apiMode: "chat_completions"
+    }
+  ];
+}
+
+async function loadHermesModelCatalog() {
+  if (!isEngineInstalled()) return fallbackModelCatalog();
+  return timeEngineStepAsync("Load Hermes model catalog", () => loadHermesModelCatalogInner());
+}
+
+async function loadHermesModelCatalogInner() {
+  const p = runtimePaths();
+  const script = String.raw`
+import json
+
+def choose_env(envs):
+    values = [str(item or "").strip() for item in (envs or []) if str(item or "").strip()]
+    preferred = [item for item in values if item.endswith("_API_KEY")]
+    return (preferred or values or [""])[0]
+
+try:
+    from hermes_cli.models import CANONICAL_PROVIDERS
+    from hermes_cli import models as hermes_models
+    from hermes_cli.providers import get_provider, determine_api_mode
+except Exception:
+    import models as hermes_models
+    from models import CANONICAL_PROVIDERS
+    from providers import get_provider, determine_api_mode
+
+rows = []
+seen = set()
+static_provider_models = getattr(hermes_models, "_PROVIDER_MODELS", {}) or {}
+openrouter_models = getattr(hermes_models, "OPENROUTER_MODELS", []) or []
+for entry in CANONICAL_PROVIDERS:
+    provider = str(entry.slug)
+    pdef = get_provider(provider)
+    provider_label = str(getattr(entry, "label", "") or getattr(pdef, "name", "") or provider)
+    auth_type = str(getattr(pdef, "auth_type", "") or "api_key")
+    api_key_env = choose_env(getattr(pdef, "api_key_env_vars", ()) if pdef else ())
+    base_url = str(getattr(pdef, "base_url", "") or "")
+    api_mode = determine_api_mode(provider, base_url)
+    if provider == "openrouter":
+        models = [item[0] if isinstance(item, (tuple, list)) and item else item for item in openrouter_models]
+    else:
+        models = list(static_provider_models.get(provider, []))
+    if not models:
+        models = [""]
+    for model in models:
+        model_id = str(model or "").strip()
+        key = f"{provider}::{model_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "id": key,
+            "provider": provider,
+            "providerLabel": provider_label,
+            "model": model_id,
+            "label": model_id or "LM Studio 当前加载模型",
+            "authType": auth_type,
+            "apiKeyEnv": "" if auth_type.startswith("oauth") else api_key_env,
+            "baseUrl": base_url,
+            "apiMode": api_mode,
+        })
+print(json.dumps(rows, ensure_ascii=False))
+`;
+  const result = await runPythonScript(["-c", script], {
+    cwd: p.engine,
+    env: {
+      ...process.env,
+      HERMES_HOME: p.home,
+      PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+    },
+    encoding: "utf8",
+    timeout: 15000
+  });
+  if (result.status !== 0) {
+    appendEngineLog(`Model catalog fallback: ${result.stderr || `python exited ${result.status}`}`);
+    return fallbackModelCatalog();
+  }
+  try {
+    const rows = JSON.parse(String(result.stdout || "[]"));
+    if (Array.isArray(rows) && rows.length) return rows;
+  } catch (error) {
+    appendEngineLog(`Model catalog parse failed: ${error.message}`);
+  }
+  return fallbackModelCatalog();
+}
+
+function fallbackSlashCommands() {
+  return [
+    { command: "/new", description: "Start a new session (fresh session ID + history)" },
+    { command: "/topic", description: "Enable or inspect Telegram DM topic sessions" },
+    { command: "/retry", description: "Retry the last message (resend to agent)" },
+    { command: "/undo", description: "Remove the last user/assistant exchange" },
+    { command: "/title", description: "Set a title for the current session" },
+    { command: "/branch", description: "Branch the current session (explore a different path)" },
+    { command: "/compress", description: "Manually compress conversation context" },
+    { command: "/rollback", description: "List or restore filesystem checkpoints" },
+    { command: "/stop", description: "Kill all running background processes" },
+    { command: "/status", description: "Show session info" },
+    { command: "/model", description: "Switch model for this session" },
+    { command: "/personality", description: "Set a predefined personality" },
+    { command: "/reasoning", description: "Manage reasoning effort and display" },
+    { command: "/fast", description: "Toggle fast mode" },
+    { command: "/yolo", description: "Toggle YOLO mode" },
+    { command: "/voice", description: "Toggle voice mode" },
+    { command: "/agents", description: "Show active agents and running tasks" },
+    { command: "/goal", description: "Set a standing goal Hermes works on across turns" },
+    { command: "/subgoal", description: "Add or manage checklist items on the active goal" },
+    { command: "/usage", description: "Show token usage and rate limits for the current session" },
+    { command: "/insights", description: "Show usage insights and analytics" },
+    { command: "/commands", description: "Browse all commands and skills" },
+    { command: "/help", description: "Show available commands" }
+  ];
+}
+
+async function loadHermesSlashCommands() {
+  initializeRuntime();
+  return timeEngineStepAsync("Load Hermes slash commands", () => loadHermesSlashCommandsInner());
+}
+
+async function loadHermesSlashCommandsInner() {
+  const p = runtimePaths();
+  const script = `
+import json
+try:
+    from hermes_cli.commands import telegram_menu_commands
+    commands, hidden = telegram_menu_commands(100)
+    rows = [{"command": "/" + name, "description": desc} for name, desc in commands]
+except Exception:
+    rows = []
+print(json.dumps(rows, ensure_ascii=False))
+`;
+  const result = await runPythonScript(["-c", script], {
+    cwd: p.engine,
+    env: {
+      ...process.env,
+      HERMES_HOME: p.home,
+      PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+    },
+    encoding: "utf8",
+    timeout: 15000
+  });
+  if (result.status !== 0) {
+    appendEngineLog(`Slash command fallback: ${result.stderr || `python exited ${result.status}`}`);
+    return fallbackSlashCommands();
+  }
+  try {
+    const rows = JSON.parse(String(result.stdout || "[]"));
+    if (Array.isArray(rows) && rows.length) {
+      return rows
+        .filter((item) => item && item.command && item.description)
+        .map((item) => ({
+          command: String(item.command).startsWith("/") ? String(item.command) : `/${item.command}`,
+          description: String(item.description)
+        }));
+    }
+  } catch (error) {
+    appendEngineLog(`Slash command parse failed: ${error.message}`);
+  }
+  return fallbackSlashCommands();
+}
+
+function skillRoots() {
+  const home = app.getPath("home");
+  const p = runtimePaths();
+  return [
+    { source: "aimashi", label: "Aimashi Runtime", root: path.join(p.home, "skills") },
+    { source: "hermes", label: "Hermes", root: path.join(home, ".hermes", "skills") },
+    { source: "codex", label: "Codex", root: path.join(home, ".codex", "skills") }
+  ];
+}
+
+function cleanYamlScalar(value) {
+  let text = String(value || "").trim();
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1);
+  }
+  return text.replace(/\\"/g, '"').trim();
+}
+
+function parseSkillMarkdown(filePath, rootInfo) {
+  const raw = fs.readFileSync(filePath, "utf8");
+  const rel = path.relative(rootInfo.root, path.dirname(filePath));
+  const parts = rel.split(path.sep).filter(Boolean);
+  const fallbackName = parts[parts.length - 1] || path.basename(path.dirname(filePath));
+  const rawCategory = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+  const category = rawCategory === ".system" ? "system" : (rawCategory || "uncategorized");
+  const meta = {};
+  let body = raw;
+  let frontmatter = "";
+  if (raw.startsWith("---")) {
+    const lines = raw.split(/\r?\n/);
+    const end = lines.findIndex((line, index) => index > 0 && /^---\s*$/.test(line));
+    if (end > 0) {
+      frontmatter = lines.slice(1, end).join("\n");
+      body = lines.slice(end + 1).join("\n");
+      for (const line of lines.slice(1, end)) {
+        const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+        if (match) meta[match[1]] = cleanYamlScalar(match[2]);
+      }
+    }
+  }
+  const tagMatch = frontmatter.match(/tags:\s*\[([^\]]+)\]/);
+  const tags = tagMatch
+    ? tagMatch[1].split(",").map((item) => cleanYamlScalar(item)).filter(Boolean).slice(0, 8)
+    : [];
+  const firstHeading = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
+  const paragraphs = body
+    .replace(/^#.+$/gm, "")
+    .split(/\n\s*\n/)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const description = meta.description || paragraphs[0] || "";
+  const id = `${rootInfo.source}:${rel}`;
+  return {
+    id,
+    name: meta.name || fallbackName,
+    title: firstHeading || meta.name || fallbackName,
+    description: description.slice(0, 520),
+    version: meta.version || "",
+    category,
+    tags,
+    source: rootInfo.source,
+    sourceLabel: rootInfo.label,
+    relPath: rel,
+    filePath,
+    bodyPreview: body.trim().slice(0, 1200),
+    bodyLength: body.length
+  };
+}
+
+function findSkillFiles(root, maxDepth = 8) {
+  const files = [];
+  function walk(dir, depth) {
+    if (depth > maxDepth) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isFile() && entry.name === "SKILL.md") {
+        files.push(full);
+      } else if (entry.isDirectory() && !["node_modules", ".git", "__pycache__"].includes(entry.name)) {
+        walk(full, depth + 1);
+      }
+    }
+  }
+  walk(root, 0);
+  return files;
+}
+
+function loadLocalSkills() {
+  const roots = skillRoots();
+  const skills = [];
+  const seenNames = new Set();
+  for (const rootInfo of roots) {
+    if (!fs.existsSync(rootInfo.root)) continue;
+    for (const filePath of findSkillFiles(rootInfo.root)) {
+      try {
+        const skill = parseSkillMarkdown(filePath, rootInfo);
+        const nameKey = skill.name.toLowerCase();
+        if (rootInfo.source !== "aimashi" && seenNames.has(nameKey)) continue;
+        seenNames.add(nameKey);
+        skills.push(skill);
+      } catch (error) {
+        appendEngineLog(`Skill scan skipped ${filePath}: ${error.message}`);
+      }
+    }
+  }
+  const sourceRank = { aimashi: 0, hermes: 1, codex: 2 };
+  skills.sort((a, b) => (
+    (sourceRank[a.source] ?? 9) - (sourceRank[b.source] ?? 9)
+    || String(a.category).localeCompare(String(b.category))
+    || String(a.name).localeCompare(String(b.name))
+  ));
+  return {
+    roots: roots.map((root) => ({ source: root.source, label: root.label, root: root.root, exists: fs.existsSync(root.root) })),
+    skills
+  };
+}
+
+function readLocalSkill(skillId) {
+  const id = String(skillId || "");
+  const found = loadLocalSkills().skills.find((skill) => skill.id === id);
+  if (!found) throw new Error("Skill not found.");
+  const stat = fs.statSync(found.filePath);
+  if (stat.size > 2 * 1024 * 1024) throw new Error("Skill file is too large to preview.");
+  return {
+    ...found,
+    body: fs.readFileSync(found.filePath, "utf8")
+  };
+}
+
+function isSlashCommandText(messages) {
+  const normalized = normalizeRunMessages(messages);
+  const dialogue = normalized.filter((message) => message.role !== "system");
+  const lastUserIndex = dialogue.map((message) => message.role).lastIndexOf("user");
+  if (lastUserIndex < 0) return "";
+  const input = dialogue[lastUserIndex].content.trim();
+  return /^\/[A-Za-z0-9_-]+(?:\s|$)/.test(input) ? input : "";
+}
+
+function runHermesSlashCommand({ text, fellow, sessionId }) {
+  const p = runtimePaths();
+  const sessionKey = cleanRunSessionId(sessionId, fellow.key);
+  const payload = JSON.stringify({
+    text,
+    sessionKey,
+    chatName: fellow.name || "Aimashi",
+    userName: readJson(p.userProfile, defaultUserProfile()).displayName || "Aimashi"
+  });
+  const script = `
+import asyncio, json, sys
+from agent import i18n as _aimashi_i18n
+from gateway.config import Platform
+from gateway.platforms.base import MessageEvent, MessageType
+from gateway.run import GatewayRunner
+from gateway.session import SessionSource
+
+payload = json.loads(sys.argv[1])
+
+_AIMASHI_ZH_I18N = {
+    "gateway.help.header": "可用命令：",
+    "gateway.help.skill_header": "技能命令（{count} 个）：",
+    "gateway.help.more_use_commands": "还有 {count} 个技能命令，输入 /commands 查看更多。",
+    "gateway.commands.header": "命令列表（共 {total} 条，第 {page}/{total_pages} 页）",
+    "gateway.commands.skill_header": "技能命令：",
+    "gateway.commands.default_desc": "无描述",
+    "gateway.commands.none": "没有可用命令。",
+    "gateway.commands.usage": "用法：/commands [页码]",
+    "gateway.commands.nav_prev": "上一页：/commands {page}",
+    "gateway.commands.nav_next": "下一页：/commands {page}",
+    "gateway.commands.out_of_range": "第 {requested} 页不存在，已显示第 {page} 页。",
+    "gateway.model.current_label": "当前模型：{model}（{provider}）",
+    "gateway.model.current_tag": "（当前）",
+    "gateway.model.more_models_suffix": " 等 {count} 个模型",
+    "gateway.model.usage_switch_model": "切换模型：/model <模型名>",
+    "gateway.model.usage_switch_provider": "切换提供商：/model --provider <提供商>",
+    "gateway.model.usage_persist": "保存为默认：/model <模型名> --global",
+    "gateway.model.provider_label": "提供商：{provider}",
+    "gateway.model.context_label": "上下文：{tokens} tokens",
+    "gateway.model.max_output_label": "最大输出：{tokens} tokens",
+    "gateway.model.cost_label": "价格：{cost}",
+    "gateway.model.capabilities_label": "能力：{capabilities}",
+    "gateway.model.session_only_hint": "仅对当前会话生效。",
+    "gateway.model.switched": "已切换到 {model}（{provider}）。",
+    "gateway.model.saved_global": "已保存为默认模型。",
+    "gateway.model.error_prefix": "模型切换失败：",
+    "gateway.model.warning_prefix": "提示：",
+    "gateway.status.header": "会话状态",
+    "gateway.status.session_id": "会话 ID：{session_id}",
+    "gateway.status.title": "标题：{title}",
+    "gateway.status.created": "创建时间：{created}",
+    "gateway.status.last_activity": "最近活动：{last_activity}",
+    "gateway.status.tokens": "Token：{tokens}",
+    "gateway.status.platforms": "平台：{platforms}",
+    "gateway.status.agent_running": "Agent 正在运行。",
+    "gateway.status.state_yes": "是",
+    "gateway.status.state_no": "否",
+    "gateway.stop.no_active": "没有正在运行的任务。",
+    "gateway.stop.stopped": "已停止当前任务。",
+    "gateway.stop.stopped_pending": "已停止正在启动的任务。",
+    "gateway.retry.no_previous": "没有可重试的上一条消息。",
+    "gateway.undo.nothing": "没有可撤销的消息。",
+    "gateway.undo.removed": "已撤销上一轮对话。",
+    "gateway.title.current_no_title": "当前会话还没有标题。",
+    "gateway.title.current_with_title": "当前标题：{title}",
+    "gateway.title.empty_after_clean": "标题不能为空。",
+    "gateway.title.set_to": "标题已设置为：{title}",
+    "gateway.profile.header": "当前配置",
+    "gateway.profile.home": "Hermes Home：{home}",
+    "gateway.usage.no_data": "当前会话还没有用量数据。",
+    "gateway.usage.header_session": "当前会话用量",
+    "gateway.usage.header_session_info": "会话信息",
+    "gateway.usage.label_model": "模型",
+    "gateway.usage.label_messages": "消息",
+    "gateway.usage.label_input_tokens": "输入 tokens",
+    "gateway.usage.label_output_tokens": "输出 tokens",
+    "gateway.usage.label_total": "总计",
+    "gateway.usage.label_cost": "费用",
+    "gateway.usage.rate_limits": "速率限制",
+}
+with _aimashi_i18n._catalog_lock:
+    _aimashi_i18n._catalog_cache.setdefault("zh", {}).update(_AIMASHI_ZH_I18N)
+    _aimashi_i18n._catalog_cache.setdefault("en", {}).update(_AIMASHI_ZH_I18N)
+
+async def main():
+    runner = GatewayRunner()
+    source = SessionSource(
+        platform=Platform.WEBHOOK,
+        chat_id=payload["sessionKey"],
+        chat_name=payload.get("chatName") or "Aimashi",
+        chat_type="dm",
+        user_id="aimashi-user",
+        user_name=payload.get("userName") or "Aimashi",
+    )
+    event = MessageEvent(
+        text=payload["text"],
+        message_type=MessageType.TEXT,
+        source=source,
+        internal=True,
+    )
+    result = await runner._handle_message(event)
+    if isinstance(result, dict):
+        content = result.get("final_response") or result.get("content") or json.dumps(result, ensure_ascii=False)
+    elif result is None:
+        content = ""
+    else:
+        content = str(result)
+    print(json.dumps({"content": content}, ensure_ascii=False))
+
+asyncio.run(main())
+`;
+  const result = spawnSync(enginePython(), ["-c", script, payload], {
+    cwd: p.engine,
+    env: {
+      ...process.env,
+      HERMES_HOME: p.home,
+      HERMES_LANGUAGE: process.env.HERMES_LANGUAGE || "zh",
+      GATEWAY_ALLOW_ALL_USERS: "true",
+      PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+    },
+    encoding: "utf8",
+    timeout: 45000
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(result.error?.message || result.stderr || `Hermes command exited ${result.status}`);
+  }
+  const lines = String(result.stdout || "").trim().split(/\r?\n/).filter(Boolean);
+  const parsed = JSON.parse(lines[lines.length - 1] || "{}");
+  return String(parsed.content || "");
+}
+
+function appendEngineLog(line) {
+  const redacted = String(line)
+    .replace(/(API_SERVER_KEY=)[^\s]+/g, "$1[REDACTED]")
+    .replace(/(Authorization:\s*Bearer\s+)[^\s]+/gi, "$1[REDACTED]")
+    .replace(/(OPENAI_API_KEY|ANTHROPIC_API_KEY|XAI_API_KEY|DEEPSEEK_API_KEY|OPENROUTER_API_KEY)=([^\s]+)/g, "$1=[REDACTED]");
+  engineState.logs.push(redacted);
+  if (engineState.logs.length > 200) engineState.logs = engineState.logs.slice(-200);
+}
+
+function appendAuthLog(line) {
+  const clean = String(line)
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .replace(/(access_token|refresh_token)["']?\s*[:=]\s*["']?[^"',\s]+/gi, "$1=[REDACTED]");
+  const codeMatch = clean.match(/\b[A-Z0-9]{4}-[A-Z0-9]{4,8}\b/);
+  if (codeMatch) authState.codexUserCode = codeMatch[0];
+  const urlMatch = clean.match(/https?:\/\/[^\s)]+/);
+  if (urlMatch) authState.codexVerificationUrl = urlMatch[0];
+  authState.logs.push(clean);
+  if (authState.logs.length > 240) authState.logs = authState.logs.slice(-240);
+}
+
+function appendCommandOutput(output) {
+  for (const line of String(output || "").split(/\r?\n/).filter(Boolean)) {
+    appendEngineLog(line);
+  }
+}
+
+function runPythonScript(args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(enginePython(), args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = options.timeout
+      ? setTimeout(() => {
+        if (settled) return;
+        child.kill("SIGTERM");
+        settled = true;
+        resolve({ status: 124, stdout, stderr: stderr || `Timed out after ${options.timeout}ms` });
+      }, options.timeout)
+      : null;
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      if (timer) clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.on("exit", (code, signal) => {
+      if (timer) clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      resolve({ status: code ?? (signal ? 128 : 0), signal, stdout, stderr });
+    });
+  });
+}
+
+function timeEngineStep(label, fn) {
+  const start = Date.now();
+  try {
+    const result = fn();
+    appendEngineLog(`${label}: ${Date.now() - start}ms`);
+    return result;
+  } catch (error) {
+    appendEngineLog(`${label}: failed after ${Date.now() - start}ms (${error.message})`);
+    throw error;
+  }
+}
+
+async function timeEngineStepAsync(label, fn) {
+  const start = Date.now();
+  try {
+    const result = await fn();
+    appendEngineLog(`${label}: ${Date.now() - start}ms`);
+    return result;
+  } catch (error) {
+    appendEngineLog(`${label}: failed after ${Date.now() - start}ms (${error.message})`);
+    throw error;
+  }
+}
+
+function runEngineInstallCommand(command, args, cwd) {
+  appendEngineLog(`$ ${command} ${args.join(" ")}`);
+  const result = spawnSync(command, args, {
+    cwd,
+    env: {
+      ...process.env,
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    },
+    encoding: "utf8"
+  });
+  appendCommandOutput(result.stdout);
+  appendCommandOutput(result.stderr);
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${command} exited with code ${result.status}`);
+  }
+  return result;
+}
+
+function aimashiPluginFiles() {
+  return {
+    "__init__.py": [
+      "import os",
+      "import sys",
+      "",
+      "sys.stderr.write(f\"[aimashi_plugins] loaded (HERMES_HOME={os.environ.get('HERMES_HOME', '<unset>')})\\n\")",
+      "sys.stderr.flush()",
+      "",
+      "from . import fellow_overlay  # noqa: F401,E402",
+      ""
+    ].join("\n"),
+    "__main__.py": [
+      "import json",
+      "import os",
+      "import runpy",
+      "import sys",
+      "",
+      "def _load_aimashi_env():",
+      "    home = os.environ.get('HERMES_HOME')",
+      "    if not home:",
+      "        return",
+      "    paths = [",
+      "        os.path.join(home, 'aimashi-model.json'),",
+      "        os.path.join(home, 'aimashi-providers.json'),",
+      "    ]",
+      "    try:",
+      "        model = json.load(open(paths[0], encoding='utf-8')) if os.path.exists(paths[0]) else {}",
+      "    except Exception:",
+      "        model = {}",
+      "    if isinstance(model, dict):",
+      "        env_name = str(model.get('apiKeyEnv') or '').strip()",
+      "        api_key = str(model.get('apiKey') or '').strip()",
+      "        if env_name and api_key and not os.environ.get(env_name):",
+      "            os.environ[env_name] = api_key",
+      "    try:",
+      "        store = json.load(open(paths[1], encoding='utf-8')) if os.path.exists(paths[1]) else {}",
+      "    except Exception:",
+      "        store = {}",
+      "    providers = store.get('providers') if isinstance(store, dict) else {}",
+      "    if isinstance(providers, dict):",
+      "        for connection in providers.values():",
+      "            if not isinstance(connection, dict):",
+      "                continue",
+      "            env_name = str(connection.get('apiKeyEnv') or '').strip()",
+      "            api_key = str(connection.get('apiKey') or '').strip()",
+      "            if env_name and api_key and not os.environ.get(env_name):",
+      "                os.environ[env_name] = api_key",
+      "",
+      "_load_aimashi_env()",
+      "sys.argv[0] = 'hermes_cli.main'",
+      "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)",
+      ""
+    ].join("\n"),
+    "fellow_overlay.py": [
+      "\"\"\"Per-Fellow persona overlay for Aimashi.",
+      "",
+      "Reads X-Aimashi-Fellow (or X-Alkaka-Fellow) on Hermes api_server",
+      "requests, loads <HERMES_HOME>/fellows/<fellow_id>.md, and prepends it",
+      "to vanilla Hermes's ephemeral_system_prompt. Hermes core remains",
+      "unmodified.",
+      "\"\"\"",
+      "",
+      "from __future__ import annotations",
+      "",
+      "import contextvars",
+      "import logging",
+      "import os",
+      "import re",
+      "from pathlib import Path",
+      "from typing import Optional",
+      "",
+      "from gateway.platforms.api_server import APIServerAdapter",
+      "",
+      "logger = logging.getLogger(__name__)",
+      "_FELLOW_ID_RE = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')",
+      "_current_fellow: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('aimashi_fellow_id', default=None)",
+      "",
+      "def _read_persona(fellow_id: str) -> Optional[str]:",
+      "    home = os.environ.get('HERMES_HOME')",
+      "    if not home or not _FELLOW_ID_RE.match(fellow_id):",
+      "        return None",
+      "    path = Path(home) / 'fellows' / f'{fellow_id}.md'",
+      "    if not path.is_file():",
+      "        return None",
+      "    try:",
+      "        text = path.read_text(encoding='utf-8').strip()",
+      "    except OSError as exc:",
+      "        logger.warning('aimashi fellow overlay cannot read %s: %s', path, exc)",
+      "        return None",
+      "    return text or None",
+      "",
+      "def _prepend(persona: str, ephemeral: Optional[str]) -> str:",
+      "    base = (ephemeral or '').strip()",
+      "    return f'{persona}\\n\\n{base}' if base else persona",
+      "",
+      "def _header_fellow_id(request) -> Optional[str]:",
+      "    headers = getattr(request, 'headers', {})",
+      "    value = headers.get('X-Aimashi-Fellow') or headers.get('X-Alkaka-Fellow') or ''",
+      "    return str(value).strip() or None",
+      "",
+      "def _wrap_handler(handler):",
+      "    async def wrapped(self, request):",
+      "        token = _current_fellow.set(_header_fellow_id(request))",
+      "        try:",
+      "            return await handler(self, request)",
+      "        finally:",
+      "            _current_fellow.reset(token)",
+      "    wrapped.__name__ = handler.__name__",
+      "    wrapped.__qualname__ = handler.__qualname__",
+      "    return wrapped",
+      "",
+      "def _patch_run_agent() -> None:",
+      "    if not hasattr(APIServerAdapter, '_run_agent'):",
+      "        return",
+      "    original = APIServerAdapter._run_agent",
+      "    async def patched(self, *args, ephemeral_system_prompt=None, **kwargs):",
+      "        fellow_id = _current_fellow.get()",
+      "        if fellow_id:",
+      "            persona = _read_persona(fellow_id)",
+      "            if persona:",
+      "                ephemeral_system_prompt = _prepend(persona, ephemeral_system_prompt)",
+      "        return await original(self, *args, ephemeral_system_prompt=ephemeral_system_prompt, **kwargs)",
+      "    APIServerAdapter._run_agent = patched",
+      "",
+      "def _patch_create_agent() -> None:",
+      "    if not hasattr(APIServerAdapter, '_create_agent'):",
+      "        return",
+      "    original = APIServerAdapter._create_agent",
+      "    def patched(self, *args, ephemeral_system_prompt=None, **kwargs):",
+      "        fellow_id = _current_fellow.get()",
+      "        if fellow_id:",
+      "            persona = _read_persona(fellow_id)",
+      "            if persona:",
+      "                ephemeral_system_prompt = _prepend(persona, ephemeral_system_prompt)",
+      "        return original(self, *args, ephemeral_system_prompt=ephemeral_system_prompt, **kwargs)",
+      "    APIServerAdapter._create_agent = patched",
+      "",
+      "def install() -> None:",
+      "    for name in ('_handle_chat_completions', '_handle_runs', '_handle_responses'):",
+      "        if hasattr(APIServerAdapter, name):",
+      "            setattr(APIServerAdapter, name, _wrap_handler(getattr(APIServerAdapter, name)))",
+      "    _patch_run_agent()",
+      "    _patch_create_agent()",
+      "",
+      "install()",
+      ""
+    ].join("\n")
+  };
+}
+
+function ensureEnginePlugins() {
+  const p = runtimePaths();
+  const pluginDir = path.join(p.engine, "aimashi_plugins");
+  fs.mkdirSync(pluginDir, { recursive: true });
+  for (const [fileName, content] of Object.entries(aimashiPluginFiles())) {
+    fs.writeFileSync(path.join(pluginDir, fileName), content);
+  }
+}
+
+function installEngineFromDevSource() {
+  initializeRuntime();
+  stopEngine();
+  const p = runtimePaths();
+  if (!fs.existsSync(DEV_ENGINE_SOURCE)) {
+    throw new Error(`Hermes source missing: ${DEV_ENGINE_SOURCE}`);
+  }
+
+  fs.rmSync(p.engine, { recursive: true, force: true });
+  const skip = new Set([
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "node_modules",
+    "tests",
+    "website",
+    "ui-tui",
+    "demo"
+  ]);
+  fs.cpSync(DEV_ENGINE_SOURCE, p.engine, {
+    recursive: true,
+    dereference: false,
+    filter: (source) => !skip.has(path.basename(source))
+  });
+  fs.writeFileSync(engineMarkerPath(), JSON.stringify({
+    product: "aimashi",
+    source: "maintained-local-source",
+    source_path: DEV_ENGINE_SOURCE,
+    installed_at: new Date().toISOString()
+  }, null, 2) + "\n");
+  ensureEnginePlugins();
+  return getRuntimeStatus(["runtime/hermes-engine"]);
+}
+
+function installEngineFromOfficialPackage() {
+  initializeRuntime();
+  stopEngine();
+  const p = runtimePaths();
+  const packageSpec = officialEngineRequirement(OFFICIAL_ENGINE_EXTRAS);
+  const basePackageSpec = officialEngineRequirement("");
+  const python = selectOfficialEnginePython();
+
+  engineState.logs = [];
+  fs.rmSync(p.engine, { recursive: true, force: true });
+  fs.mkdirSync(p.engine, { recursive: true });
+  fs.writeFileSync(path.join(p.engine, "README.md"), [
+    "# Aimashi Hermes Engine",
+    "",
+    `This runtime installs the official Hermes source archive: ${officialEngineUrl()}`,
+    `Python executable used for installation: ${python}`,
+    "Set AIMASHI_ENGINE_SOURCE only for local Hermes development builds.",
+    ""
+  ].join("\n"));
+
+  runEngineInstallCommand(python, ["-m", "venv", ".venv"], p.engine);
+  runEngineInstallCommand(venvPythonPath(), ["-m", "pip", "install", "--upgrade", "pip"], p.engine);
+  try {
+    runEngineInstallCommand(venvPythonPath(), ["-m", "pip", "install", "--upgrade", packageSpec], p.engine);
+  } catch (error) {
+    if (!OFFICIAL_ENGINE_EXTRAS) throw error;
+    appendEngineLog(`Official Hermes install with extras failed; retrying base install: ${error.message}`);
+    runEngineInstallCommand(venvPythonPath(), ["-m", "pip", "install", "--upgrade", basePackageSpec], p.engine);
+  }
+  runEngineInstallCommand(venvPythonPath(), ["-c", "import hermes_cli.main, fastapi, uvicorn; print('hermes_cli + web deps import OK')"], p.engine);
+  ensureEnginePlugins();
+  runEngineInstallCommand(venvPythonPath(), ["-c", "import aimashi_plugins; print('aimashi_plugins import OK')"], p.engine);
+
+  fs.writeFileSync(engineMarkerPath(), JSON.stringify({
+    product: "aimashi",
+    source: "official-github-archive",
+    package: OFFICIAL_ENGINE_PACKAGE,
+    repo: OFFICIAL_ENGINE_REPO_URL,
+    ref: OFFICIAL_ENGINE_REF,
+    url: officialEngineUrl(),
+    extras: OFFICIAL_ENGINE_EXTRAS || null,
+    python,
+    spec: packageSpec,
+    installed_at: new Date().toISOString()
+  }, null, 2) + "\n");
+  return getRuntimeStatus(["runtime/hermes-engine"]);
+}
+
+function installEngine() {
+  if (DEV_ENGINE_SOURCE) return installEngineFromDevSource();
+  return installEngineFromOfficialPackage();
+}
+
+function choosePort(preferred = 8642, attempts = 40) {
+  return new Promise((resolve) => {
+    let index = 0;
+    const tryNext = () => {
+      if (index >= attempts) {
+        resolve(0);
+        return;
+      }
+      const port = preferred + index;
+      index += 1;
+      const server = net.createServer();
+      server.once("error", tryNext);
+      server.listen(port, "127.0.0.1", () => {
+        const selected = server.address().port;
+        server.close(() => resolve(selected));
+      });
+    };
+    tryNext();
+  });
+}
+
+function enginePython() {
+  const venvPython = venvPythonPath();
+  if (fs.existsSync(venvPython)) return venvPython;
+  return "python3";
+}
+
+function readConfiguredPort() {
+  const text = fs.existsSync(runtimePaths().config) ? fs.readFileSync(runtimePaths().config, "utf8") : "";
+  const match = text.match(/^\s*port:\s*(\d+)\s*$/m);
+  const port = match ? Number(match[1]) : 0;
+  return Number.isInteger(port) && port > 0 ? port : 8642;
+}
+
+function xmlEscape(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function launchdDomain() {
+  if (typeof process.getuid !== "function") return "";
+  return `gui/${process.getuid()}`;
+}
+
+function runLaunchctl(args, { ignoreFailure = false } = {}) {
+  const result = spawnSync("launchctl", args, { encoding: "utf8" });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  if (output) appendEngineLog(`launchctl ${args.join(" ")}: ${output}`);
+  if (result.error) {
+    if (ignoreFailure) return result;
+    throw result.error;
+  }
+  if (result.status !== 0 && !ignoreFailure) {
+    throw new Error(`launchctl ${args.join(" ")} exited with code ${result.status}`);
+  }
+  return result;
+}
+
+function launchAgentEnvironment() {
+  const p = runtimePaths();
+  return {
+    HERMES_HOME: p.home,
+    HERMES_LANGUAGE: process.env.HERMES_LANGUAGE || "zh",
+    HERMES_ACCEPT_HOOKS: "1",
+    GATEWAY_ALLOW_ALL_USERS: "true",
+    PYTHONUNBUFFERED: "1",
+    PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+  };
+}
+
+function launchAgentPlist() {
+  const p = runtimePaths();
+  const env = launchAgentEnvironment();
+  const envEntries = Object.entries(env)
+    .map(([key, value]) => `      <key>${xmlEscape(key)}</key>\n      <string>${xmlEscape(value)}</string>`)
+    .join("\n");
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
+    `<plist version="1.0">`,
+    `<dict>`,
+    `  <key>Label</key>`,
+    `  <string>${AIMASHI_GATEWAY_SERVICE_LABEL}</string>`,
+    `  <key>ProgramArguments</key>`,
+    `  <array>`,
+    `    <string>${xmlEscape(enginePython())}</string>`,
+    `    <string>-m</string>`,
+    `    <string>aimashi_plugins</string>`,
+    `    <string>gateway</string>`,
+    `    <string>run</string>`,
+    `    <string>--replace</string>`,
+    `    <string>--accept-hooks</string>`,
+    `  </array>`,
+    `  <key>WorkingDirectory</key>`,
+    `  <string>${xmlEscape(p.engine)}</string>`,
+    `  <key>EnvironmentVariables</key>`,
+    `  <dict>`,
+    envEntries,
+    `  </dict>`,
+    `  <key>RunAtLoad</key>`,
+    `  <true/>`,
+    `  <key>KeepAlive</key>`,
+    `  <true/>`,
+    `  <key>StandardOutPath</key>`,
+    `  <string>${xmlEscape(path.join(p.logsDir, "gateway.log"))}</string>`,
+    `  <key>StandardErrorPath</key>`,
+    `  <string>${xmlEscape(path.join(p.logsDir, "gateway.error.log"))}</string>`,
+    `</dict>`,
+    `</plist>`,
+    ``
+  ].join("\n");
+}
+
+function writeLaunchAgentPlist() {
+  const p = runtimePaths();
+  fs.mkdirSync(path.dirname(p.launchAgent), { recursive: true });
+  fs.mkdirSync(p.logsDir, { recursive: true });
+  fs.writeFileSync(p.launchAgent, launchAgentPlist(), { mode: 0o600 });
+  return p.launchAgent;
+}
+
+function stopLaunchAgent() {
+  if (process.platform !== "darwin") return;
+  const p = runtimePaths();
+  const domain = launchdDomain();
+  if (!domain) return;
+  runLaunchctl(["bootout", domain, p.launchAgent], { ignoreFailure: true });
+  runLaunchctl(["bootout", `${domain}/${AIMASHI_GATEWAY_SERVICE_LABEL}`], { ignoreFailure: true });
+}
+
+function startLaunchAgent() {
+  const p = runtimePaths();
+  const domain = launchdDomain();
+  if (process.platform !== "darwin" || !domain) {
+    throw new Error("Aimashi background service is currently implemented for macOS launchd.");
+  }
+  const plist = writeLaunchAgentPlist();
+  stopLaunchAgent();
+  runLaunchctl(["bootstrap", domain, plist]);
+  runLaunchctl(["kickstart", "-k", `${domain}/${AIMASHI_GATEWAY_SERVICE_LABEL}`], { ignoreFailure: true });
+}
+
+async function isEngineHealthy(baseUrl, timeoutMs = 1200) {
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      headers: { Authorization: `Bearer ${apiKey()}` },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function adoptRunningEngine() {
+  const ports = [engineState.port, readConfiguredPort(), 8642, 8643, 8644, 8645]
+    .filter((port, index, list) => Number.isInteger(port) && port > 0 && list.indexOf(port) === index);
+  for (const port of ports) {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    if (await isEngineHealthy(baseUrl)) {
+      engineState = {
+        ...engineState,
+        running: true,
+        starting: false,
+        baseUrl,
+        port,
+        managedBy: process.platform === "darwin" ? "launchd" : "process",
+        lastError: ""
+      };
+      return true;
+    }
+  }
+  return false;
+}
+
+async function waitForHealth(baseUrl, timeoutMs = 45000, requireChildProcess = false) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(`${baseUrl}/health`, {
+        headers: { Authorization: `Bearer ${apiKey()}` }
+      });
+      if (response.ok && (!requireChildProcess || (engineProcess && engineProcess.exitCode === null))) return true;
+    } catch {
+      // Keep polling until the process is ready or times out.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function startEngine() {
+  initializeRuntime();
+  const p = runtimePaths();
+  if (!isEngineInstalled()) {
+    throw new Error("Hermes engine is not installed in Aimashi runtime.");
+  }
+  if (engineProcess && engineState.running) return getRuntimeStatus();
+  ensureEnginePlugins();
+  if (await adoptRunningEngine()) return getRuntimeStatus();
+
+  const port = await choosePort();
+  if (!port) throw new Error("No available local port for Aimashi Hermes API.");
+
+  writeRuntimeConfig(port);
+  const settings = modelSettings();
+  const env = {
+    ...process.env,
+    HERMES_HOME: p.home,
+    API_SERVER_ENABLED: "true",
+    API_SERVER_HOST: "127.0.0.1",
+    API_SERVER_PORT: String(port),
+    API_SERVER_KEY: apiKey(),
+    PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+  };
+  if (settings.apiKey && settings.apiKeyEnv) {
+    env[settings.apiKeyEnv] = settings.apiKey;
+  }
+  for (const connection of Object.values(providerConnectionStore().providers)) {
+    if (connection.apiKey && connection.apiKeyEnv) {
+      env[connection.apiKeyEnv] = connection.apiKey;
+    }
+  }
+
+  engineState = {
+    ...engineState,
+    running: false,
+    starting: true,
+    baseUrl: `http://127.0.0.1:${port}`,
+    port,
+    managedBy: process.platform === "darwin" ? "launchd" : "process",
+    lastError: "",
+    logs: []
+  };
+
+  if (process.platform === "darwin") {
+    startLaunchAgent();
+    const ok = await waitForHealth(engineState.baseUrl, 45000, false);
+    engineState.starting = false;
+    engineState.running = ok;
+    if (!ok) {
+      engineState.lastError = "Timed out waiting for Aimashi Hermes launchd service.";
+      throw new Error(engineState.lastError);
+    }
+    appendEngineLog(`Aimashi Hermes service running at ${engineState.baseUrl}`);
+    return getRuntimeStatus();
+  }
+
+  engineProcess = spawn(enginePython(), ["-m", "aimashi_plugins", "gateway", "run"], {
+    cwd: p.engine,
+    env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  engineProcess.stdout.on("data", (chunk) => {
+    for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) appendEngineLog(line);
+  });
+  engineProcess.stderr.on("data", (chunk) => {
+    for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) appendEngineLog(line);
+  });
+  engineProcess.on("exit", (code, signal) => {
+    engineState.running = false;
+    engineState.starting = false;
+    if (code !== 0 && signal !== "SIGTERM") {
+      engineState.lastError = `Hermes exited with code ${code ?? "null"} signal ${signal ?? "null"}`;
+    }
+    engineProcess = null;
+  });
+
+  const ok = await waitForHealth(engineState.baseUrl, 45000, true);
+  engineState.starting = false;
+  engineState.running = ok;
+  if (!ok) {
+    engineState.lastError = "Timed out waiting for Hermes API health.";
+    stopEngine();
+    throw new Error(engineState.lastError);
+  }
+  return getRuntimeStatus();
+}
+
+function stopEngine() {
+  if (engineProcess) {
+    engineProcess.kill("SIGTERM");
+    engineProcess = null;
+  }
+  stopLaunchAgent();
+  engineState.running = false;
+  engineState.starting = false;
+  engineState.managedBy = "";
+  return getRuntimeStatus();
+}
+
+function writeModelSettings(next) {
+  const p = runtimePaths();
+  fs.writeFileSync(p.modelSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+  writeRuntimeConfig(engineState.port || 8642);
+}
+
+function applyCodexModelSettings() {
+  const current = modelSettings();
+  saveProviderConnection({
+    provider: "openai-codex",
+    providerLabel: "OpenAI Codex",
+    authType: "oauth_external",
+    apiKeyEnv: "",
+    apiKey: "",
+    baseUrl: "",
+    apiMode: "codex_responses"
+  });
+  writeModelSettings({
+    provider: "openai-codex",
+    model: current.provider === "openai-codex" && current.model ? current.model : "gpt-5.3-codex",
+    apiKeyEnv: "",
+    apiKey: "",
+    baseUrl: "",
+    apiMode: "codex_responses"
+  });
+}
+
+function saveCodexTokens(tokens) {
+  const p = runtimePaths();
+  const auth = readJson(p.authJson, { version: 2, providers: {} });
+  if (!auth || typeof auth !== "object") throw new Error("Invalid auth store.");
+  if (!auth.providers || typeof auth.providers !== "object") auth.providers = {};
+  auth.providers["openai-codex"] = {
+    ...(auth.providers["openai-codex"] || {}),
+    tokens,
+    last_refresh: new Date().toISOString().replace("+00:00", "Z"),
+    auth_mode: "chatgpt"
+  };
+  auth.active_provider = "openai-codex";
+  auth.version = auth.version || 2;
+  auth.updated_at = new Date().toISOString();
+  fs.mkdirSync(path.dirname(p.authJson), { recursive: true });
+  fs.writeFileSync(p.authJson, JSON.stringify(auth, null, 2) + "\n", { mode: 0o600 });
+}
+
+async function restartEngineIfRunning() {
+  const shouldRestart = Boolean(engineProcess || engineState.running || engineState.starting);
+  if (!shouldRestart) return getRuntimeStatus();
+  stopEngine();
+  return startEngine();
+}
+
+async function requestCodexDeviceCode() {
+  const response = await fetch("https://auth.openai.com/api/accounts/deviceauth/usercode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID })
+  });
+  if (!response.ok) {
+    throw new Error(`Device code request failed: ${response.status} ${response.statusText}`);
+  }
+  const data = await response.json();
+  if (!data.user_code || !data.device_auth_id) {
+    throw new Error("Device code response missing user_code or device_auth_id.");
+  }
+  return data;
+}
+
+async function pollCodexAuthorization(deviceAuthId, userCode, intervalSeconds) {
+  const intervalMs = Math.max(3000, Number(intervalSeconds || 5) * 1000);
+  const started = Date.now();
+  while (!codexOAuthCancelled && Date.now() - started < 15 * 60 * 1000) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    const response = await fetch("https://auth.openai.com/api/accounts/deviceauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_auth_id: deviceAuthId,
+        user_code: userCode
+      })
+    });
+    if (response.ok) return response.json();
+    if (response.status === 403 || response.status === 404) continue;
+    throw new Error(`Device auth polling failed: ${response.status} ${response.statusText}`);
+  }
+  if (codexOAuthCancelled) throw new Error("Codex OAuth cancelled.");
+  throw new Error("Codex OAuth timed out after 15 minutes.");
+}
+
+async function exchangeCodexTokens(codeResponse) {
+  const authorizationCode = codeResponse.authorization_code || "";
+  const codeVerifier = codeResponse.code_verifier || "";
+  if (!authorizationCode || !codeVerifier) {
+    throw new Error("Device auth response missing authorization_code or code_verifier.");
+  }
+  const form = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: authorizationCode,
+    redirect_uri: "https://auth.openai.com/deviceauth/callback",
+    client_id: CODEX_OAUTH_CLIENT_ID,
+    code_verifier: codeVerifier
+  });
+  const response = await fetch(CODEX_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error(`Token exchange failed: ${response.status} ${response.statusText}`);
+  }
+  const tokens = await response.json();
+  if (!tokens.access_token || !tokens.refresh_token) {
+    throw new Error("Token exchange did not return access_token and refresh_token.");
+  }
+  return {
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token
+  };
+}
+
+async function finishCodexOAuth(deviceData) {
+  try {
+    const codeResponse = await pollCodexAuthorization(
+      deviceData.device_auth_id,
+      deviceData.user_code,
+      deviceData.interval
+    );
+    const tokens = await exchangeCodexTokens(codeResponse);
+    saveCodexTokens(tokens);
+    applyCodexModelSettings();
+    authState.codexStarting = false;
+    authState.codexLoggedIn = true;
+    authState.codexUserCode = "";
+    authState.oauthProvider = "";
+    authState.oauthProviderLabel = "";
+    appendAuthLog("OpenAI Codex OAuth login completed.");
+    await restartEngineIfRunning();
+  } catch (error) {
+    authState.codexStarting = false;
+    if (!codexOAuthCancelled) {
+      authState.codexLastError = error.message;
+      appendAuthLog(`OpenAI Codex OAuth failed: ${error.message}`);
+    }
+  } finally {
+    authProcess = null;
+  }
+}
+
+async function startCodexOAuth() {
+  initializeRuntime();
+  if (!isEngineInstalled()) {
+    throw new Error("Hermes engine is not installed in Aimashi runtime.");
+  }
+  if (authProcess || authState.codexStarting) return getRuntimeStatus();
+
+  codexOAuthCancelled = false;
+  authState = {
+    ...authState,
+    codexStarting: true,
+    oauthProvider: "openai-codex",
+    oauthProviderLabel: "OpenAI Codex",
+    codexLastError: "",
+    codexUserCode: "",
+    codexVerificationUrl: CODEX_DEVICE_URL,
+    logs: []
+  };
+  appendAuthLog("Requesting OpenAI Codex device code...");
+  const deviceData = await requestCodexDeviceCode();
+  authState.codexUserCode = String(deviceData.user_code || "");
+  appendAuthLog(`Open ${CODEX_DEVICE_URL}`);
+  appendAuthLog(`Enter device code: ${authState.codexUserCode}`);
+  shell.openExternal(CODEX_DEVICE_URL).catch(() => {});
+  authProcess = { kind: "codex-oauth" };
+  finishCodexOAuth(deviceData);
+
+  return getRuntimeStatus();
+}
+
+function cancelCodexOAuth() {
+  codexOAuthCancelled = true;
+  if (authProcess && typeof authProcess.kill === "function") {
+    authProcess.kill("SIGTERM");
+  }
+  authProcess = null;
+  authState.codexStarting = false;
+  authState.codexUserCode = "";
+  authState.oauthProvider = "";
+  authState.oauthProviderLabel = "";
+  appendAuthLog("OpenAI Codex OAuth cancelled.");
+  return getRuntimeStatus();
+}
+
+function startProviderOAuth(input = {}) {
+  initializeRuntime();
+  if (!isEngineInstalled()) {
+    throw new Error("Hermes engine is not installed in Aimashi runtime.");
+  }
+  const provider = String(input.provider || "").trim();
+  if (!provider) throw new Error("Provider is required.");
+  if (provider === "openai-codex") return startCodexOAuth();
+  if (authProcess || authState.codexStarting) return getRuntimeStatus();
+
+  const p = runtimePaths();
+  const providerLabel = String(input.providerLabel || provider).trim();
+  codexOAuthCancelled = false;
+  authState = {
+    ...authState,
+    codexStarting: true,
+    oauthProvider: provider,
+    oauthProviderLabel: providerLabel,
+    codexLastError: "",
+    codexUserCode: "",
+    codexVerificationUrl: "",
+    logs: []
+  };
+  appendAuthLog(`Starting ${providerLabel} OAuth...`);
+
+  const args = ["-m", "hermes_cli.main", "auth", "add", provider, "--type", "oauth"];
+  authProcess = spawn(enginePython(), args, {
+    cwd: p.engine,
+    env: {
+      ...process.env,
+      HERMES_HOME: p.home,
+      PYTHONPATH: process.env.PYTHONPATH ? `${p.engine}:${process.env.PYTHONPATH}` : p.engine
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const onOutput = (chunk) => {
+    for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) appendAuthLog(line);
+  };
+  authProcess.stdout.on("data", onOutput);
+  authProcess.stderr.on("data", onOutput);
+  authProcess.on("exit", async (code, signal) => {
+    const completedProvider = provider;
+    authState.codexStarting = false;
+    authProcess = null;
+    if (code === 0) {
+      saveProviderConnection({
+        provider: completedProvider,
+        providerLabel,
+        authType: input.authType || "oauth_external",
+        apiKeyEnv: "",
+        apiKey: "",
+        baseUrl: input.baseUrl || "",
+        apiMode: input.apiMode || ""
+      });
+      appendAuthLog(`${providerLabel} OAuth login completed.`);
+      authState.oauthProvider = "";
+      authState.oauthProviderLabel = "";
+      try {
+        await restartEngineIfRunning();
+      } catch (error) {
+        appendAuthLog(`Restart after OAuth failed: ${error.message}`);
+      }
+    } else if (!codexOAuthCancelled) {
+      authState.codexLastError = `${providerLabel} OAuth exited with code ${code ?? "null"} signal ${signal ?? "null"}`;
+      appendAuthLog(authState.codexLastError);
+    }
+  });
+  return getRuntimeStatus();
+}
+
+function cancelProviderOAuth() {
+  if (authState.oauthProvider === "openai-codex" || !authState.oauthProvider) return cancelCodexOAuth();
+  codexOAuthCancelled = true;
+  if (authProcess && typeof authProcess.kill === "function") authProcess.kill("SIGTERM");
+  authProcess = null;
+  authState.codexStarting = false;
+  authState.codexUserCode = "";
+  authState.oauthProvider = "";
+  authState.oauthProviderLabel = "";
+  appendAuthLog("OAuth cancelled.");
+  return getRuntimeStatus();
+}
+
+function cleanRunSessionId(value, fellowKey) {
+  const raw = String(value || "").trim();
+  const fallback = `${fellowKey || "aimashi"}:default`;
+  return (raw || fallback)
+    .replace(/[^A-Za-z0-9_.:-]+/g, "_")
+    .slice(0, 120) || fallback;
+}
+
+function normalizeRunMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((message) => message && ["system", "user", "assistant"].includes(message.role))
+    .map((message) => ({
+      role: message.role,
+      content: String(message.content || "").trim()
+    }))
+    .filter((message) => message.content);
+}
+
+function buildRunPayload({ fellow, sessionId, messages }) {
+  const normalized = normalizeRunMessages(messages);
+  const instructions = normalized
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n")
+    .trim();
+  const dialogue = normalized.filter((message) => message.role !== "system");
+  const lastUserIndex = dialogue.map((message) => message.role).lastIndexOf("user");
+  if (lastUserIndex < 0) {
+    throw new Error("No user message found.");
+  }
+  const input = dialogue[lastUserIndex].content;
+  const conversationHistory = dialogue
+    .slice(0, lastUserIndex)
+    .filter((message) => message.role === "user" || message.role === "assistant");
+  const accountId = fellow.account_id || fellow.key;
+  const routeProfile = fellow.route_profile || accountId;
+  const body = {
+    model: "hermes-agent",
+    input,
+    session_id: cleanRunSessionId(sessionId, fellow.key),
+    account_id: accountId,
+    metadata: {
+      fellow_key: fellow.key,
+      persona_key: fellow.key,
+      account_id: accountId,
+      route_profile: routeProfile,
+      display_name: fellow.name
+    }
+  };
+  if (instructions) body.instructions = instructions;
+  if (conversationHistory.length) body.conversation_history = conversationHistory;
+  return body;
+}
+
+function firstTextValue(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map(firstTextValue).filter(Boolean).join("");
+  }
+  if (value && typeof value === "object") {
+    for (const key of ["text", "content", "delta", "output", "message", "final_response"]) {
+      const nested = firstTextValue(value[key]);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function normalizeHermesError(message) {
+  const text = String(message || "").trim();
+  if (text.includes("No inference provider configured") || text.includes("no API key was found")) {
+    return "Aimashi Hermes 已启动，但模型还不能调用。请在右侧 Model 选择 preset，填 API key，保存后再发送。";
+  }
+  return text;
+}
+
+function eventText(eventName, payload) {
+  if (!payload || typeof payload !== "object") return "";
+  if (eventName === "message.delta") return firstTextValue(payload.delta);
+  for (const key of ["output", "final_response", "text", "content", "message"]) {
+    const value = firstTextValue(payload[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function parseSseFrame(frame) {
+  const dataLines = [];
+  let eventName = "";
+  for (const line of frame.split("\n")) {
+    if (!line || line.startsWith(":")) continue;
+    const colon = line.indexOf(":");
+    const field = colon >= 0 ? line.slice(0, colon) : line;
+    let value = colon >= 0 ? line.slice(colon + 1) : "";
+    if (value.startsWith(" ")) value = value.slice(1);
+    if (field === "event") eventName = value;
+    if (field === "data") dataLines.push(value);
+  }
+  if (!dataLines.length) return null;
+  const raw = dataLines.join("\n");
+  let data = raw;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // Some SSE producers send plain text data.
+  }
+  return {
+    event: eventName || (data && typeof data === "object" ? data.event : "") || "message",
+    data
+  };
+}
+
+async function readRunEventStream({ runId, signal }) {
+  const response = await fetch(`${engineState.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, {
+    method: "GET",
+    headers: {
+      Accept: "text/event-stream",
+      Authorization: `Bearer ${apiKey()}`
+    },
+    signal
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `${response.status} ${response.statusText}`);
+  }
+  if (!response.body?.getReader) {
+    throw new Error("Hermes run event stream is not readable in this runtime.");
+  }
+
+  const reader = response.body.getReader();
+  const cancelReader = () => {
+    try {
+      reader.cancel();
+    } catch {
+      // Ignore cancellation failures.
+    }
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  const decoder = new TextDecoder();
+  const events = [];
+  let buffer = "";
+  let content = "";
+  let finalContent = "";
+  let finishReason = "stop";
+
+  const consumeFrame = (frame) => {
+    const parsed = parseSseFrame(frame);
+    if (!parsed) return false;
+    const payload = parsed.data && typeof parsed.data === "object" ? parsed.data : { data: parsed.data };
+    const name = parsed.event || payload.event || "message";
+    if (events.length < 500) {
+      events.push({
+        event: name,
+        run_id: payload.run_id || runId,
+        timestamp: payload.timestamp || null,
+        data: payload
+      });
+    }
+    if (name === "message.delta") {
+      content += eventText(name, payload);
+      return false;
+    }
+    if (name === "message.complete") {
+      const text = eventText(name, payload);
+      if (text) finalContent = text;
+      return false;
+    }
+    if (name === "run.completed") {
+      finalContent = eventText(name, payload) || finalContent || content;
+      finishReason = "stop";
+      return true;
+    }
+    if (name === "run.cancelled") {
+      finishReason = "cancelled";
+      return true;
+    }
+    if (name === "run.failed") {
+      const error = firstTextValue(payload.error) || firstTextValue(payload.message) || "Hermes run failed.";
+      throw new Error(normalizeHermesError(error));
+    }
+    return false;
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let splitIndex = buffer.indexOf("\n\n");
+      while (splitIndex >= 0) {
+        const frame = buffer.slice(0, splitIndex);
+        buffer = buffer.slice(splitIndex + 2);
+        if (consumeFrame(frame)) {
+          try {
+            await reader.cancel();
+          } catch {
+            // The stream may already be closed by Hermes.
+          }
+          return { content: finalContent || content, finishReason, events };
+        }
+        splitIndex = buffer.indexOf("\n\n");
+      }
+    }
+    const tail = buffer.trim();
+    if (tail) consumeFrame(tail);
+  } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore release failures on already-closed streams.
+    }
+  }
+  return { content: finalContent || content, finishReason, events };
+}
+
+async function sendChat({ fellowKey, personaKey, sessionId, messages }) {
+  if (activeChatAbortController) {
+    activeChatAbortController.abort();
+  }
+  const abortController = new AbortController();
+  activeChatAbortController = abortController;
+  const { signal } = abortController;
+  if (!engineState.running || !engineState.baseUrl) {
+    await startEngine();
+  }
+  try {
+    const manifest = loadFellowManifest();
+    const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : [];
+    const key = fellowKey || personaKey;
+    const fellow = fellows.find((item) => item.key === key) || fellows[0] || defaultFellowManifest().fellows[0];
+    const slashText = isSlashCommandText(messages);
+    if (slashText) {
+      const content = runHermesSlashCommand({ text: slashText, fellow, sessionId });
+      return {
+        id: `cmd_${crypto.randomUUID()}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: "hermes-agent",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: content || "(command completed)"
+            },
+            finish_reason: "stop"
+          }
+        ]
+      };
+    }
+
+    const runBody = buildRunPayload({ fellow, sessionId, messages });
+    const response = await fetch(`${engineState.baseUrl}/v1/runs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey()}`,
+        "X-Aimashi-Fellow": fellow.key,
+        "X-Alkaka-Fellow": fellow.key
+      },
+      body: JSON.stringify(runBody),
+      signal
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let message = text;
+      try {
+        message = JSON.parse(text).error?.message || text;
+      } catch {
+        // Keep the raw response text.
+      }
+      throw new Error(normalizeHermesError(message) || `${response.status} ${response.statusText}`);
+    }
+    const run = JSON.parse(text);
+    const runId = run.run_id || run.id;
+    if (!runId) throw new Error("Hermes did not return a run_id.");
+    const stream = await readRunEventStream({ runId, signal });
+    return {
+      id: runId,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: "hermes-agent",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: stream.content || ""
+          },
+          finish_reason: stream.finishReason
+        }
+      ],
+      aimashi: {
+        transport: "runs",
+        run_id: runId,
+        session_id: runBody.session_id,
+        fellow_key: fellow.key,
+        events: stream.events
+      }
+    };
+  } catch (error) {
+    if (signal.aborted) {
+      const stopped = new Error("生成已停止");
+      stopped.code = "AIMASHI_STOPPED";
+      throw stopped;
+    }
+    throw error;
+  } finally {
+    if (activeChatAbortController === abortController) activeChatAbortController = null;
+  }
+}
+
+function stopChat() {
+  if (activeChatAbortController) {
+    activeChatAbortController.abort();
+    activeChatAbortController = null;
+    return { stopped: true };
+  }
+  return { stopped: false };
+}
+
+function loadChatSessions() {
+  initializeRuntime();
+  const store = loadChatStore();
+  return saveChatStore(store);
+}
+
+function saveChatSession({ personaKey, session }) {
+  initializeRuntime();
+  const key = String(personaKey || session?.personaKey || "").trim();
+  if (!key) throw new Error("personaKey is required.");
+  const store = loadChatStore();
+  if (!store.sessions[key]) store.sessions[key] = [];
+  const now = new Date().toISOString();
+  const next = {
+    id: String(session?.id || crypto.randomUUID()),
+    personaKey: key,
+    title: cleanSessionTitle(session?.title) || "新对话",
+    titleGenerated: Boolean(session?.titleGenerated),
+    createdAt: session?.createdAt || now,
+    updatedAt: session?.updatedAt || now,
+    messages: Array.isArray(session?.messages)
+      ? session.messages.map((message) => ({
+        role: ["user", "assistant", "system"].includes(message.role) ? message.role : "assistant",
+        content: String(message.content || ""),
+        createdAt: message.createdAt || now,
+        transient: Boolean(message.transient)
+      }))
+        .filter((message) => !message.transient)
+        .map(({ transient, ...message }) => message)
+      : []
+  };
+  const index = store.sessions[key].findIndex((item) => item.id === next.id);
+  if (index >= 0) {
+    const existing = store.sessions[key][index];
+    const mergedMessages = [...(existing.messages || [])];
+    const seen = new Set(mergedMessages.map((message) => `${message.role}\n${message.createdAt}\n${message.content}`));
+    for (const message of next.messages) {
+      const messageKey = `${message.role}\n${message.createdAt}\n${message.content}`;
+      if (!seen.has(messageKey)) {
+        mergedMessages.push(message);
+        seen.add(messageKey);
+      }
+    }
+    mergedMessages.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    store.sessions[key][index] = {
+      ...existing,
+      ...next,
+      title: next.titleGenerated ? next.title : (existing.title || next.title),
+      titleGenerated: Boolean(existing.titleGenerated || next.titleGenerated),
+      createdAt: existing.createdAt || next.createdAt,
+      updatedAt: String(next.updatedAt || "").localeCompare(String(existing.updatedAt || "")) >= 0 ? next.updatedAt : existing.updatedAt,
+      messages: mergedMessages
+    };
+  }
+  else store.sessions[key].push(next);
+  return saveChatStore(store);
+}
+
+function saveChatReadState({ readAt }) {
+  initializeRuntime();
+  const store = loadChatStore();
+  if (readAt && typeof readAt === "object") {
+    store.readAt = Object.fromEntries(
+      Object.entries(readAt)
+        .filter(([key, value]) => key && typeof value === "string" && value.trim())
+        .map(([key, value]) => [String(key), value])
+    );
+  }
+  return saveChatStore(store);
+}
+
+function newChatSession({ personaKey }) {
+  initializeRuntime();
+  const key = String(personaKey || "").trim();
+  if (!key) throw new Error("personaKey is required.");
+  const store = loadChatStore();
+  if (!store.sessions[key]) store.sessions[key] = [];
+  store.sessions[key] = store.sessions[key].filter((session) => (session.messages || []).some((message) => String(message.content || "").trim()));
+  const session = createChatSession(key);
+  store.sessions[key].unshift(session);
+  return saveChatStore(store);
+}
+
+function renameChatSession({ personaKey, sessionId, title }) {
+  initializeRuntime();
+  const key = String(personaKey || "").trim();
+  const id = String(sessionId || "").trim();
+  const nextTitle = cleanSessionTitle(title);
+  if (!key || !id || !nextTitle) throw new Error("personaKey, sessionId and title are required.");
+  const store = loadChatStore();
+  const session = (store.sessions[key] || []).find((item) => item.id === id);
+  if (!session) throw new Error("Session not found.");
+  session.title = nextTitle;
+  session.titleGenerated = true;
+  session.updatedAt = new Date().toISOString();
+  return saveChatStore(store);
+}
+
+async function generateSessionTitle({ personaKey, sessionId, messages }) {
+  const clipped = (Array.isArray(messages) ? messages : [])
+    .filter((message) => ["user", "assistant"].includes(message.role) && String(message.content || "").trim())
+    .slice(0, 4);
+  if (!clipped.length) return { title: "新对话" };
+  try {
+    const response = await sendChat({
+      personaKey,
+      sessionId: sessionId || `title:${crypto.randomUUID()}`,
+      messages: [
+        {
+          role: "system",
+          content: "请给下面这段对话生成一个简短标题。要求：不超过12个中文字；只输出标题；不要解释；不要引号；不要句号。"
+        },
+        {
+          role: "user",
+          content: clipped.map((message) => `${message.role}: ${message.content}`).join("\n").slice(0, 1600)
+        }
+      ]
+    });
+    const content = response.choices?.[0]?.message?.content || "";
+    return { title: cleanSessionTitle(content) || fallbackSessionTitle(clipped) };
+  } catch {
+    return { title: fallbackSessionTitle(clipped) };
+  }
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1120,
+    height: 760,
+    minWidth: 900,
+    minHeight: 620,
+    title: "Aimashi",
+    titleBarStyle: "hidden",
+    trafficLightPosition: { x: 4, y: 8 },
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  win.loadFile(path.join(__dirname, "renderer", "index.html"));
+}
+
+ipcMain.handle("runtime:initialize", () => initializeRuntime());
+ipcMain.handle("runtime:status", () => getRuntimeStatus());
+ipcMain.handle("engine:install", () => installEngine());
+ipcMain.handle("engine:start", () => startEngine());
+ipcMain.handle("engine:stop", () => stopEngine());
+ipcMain.handle("auth:codex-start", () => startCodexOAuth());
+ipcMain.handle("auth:codex-cancel", () => cancelCodexOAuth());
+ipcMain.handle("auth:provider-start", (_event, provider) => startProviderOAuth(provider));
+ipcMain.handle("auth:provider-cancel", () => cancelProviderOAuth());
+ipcMain.handle("chat:send", (_event, payload) => sendChat(payload));
+ipcMain.handle("chat:stop", () => stopChat());
+ipcMain.handle("commands:slash", () => loadHermesSlashCommands());
+ipcMain.handle("chat:sessions-load", () => loadChatSessions());
+ipcMain.handle("chat:session-save", (_event, payload) => saveChatSession(payload));
+ipcMain.handle("chat:read-state-save", (_event, payload) => saveChatReadState(payload));
+ipcMain.handle("chat:session-create", (_event, payload) => newChatSession(payload));
+ipcMain.handle("chat:session-rename", (_event, payload) => renameChatSession(payload));
+ipcMain.handle("chat:title-generate", (_event, payload) => generateSessionTitle(payload));
+ipcMain.handle("model:catalog", () => loadHermesModelCatalog());
+ipcMain.handle("skills:list", () => loadLocalSkills());
+ipcMain.handle("skills:read", (_event, skillId) => readLocalSkill(skillId));
+ipcMain.handle("model:save", (_event, settings) => {
+  const current = modelSettings();
+  const nextProvider = String(settings.provider || "").trim();
+  const hasApiKey = Object.prototype.hasOwnProperty.call(settings || {}, "apiKey");
+  const hasApiKeyEnv = Object.prototype.hasOwnProperty.call(settings || {}, "apiKeyEnv");
+  const existingConnection = providerConnection(nextProvider);
+  const submittedApiKey = hasApiKey ? String(settings.apiKey || "").trim() : "";
+  const fallbackApiKey = existingConnection?.apiKey || (nextProvider === current.provider ? current.apiKey : "");
+  const nextApiKeyEnv = String(hasApiKeyEnv ? settings.apiKeyEnv : (existingConnection?.apiKeyEnv || current.apiKeyEnv || "OPENAI_API_KEY")).trim();
+  const next = {
+    provider: nextProvider,
+    model: String(settings.model || "").trim(),
+    apiKeyEnv: nextApiKeyEnv,
+    apiKey: submittedApiKey || String(fallbackApiKey || "").trim(),
+    baseUrl: String(settings.baseUrl || "").trim(),
+    apiMode: String(settings.apiMode || "").trim()
+  };
+  if (next.provider && (submittedApiKey || next.apiKey || next.provider === "lmstudio")) {
+    saveProviderConnection({
+      provider: next.provider,
+      providerLabel: String(settings.providerLabel || existingConnection?.providerLabel || next.provider).trim(),
+      authType: String(settings.authType || existingConnection?.authType || (next.provider === "openai-codex" ? "oauth_external" : "api_key")).trim(),
+      apiKeyEnv: next.apiKeyEnv,
+      apiKey: next.apiKey,
+      baseUrl: next.baseUrl,
+      apiMode: next.apiMode
+    });
+  }
+  writeModelSettings(next);
+  if (submittedApiKey) return restartEngineIfRunning();
+  return getRuntimeStatus();
+});
+
+ipcMain.handle("appearance:save", (_event, settings) => {
+  const p = runtimePaths();
+  const current = appearanceSettings();
+  const theme = String(settings.theme || current.theme || "light").trim();
+  const fontPreset = String(settings.fontPreset || current.fontPreset || "system").trim();
+  const next = {
+    theme: ["light", "dark"].includes(theme) ? theme : "light",
+    fontPreset,
+    customFont: String(settings.customFont || "").trim()
+  };
+  fs.writeFileSync(p.appearanceSettings, JSON.stringify(next, null, 2) + "\n");
+  return getRuntimeStatus();
+});
+
+ipcMain.handle("profile:save", (_event, profile) => {
+  const p = runtimePaths();
+  const current = { ...defaultUserProfile(), ...readJson(p.userProfile, {}) };
+  const next = {
+    displayName: String(profile.displayName || current.displayName || "Boss").trim() || "Boss",
+    avatarText: String(profile.avatarText || current.avatarText || "B").trim().slice(0, 2).toUpperCase() || "B",
+    avatarColor: String(profile.avatarColor || current.avatarColor || "#111827").trim() || "#111827",
+    avatarImage: String(profile.avatarImage || current.avatarImage || "").trim()
+  };
+  fs.writeFileSync(p.userProfile, JSON.stringify(next, null, 2) + "\n");
+  return getRuntimeStatus();
+});
+
+function saveFellow(fellowInput) {
+  const p = runtimePaths();
+  const name = String(fellowInput.name || "").trim();
+  if (!name) throw new Error("Fellow name is required.");
+  let key = fellowKeyFromName(fellowInput.key || name);
+
+  const manifest = loadFellowManifest();
+  const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : [];
+  if (!fellowInput.key) {
+    const existingKeys = new Set(fellows.map((item) => item.key));
+    const baseKey = key;
+    let index = 2;
+    while (existingKeys.has(key)) {
+      const existing = fellows.find((item) => item.key === key);
+      if (existing && existing.name === name) break;
+      key = `${baseKey}_${index}`;
+      index += 1;
+    }
+  }
+  const next = normalizeFellow({
+    key,
+    name,
+    account_id: key,
+    route_profile: key,
+    platform: "api_server",
+    color: fellowInput.color || "#0f766e",
+    avatarImage: fellowInput.avatarImage || fellowInput.avatar || "",
+    avatarCrop: normalizeAvatarCrop(fellowInput.avatarCrop),
+    bio: fellowInput.description || fellowInput.bio || ""
+  });
+  const index = fellows.findIndex((item) => item.key === key);
+  if (index >= 0) fellows[index] = next;
+  else fellows.push(next);
+  manifest.fellows = fellows;
+  saveFellowManifest(manifest);
+
+  const body = fellowPersonaBody(name, fellowInput.description || fellowInput.bio || "");
+  fs.writeFileSync(path.join(p.fellowDir, `${key}.md`), body);
+  fs.writeFileSync(path.join(p.fellowDir, `${key}.fellow.json`), JSON.stringify(fellowMetadata(next), null, 2) + "\n");
+  fs.writeFileSync(path.join(p.compatSoulsDir, `${key}.md`), body);
+  return getRuntimeStatus();
+}
+
+ipcMain.handle("fellow:save", (_event, fellow) => saveFellow(fellow));
+ipcMain.handle("persona:save", (_event, persona) => saveFellow(persona));
+
+app.whenReady().then(() => {
+  initializeRuntime();
+  createWindow();
+  setTimeout(async () => {
+    try {
+      if (!getRuntimeStatus().engineInstalled) installEngine();
+      await startEngine();
+    } catch (error) {
+      engineState.lastError = error.message;
+      appendEngineLog(`Auto-start failed: ${error.message}`);
+    }
+  }, 300);
+});
+
+app.on("window-all-closed", () => {
+  cancelCodexOAuth();
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});

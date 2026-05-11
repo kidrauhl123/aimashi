@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aimashi</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="nav-rail" aria-label="主导航">
+      <div class="traffic-spacer"></div>
+      <div id="userAvatar" class="profile-avatar rail-avatar" title="Boss">B</div>
+      <span id="userDisplayName" class="visually-hidden">Boss</span>
+      <div class="rail-divider"></div>
+      <button class="rail-button active" type="button" data-view="chat" title="消息" aria-label="消息">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <em id="personaCount">0</em>
+      </button>
+      <button class="rail-button" type="button" title="联系人" aria-label="联系人">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"/></svg>
+      </button>
+      <button class="rail-button" type="button" data-view="skills" title="Skill 库" aria-label="Skill 库">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14 M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+      </button>
+      <div class="rail-spacer"></div>
+      <button id="openSettings" class="rail-button" type="button" title="设置" aria-label="设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h16"/></svg>
+      </button>
+    </aside>
+
+    <aside id="conversationSidebar" class="sidebar conversation-sidebar">
+      <header class="sidebar-tools">
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="personaSearch" autocomplete="off" placeholder="搜索">
+        </label>
+        <button id="newPersona" class="icon-button" type="button" title="新建">＋</button>
+        <div id="fellowCreateMenu" class="create-menu hidden">
+          <button id="addFellow" type="button">添加伙伴</button>
+          <button id="createGroup" type="button" disabled>创建群组 <span>实验性</span></button>
+        </div>
+      </header>
+
+      <section class="conversation-section">
+        <div id="personaList" class="persona-list"></div>
+      </section>
+    </aside>
+
+    <aside id="skillsSidebar" class="sidebar skills-sidebar hidden">
+      <header class="sidebar-tools skills-sidebar-tools">
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="skillSearch" autocomplete="off" placeholder="搜索 skill">
+        </label>
+      </header>
+      <section id="skillNav" class="skills-nav"></section>
+    </aside>
+
+    <section id="chatView" class="workspace">
+      <header class="topbar">
+        <div class="group-title">
+          <div id="activeChatAvatar" class="profile-avatar">A</div>
+          <div>
+            <h1><span id="activeChatName">Aimashi</span> <small id="activeChatBadge">单聊</small></h1>
+            <p id="activeChatMeta">本地伙伴</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="session-menu-wrap">
+            <button id="sessionMenuButton" class="session-trigger" type="button" title="聊天记录" aria-label="聊天记录">
+              <span id="currentSessionTitle" class="current-session-title">新对话</span>
+            </button>
+            <div id="sessionMenu" class="session-menu hidden">
+              <div class="session-menu-head">
+                <strong>聊天记录</strong>
+                <button id="newSession" class="icon-button" type="button" title="新建对话">＋</button>
+              </div>
+              <div id="sessionList" class="session-list"></div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="chat-layout">
+        <div id="chat" class="chat"></div>
+        <form id="chatForm" class="composer">
+          <div class="composer-input-row">
+            <textarea id="chatInput" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+            <button id="sendChat" class="send-button" type="submit" title="发送" aria-label="发送">↗</button>
+          </div>
+          <div id="slashCommandMenu" class="slash-command-menu hidden"></div>
+          <div class="composer-bottom">
+            <label class="model-switcher" title="切换当前模型">
+              <span class="model-avatar" aria-hidden="true">◇</span>
+              <select id="quickModelSelect" aria-label="切换当前模型">
+                <option value="custom">Custom</option>
+                <option value="openai-codex">GPT-5.3 Codex | OpenAI Codex</option>
+                <option value="xai">Grok 4.1 Fast | xAI</option>
+                <option value="anthropic">Claude Sonnet 4.6 | Anthropic</option>
+                <option value="openrouter">Claude Sonnet 4.6 | OpenRouter</option>
+                <option value="deepseek">DeepSeek Chat | DeepSeek</option>
+                <option value="gemini">Gemini 2.5 Pro | Google</option>
+                <option value="lmstudio">Local Model | LM Studio</option>
+              </select>
+            </label>
+            <span id="modelSwitchStatus" class="model-switch-status"></span>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <section id="skillsView" class="workspace skills-workspace hidden">
+      <header class="topbar">
+        <div class="group-title">
+          <div class="skill-page-mark">SK</div>
+          <div>
+            <h1><span>Skill 库</span> <small>本地</small></h1>
+            <p id="skillLibraryMeta">正在扫描本地 Skill...</p>
+          </div>
+        </div>
+        <div class="skills-top-meta">
+          <span id="skillSourceMeta">Local Skills</span>
+          <strong id="skillEnabledMeta">Ready</strong>
+        </div>
+      </header>
+      <section class="skills-layout">
+        <div class="skills-hero">
+          <div>
+            <h2>能力库</h2>
+            <p>按本地目录扫描真实 SKILL.md，所有 Fellow 共享同一套 Skill registry。</p>
+          </div>
+          <div id="skillStats" class="skill-stat-strip">
+            <span><strong>0</strong> 扫描中</span>
+          </div>
+        </div>
+
+        <div id="skillChipRow" class="skill-chip-row" aria-label="Skill 分类"></div>
+
+        <div class="skill-content-grid">
+          <section id="skillCardGrid" class="skill-card-grid" aria-label="Skill 列表"></section>
+
+          <aside id="skillDetailPanel" class="skill-detail-panel"></aside>
+        </div>
+      </section>
+    </section>
+
+    <section id="settingsView" class="settings-modal hidden" role="dialog" aria-modal="true">
+      <div class="settings-dialog">
+      <header class="modal-header">
+        <div>
+          <h1>设置</h1>
+          <p>只保留 Aimashi 当前真实需要的配置</p>
+        </div>
+        <button id="closeSettings" class="icon-button" type="button" title="关闭">×</button>
+      </header>
+
+      <section class="settings-layout">
+        <aside class="settings-tabs">
+          <button class="settings-tab active" type="button" data-settings-tab="profile">账号</button>
+          <button class="settings-tab" type="button" data-settings-tab="appearance">外观</button>
+          <button class="settings-tab" type="button" data-settings-tab="model">模型与登录</button>
+          <button class="settings-tab" type="button" data-settings-tab="runtime">Hermes Runtime</button>
+        </aside>
+
+        <div class="settings-content">
+          <section class="settings-panel" data-settings-panel="profile">
+            <form id="profileForm" class="form-grid">
+              <div class="panel-heading">
+                <h2>账号</h2>
+                <p>当前本地用户资料，只保存在 Aimashi 私有 runtime。</p>
+              </div>
+              <label>
+                Nickname
+                <input id="profileDisplayName" autocomplete="off" placeholder="例如 Boss">
+              </label>
+              <label>
+                Avatar Text
+                <input id="profileAvatarText" autocomplete="off" maxlength="2" placeholder="例如 B">
+              </label>
+              <label>
+                Avatar Color
+                <input id="profileAvatarColor" type="color">
+              </label>
+              <label>
+                Avatar Image
+                <input id="profileAvatarImage" autocomplete="off" placeholder="本地图片路径或图片 URL，可留空">
+              </label>
+              <button class="primary" type="submit">保存账号</button>
+            </form>
+          </section>
+
+          <section class="settings-panel hidden" data-settings-panel="appearance">
+            <form id="appearanceForm" class="form-grid">
+              <div class="panel-heading">
+                <h2>外观</h2>
+                <p>主题和字体只影响 Aimashi 本应用。</p>
+              </div>
+              <label>
+                Theme
+                <select id="appearanceTheme">
+                  <option value="light">浅色模式</option>
+                  <option value="dark">深色模式</option>
+                </select>
+              </label>
+              <label>
+                Font
+                <select id="appearanceFontPreset">
+                  <option value="system">System Default</option>
+                  <option value="sf-pro">SF Pro</option>
+                  <option value="pingfang">PingFang SC</option>
+                  <option value="inter">Inter</option>
+                  <option value="helvetica">Helvetica Neue</option>
+                  <option value="noto-sans-sc">Noto Sans SC</option>
+                  <option value="lxgw">LXGW WenKai</option>
+                  <option value="mono">Monospace</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label class="wide">
+                Custom Font
+                <input id="appearanceCustomFont" autocomplete="off" placeholder='例如 "Maple Mono", "PingFang SC", sans-serif'>
+              </label>
+              <button class="primary" type="submit">保存外观</button>
+            </form>
+          </section>
+
+          <section class="settings-panel hidden" data-settings-panel="model">
+            <form id="modelForm" class="form-grid">
+              <div class="panel-heading">
+                <h2>模型</h2>
+              </div>
+              <section class="connected-providers wide">
+                <div class="model-section-title">
+                  <strong>已连接的模型提供商</strong>
+                </div>
+                <div id="connectedProviderList" class="connected-provider-list"></div>
+              </section>
+              <section class="add-provider-panel wide">
+                <div class="model-section-title">
+                  <strong>添加模型提供商</strong>
+                </div>
+                <label class="model-select-field">
+                  提供商
+                  <select id="modelSelect">
+                    <option value="">选择要连接的提供商</option>
+                  </select>
+                </label>
+                <p id="modelAuthState" class="model-auth-state hidden">未配置</p>
+              </section>
+              <label id="modelApiKeyField" class="api-key-field wide">
+                <span id="modelApiKeyLabel">API Key</span>
+                <input id="modelApiKey" type="password" autocomplete="off" placeholder="保存在 Aimashi 私有 runtime">
+              </label>
+              <input id="authMethod" type="hidden" value="api-key">
+              <input id="modelPreset" type="hidden" value="">
+              <input id="modelProvider" type="hidden">
+              <input id="modelName" type="hidden">
+              <input id="modelKeyEnv" type="hidden">
+              <input id="modelBaseUrl" type="hidden">
+              <input id="modelApiMode" type="hidden">
+              <section id="codexInlineAuth" class="inline-auth hidden">
+                <div class="auth-line">
+                  <span id="codexCheck" class="check-dot">✓</span>
+                  <strong id="codexStatus">Checking...</strong>
+                </div>
+                <div class="auth-code" id="codexCode"></div>
+                <div class="inline-actions">
+                  <button id="codexLogin" class="primary" type="button">用 OpenAI 登录</button>
+                  <button id="codexCancel" class="secondary" type="button">取消</button>
+                </div>
+                <pre id="codexLogs"></pre>
+              </section>
+              <button id="modelConnectButton" class="primary hidden" type="submit">连接提供商</button>
+            </form>
+          </section>
+
+          <section class="settings-panel hidden" data-settings-panel="runtime">
+            <div class="runtime-card">
+              <div class="panel-heading">
+                <h2>私有 Hermes</h2>
+                <p>Aimashi 不读取、不修改现有 Hermes。</p>
+              </div>
+              <dl class="runtime-list">
+                <div><dt>Status</dt><dd id="engineStatus">Checking...</dd></div>
+                <div><dt>Hermes Home</dt><dd id="hermesHome"></dd></div>
+                <div><dt>Manifest</dt><dd id="manifestPath"></dd></div>
+              </dl>
+              <div class="inline-actions">
+                <button id="initialize" class="secondary" type="button">Initialize</button>
+                <button id="installEngine" class="secondary" type="button">Install Engine</button>
+                <button id="startEngine" class="secondary" type="button">Start</button>
+                <button id="stopEngine" class="secondary" type="button">Stop</button>
+              </div>
+              <article id="engineWarning" class="notice hidden">Engine 尚未安装到 Aimashi 私有 runtime。</article>
+              <pre id="engineLogs"></pre>
+            </div>
+          </section>
+        </div>
+      </section>
+      </div>
+    </section>
+
+    <section id="fellowDialog" class="fellow-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="fellowDialogTitle">
+      <form id="fellowForm" class="fellow-form">
+        <header class="fellow-dialog-head">
+          <div>
+            <h2 id="fellowDialogTitle">添加伙伴</h2>
+          </div>
+          <button id="closeFellowDialog" class="icon-button" type="button" title="关闭">×</button>
+        </header>
+        <label>
+          姓名
+          <input id="fellowName" autocomplete="off">
+        </label>
+        <section class="avatar-picker">
+          <div id="fellowAvatarPreview" class="avatar-crop-preview"></div>
+          <div id="fellowAvatarDrop" class="avatar-drop">
+            <input id="fellowAvatarFile" type="file" accept="image/*" class="hidden">
+            <input id="fellowAvatar" type="hidden">
+            <button id="chooseFellowAvatar" class="secondary avatar-file-button" type="button" title="选择图片" aria-label="选择图片">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12"/></svg>
+              选择图片
+            </button>
+            <span>也可以把图片拖到这里</span>
+          </div>
+        </section>
+        <section class="avatar-defaults" aria-label="默认头像"></section>
+        <label>
+          人设
+          <textarea id="fellowSeed" placeholder="可留空，后续在对话中慢慢形成"></textarea>
+        </label>
+        <footer class="fellow-dialog-actions">
+          <button id="cancelFellow" class="secondary" type="button">取消</button>
+          <button class="primary" type="submit">保存伙伴</button>
+        </footer>
+      </form>
+    </section>
+
+    <section id="avatarCropDialog" class="avatar-crop-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="avatarCropTitle">
+      <div class="avatar-crop-card">
+        <header class="avatar-crop-head">
+          <h2 id="avatarCropTitle">调整头像</h2>
+          <button id="cancelAvatarCrop" class="icon-button" type="button" title="关闭">×</button>
+        </header>
+        <div id="avatarCropStage" class="avatar-crop-stage">
+          <div class="avatar-crop-circle"></div>
+        </div>
+        <footer class="avatar-crop-actions">
+          <button id="resetAvatarCrop" class="secondary" type="button">重置</button>
+          <span>拖拽移动，滚轮缩放</span>
+          <button id="confirmAvatarCrop" class="primary" type="button">使用头像</button>
+        </footer>
+      </div>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "aimashi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aimashi desktop demo with an app-owned Hermes runtime home.",
+  "main": "src/main.js",
+  "scripts": {
+    "open": "electron .",
+    "start": "electron .",
+    "check": "node src/check.js"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6"
+  }
+}

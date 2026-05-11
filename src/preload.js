@@ -1,0 +1,30 @@
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("aimashi", {
+  initializeRuntime: () => ipcRenderer.invoke("runtime:initialize"),
+  runtimeStatus: () => ipcRenderer.invoke("runtime:status"),
+  installEngine: () => ipcRenderer.invoke("engine:install"),
+  startEngine: () => ipcRenderer.invoke("engine:start"),
+  stopEngine: () => ipcRenderer.invoke("engine:stop"),
+  startCodexOAuth: () => ipcRenderer.invoke("auth:codex-start"),
+  cancelCodexOAuth: () => ipcRenderer.invoke("auth:codex-cancel"),
+  startProviderOAuth: (provider) => ipcRenderer.invoke("auth:provider-start", provider),
+  cancelProviderOAuth: () => ipcRenderer.invoke("auth:provider-cancel"),
+  sendChat: (payload) => ipcRenderer.invoke("chat:send", payload),
+  stopChat: () => ipcRenderer.invoke("chat:stop"),
+  loadSlashCommands: () => ipcRenderer.invoke("commands:slash"),
+  loadChatSessions: () => ipcRenderer.invoke("chat:sessions-load"),
+  saveChatSession: (payload) => ipcRenderer.invoke("chat:session-save", payload),
+  saveChatReadState: (payload) => ipcRenderer.invoke("chat:read-state-save", payload),
+  createChatSession: (payload) => ipcRenderer.invoke("chat:session-create", payload),
+  renameChatSession: (payload) => ipcRenderer.invoke("chat:session-rename", payload),
+  generateSessionTitle: (payload) => ipcRenderer.invoke("chat:title-generate", payload),
+  loadModelCatalog: () => ipcRenderer.invoke("model:catalog"),
+  loadSkills: () => ipcRenderer.invoke("skills:list"),
+  readSkill: (skillId) => ipcRenderer.invoke("skills:read", skillId),
+  saveModel: (settings) => ipcRenderer.invoke("model:save", settings),
+  saveAppearance: (settings) => ipcRenderer.invoke("appearance:save", settings),
+  saveProfile: (profile) => ipcRenderer.invoke("profile:save", profile),
+  saveFellow: (fellow) => ipcRenderer.invoke("fellow:save", fellow),
+  savePersona: (persona) => ipcRenderer.invoke("persona:save", persona)
+});
