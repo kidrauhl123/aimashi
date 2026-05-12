@@ -2421,26 +2421,43 @@ async function maybeGenerateTitleForSession(session) {
   }
 }
 
-function renderTraceBlocks({ reasoning, tools }) {
-  const reasoningHtml = reasoning
-    ? `<details class="reasoning-block"><summary>思考过程</summary><pre>${escapeHtml(reasoning)}</pre></details>`
-    : "";
+function renderTraceBlocks({ reasoning, tools, expanded }) {
   const toolList = Array.isArray(tools) ? tools : [];
-  const toolsHtml = toolList.length
-    ? `<div class="tool-cards">${toolList.map((tool) => {
-      const statusClass = tool.status === "completed" ? "ok" : tool.status === "error" ? "err" : "run";
-      const badge = tool.status === "completed"
-        ? (tool.duration != null ? `${Number(tool.duration).toFixed(2)}s` : "完成")
-        : tool.status === "error" ? "失败" : "运行中…";
-      const name = String(tool.name || "工具");
-      const preview = String(tool.preview || "");
-      return `<div class="tool-card ${statusClass}">
-          <div class="tool-card-head"><span class="tool-card-name">${escapeHtml(name)}</span><span class="tool-card-badge">${escapeHtml(badge)}</span></div>
-          ${preview ? `<div class="tool-card-preview">${escapeHtml(preview)}</div>` : ""}
-        </div>`;
-    }).join("")}</div>`
-    : "";
-  return `${reasoningHtml}${toolsHtml}`;
+  if (!reasoning && !toolList.length) return "";
+  const openAttr = expanded ? " open" : "";
+  const rows = [];
+  if (reasoning) {
+    const reasoningText = String(reasoning).trim();
+    rows.push(
+      `<details class="trace-row reasoning"${openAttr}>` +
+        `<summary><span class="trace-chevron">▸</span><span class="trace-cmd">thinking</span><span class="trace-arg">${escapeHtml(reasoningText.slice(0, 80).replace(/\s+/g, " "))}</span></summary>` +
+        `<pre class="trace-body">${escapeHtml(reasoningText)}</pre>` +
+      `</details>`
+    );
+  }
+  for (const tool of toolList) {
+    const status = tool.status === "completed" ? "ok" : tool.status === "error" ? "err" : "run";
+    const glyph = status === "ok" ? "✓" : status === "err" ? "✗" : "●";
+    const meta = status === "run"
+      ? "…"
+      : (tool.duration != null ? `${Number(tool.duration).toFixed(2)}s` : "");
+    const name = String(tool.name || "tool");
+    const preview = String(tool.preview || "");
+    const previewInline = preview.replace(/\s+/g, " ").slice(0, 120);
+    rows.push(
+      `<details class="trace-row tool" data-status="${status}"${expanded ? " open" : ""}>` +
+        `<summary>` +
+          `<span class="trace-chevron">▸</span>` +
+          `<span class="trace-glyph">${glyph}</span>` +
+          `<span class="trace-cmd">${escapeHtml(name)}</span>` +
+          (previewInline ? `<span class="trace-arg">${escapeHtml(previewInline)}</span>` : "") +
+          (meta ? `<span class="trace-meta">${escapeHtml(meta)}</span>` : "") +
+        `</summary>` +
+        (preview ? `<pre class="trace-body">${escapeHtml(preview)}</pre>` : "") +
+      `</details>`
+    );
+  }
+  return `<div class="trace">${rows.join("")}</div>`;
 }
 
 function renderChat() {
@@ -2465,11 +2482,11 @@ function renderChat() {
       ? avatarThumbBackgroundStyle(fellowAvatarImage, persona?.avatarCrop, color)
       : "";
     const traceHtml = message.role === "assistant"
-      ? renderTraceBlocks({ reasoning: message.reasoning, tools: message.tools })
+      ? renderTraceBlocks({ reasoning: message.reasoning, tools: message.tools, expanded: false })
       : "";
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" ? escapeHtml(label) : ""}</div>
-      <div class="bubble">${traceHtml}${renderMarkdown(message.content)}</div>
+      <div class="message-stack">${traceHtml}<div class="bubble">${renderMarkdown(message.content)}</div></div>
     `;
     els.chat.appendChild(article);
   }
@@ -2501,11 +2518,11 @@ function renderChat() {
     const fellowAvatar = avatarImageSrc(fellowAvatarImage);
     const avatarBackgroundColor = fellowAvatar ? "transparent" : (personaForStream?.color || "#23444d");
     const imageStyle = avatarThumbBackgroundStyle(fellowAvatarImage, personaForStream?.avatarCrop, personaForStream?.color);
-    const traceHtml = renderTraceBlocks({ reasoning: s.reasoning, tools: s.tools });
-    const textHtml = s.text ? `<div class="streaming-text">${renderMarkdown(s.text)}</div>` : "";
+    const traceHtml = renderTraceBlocks({ reasoning: s.reasoning, tools: s.tools, expanded: true });
+    const textHtml = s.text ? `<div class="bubble">${renderMarkdown(s.text)}</div>` : "";
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}"></div>
-      <div class="bubble">${traceHtml}${textHtml}</div>
+      <div class="message-stack">${traceHtml}${textHtml}</div>
     `;
     els.chat.appendChild(article);
   }

@@ -2916,122 +2916,142 @@ pre {
   30% { opacity: 1; transform: translateY(-2px); }
 }
 
-.message.assistant.streaming .bubble {
-  position: relative;
+.message-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(74%, 780px);
 }
 
-.reasoning-block {
-  margin: 0 0 8px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(94, 92, 230, 0.06);
-  border: 1px solid rgba(94, 92, 230, 0.18);
-  color: var(--text-dim, #5b6b75);
-  font-size: 12.5px;
+.message-stack .bubble {
+  max-width: 100%;
+}
+
+.message.user .message-stack {
+  align-items: flex-end;
+}
+
+/* ----- terminal-style trace (reasoning + tools) ----- */
+
+.trace {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
   line-height: 1.55;
+  color: var(--text-dim, #6b7280);
+  opacity: 0.78;
 }
 
-.reasoning-block > summary {
+.trace-row {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.trace-row > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px 2px 2px;
+  list-style: none;
   cursor: pointer;
   user-select: none;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  list-style: none;
-  opacity: 0.85;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.reasoning-block > summary::-webkit-details-marker { display: none; }
-.reasoning-block > summary::before {
-  content: "▸ ";
+.trace-row > summary::-webkit-details-marker { display: none; }
+
+.trace-row:hover > summary {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+:root[data-theme="dark"] .trace-row:hover > summary {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.trace-chevron {
   display: inline-block;
+  width: 10px;
+  flex: 0 0 auto;
+  color: var(--text-dim, #94a3b8);
   transition: transform 120ms ease;
-  margin-right: 2px;
 }
 
-.reasoning-block[open] > summary::before {
+.trace-row[open] > summary > .trace-chevron {
   transform: rotate(90deg);
 }
 
-.reasoning-block pre {
-  margin: 6px 0 2px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
-
-.tool-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0 0 8px;
-}
-
-.tool-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.04);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  font-size: 12.5px;
-  line-height: 1.45;
-}
-
-.tool-card.run { border-color: rgba(94, 92, 230, 0.35); background: rgba(94, 92, 230, 0.06); }
-.tool-card.ok  { border-color: rgba(34, 139, 92, 0.3); background: rgba(34, 139, 92, 0.06); }
-.tool-card.err { border-color: rgba(220, 38, 38, 0.35); background: rgba(220, 38, 38, 0.07); }
-
-.tool-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.tool-card-name {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-weight: 600;
-  color: var(--text, #0f172a);
-}
-
-.tool-card-badge {
+.trace-glyph {
   flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  background: rgba(15, 23, 42, 0.07);
-  color: var(--text-dim, #5b6b75);
+  width: 10px;
+  text-align: center;
+  font-weight: 600;
 }
 
-.tool-card.run .tool-card-badge {
-  background: rgba(94, 92, 230, 0.15);
-  color: #4f46e5;
+.trace-row[data-status="run"] > summary > .trace-glyph {
+  color: #6366f1;
+  animation: traceGlyphPulse 1.2s ease-in-out infinite;
 }
 
-.tool-card.ok .tool-card-badge {
-  background: rgba(34, 139, 92, 0.18);
-  color: #137a4c;
+.trace-row[data-status="ok"] > summary > .trace-glyph {
+  color: #16a34a;
 }
 
-.tool-card.err .tool-card-badge {
-  background: rgba(220, 38, 38, 0.18);
-  color: #b91c1c;
+.trace-row[data-status="err"] > summary > .trace-glyph {
+  color: #dc2626;
 }
 
-.tool-card-preview {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11.5px;
-  color: var(--text-dim, #5b6b75);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 6em;
+@keyframes traceGlyphPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.trace-cmd {
+  flex: 0 0 auto;
+  color: var(--text, #1f2937);
+  font-weight: 500;
+}
+
+.trace-arg {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  opacity: 0.7;
+}
+
+.trace-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.trace-body {
+  margin: 2px 0 6px 18px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid currentColor;
+  border-left-color: rgba(15, 23, 42, 0.12);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-dim, #6b7280);
   opacity: 0.85;
+  max-height: 240px;
+  overflow: auto;
+}
+
+:root[data-theme="dark"] .trace-body {
+  border-left-color: rgba(255, 255, 255, 0.18);
 }
