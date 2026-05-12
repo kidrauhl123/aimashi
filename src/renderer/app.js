@@ -3701,10 +3701,15 @@ window.aimashi.onChatEvent((envelope) => {
       break;
     }
     case "complete":
-      state.streaming = null;
+      // Intentionally do NOT clear state.streaming here. The chatForm submit
+      // takes a snapshot AFTER chat:send resolves and BEFORE it clears
+      // state.streaming — that's the single source of truth for trace
+      // persistence. If we cleared on complete (which can arrive before
+      // chat:send resolves), the snapshot would be empty.
+      if (s.status) s.status = "";
       break;
     case "error":
-      state.streaming = null;
+      if (s.status) s.status = "";
       break;
     default:
       break;
