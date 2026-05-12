@@ -3538,6 +3538,7 @@ els.chatForm.addEventListener("submit", async (event) => {
       messages: history
     });
     const answer = response.choices?.[0]?.message?.content || "(No response)";
+    state.streaming = null;
     appendChat("assistant", answer);
     await persistSessionQuietly(session);
     persistReadStateQuietly();
