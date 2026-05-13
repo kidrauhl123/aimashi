@@ -2906,7 +2906,7 @@ body.topbar-click-capture .topbar {
   color: var(--text);
   text-align: left;
   font-size: 13px;
-  font-weight: 520;
+  font-weight: 400;
   transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -2918,7 +2918,7 @@ body.topbar-click-capture .topbar {
   box-shadow: none;
   background: var(--accent);
   color: #fff;
-  font-weight: 620;
+  font-weight: 400;
 }
 
 :root[data-list-style="flush"] .settings-tabs {
@@ -2981,7 +2981,7 @@ body.topbar-click-capture .topbar {
   gap: 5px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .settings-row {
@@ -3016,13 +3016,14 @@ body.topbar-click-capture .topbar {
   display: block;
   color: var(--text);
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .settings-row p {
   margin: 2px 0 0;
-  color: var(--muted);
+  color: var(--faint);
   font-size: 11px;
+  font-weight: 400;
   line-height: 1.35;
 }
 
@@ -3041,7 +3042,7 @@ body.topbar-click-capture .topbar {
   padding: 0 12px;
   border-radius: 8px;
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .settings-panel .primary:hover:not(:disabled) {
@@ -3058,7 +3059,7 @@ body.topbar-click-capture .topbar {
   background: rgb(0 0 0 / 0.055);
   color: var(--text);
   font-size: 12px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .settings-panel .secondary:hover:not(:disabled) {
@@ -3085,7 +3086,7 @@ body.topbar-click-capture .topbar {
   border-color: var(--line);
   border-radius: 8px;
   background: var(--surface-soft);
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .settings-content input:focus,
@@ -3097,7 +3098,7 @@ body.topbar-click-capture .topbar {
 .form-save-status {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 520;
+  font-weight: 400;
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -3111,15 +3112,12 @@ body.topbar-click-capture .topbar {
 }
 
 .settings-panel[data-settings-panel="model"] .form-grid,
-.settings-panel[data-settings-panel="runtime"] .runtime-card,
 .settings-panel[data-settings-panel="mobile"] .runtime-card {
   gap: 12px;
   padding: 0;
 }
 
 .settings-panel[data-settings-panel="model"] .primary,
-.settings-panel[data-settings-panel="runtime"] .primary,
-.settings-panel[data-settings-panel="runtime"] .secondary,
 .settings-panel[data-settings-panel="mobile"] .primary,
 .settings-panel[data-settings-panel="mobile"] .secondary {
   margin: 0;
@@ -3165,14 +3163,15 @@ body.topbar-click-capture .topbar {
 
 .connection-row-head strong {
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .connection-row-head p {
   max-width: 560px;
   margin: 2px 0 0;
-  color: var(--muted);
+  color: var(--faint);
   font-size: 11px;
+  font-weight: 400;
   line-height: 1.45;
 }
 
@@ -3200,7 +3199,7 @@ body.topbar-click-capture .topbar {
 }
 
 .connection-switch.active {
-  background: var(--accent-2);
+  background: var(--accent);
 }
 
 .connection-switch.active span {
@@ -3229,7 +3228,7 @@ body.topbar-click-capture .topbar {
   background: #fff;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .connection-qr svg {
@@ -3245,7 +3244,7 @@ body.topbar-click-capture .topbar {
   background: transparent;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .link-reveal:hover {
@@ -3258,7 +3257,7 @@ body.topbar-click-capture .topbar {
   width: min(460px, 100%);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .mobile-relay-url-field input {
@@ -3272,7 +3271,7 @@ body.topbar-click-capture .topbar {
   color: var(--text);
   font: inherit;
   font-size: 12px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .mobile-relay-url-field input:focus {
@@ -3290,7 +3289,7 @@ body.topbar-click-capture .topbar {
   color: var(--text);
   font: inherit;
   font-size: 12px;
-  font-weight: 520;
+  font-weight: 400;
   line-height: 1.35;
   overflow-wrap: anywhere;
   text-align: left;
@@ -3302,8 +3301,9 @@ body.topbar-click-capture .topbar {
 
 .pairing-hint {
   margin: 0;
-  color: var(--muted);
+  color: var(--faint);
   font-size: 11px;
+  font-weight: 400;
   line-height: 1.5;
 }
 
@@ -3344,7 +3344,7 @@ body.topbar-click-capture .topbar {
 
 .font-choice span {
   font-size: 11px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .font-choice small {
@@ -3478,7 +3478,7 @@ textarea:focus {
 .runtime-list dt {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .runtime-list dd {
@@ -3488,11 +3488,12 @@ textarea:focus {
 
 .model-select-field select {
   min-height: 34px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .connected-providers,
-.add-provider-panel {
+.add-provider-panel,
+.settings-runtime-block {
   grid-column: 1 / -1;
   display: grid;
   gap: 10px;
@@ -3506,12 +3507,19 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .model-section-title strong {
   color: var(--text);
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 400;
+}
+
+.model-section-title span {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .api-key-field.wide,
@@ -3591,13 +3599,13 @@ textarea:focus {
 .provider-main strong {
   color: var(--text);
   font-size: 12px;
-  font-weight: 560;
+  font-weight: 400;
 }
 
 .model-auth-state {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
 }
 
 .model-auth-state {
@@ -3627,6 +3635,10 @@ textarea:focus {
   gap: 8px;
 }
 
+.inline-auth strong {
+  font-weight: 400;
+}
+
 .check-dot {
   display: grid;
   place-items: center;
@@ -3636,7 +3648,7 @@ textarea:focus {
   background: var(--field);
   color: var(--faint);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .check-dot.authorized {
@@ -3647,7 +3659,7 @@ textarea:focus {
 .auth-status,
 .auth-code {
   color: var(--muted);
-  font-weight: 560;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 

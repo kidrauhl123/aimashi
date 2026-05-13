@@ -1935,6 +1935,10 @@ function render() {
 
 function renderView() {
   if (state.activeSettingsTab === "profile") state.activeSettingsTab = "appearance";
+  if (state.activeSettingsTab === "runtime") state.activeSettingsTab = "model";
+  if (!document.querySelector(`[data-settings-tab="${state.activeSettingsTab}"]`)) {
+    state.activeSettingsTab = "appearance";
+  }
   syncNarrowLayout();
   els.conversationSidebar?.classList.toggle("hidden", state.activeView !== "chat");
   els.contactsSidebar?.classList.toggle("hidden", state.activeView !== "contacts");

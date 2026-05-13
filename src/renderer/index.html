@@ -194,8 +194,7 @@
       <section class="settings-layout">
         <aside class="settings-tabs">
           <button class="settings-tab active" type="button" data-settings-tab="appearance">外观</button>
-          <button class="settings-tab" type="button" data-settings-tab="model">模型与登录</button>
-          <button class="settings-tab" type="button" data-settings-tab="runtime">Hermes Runtime</button>
+          <button class="settings-tab" type="button" data-settings-tab="model">模型</button>
           <button class="settings-tab" type="button" data-settings-tab="mobile">跨设备连接</button>
         </aside>
 
@@ -314,25 +313,26 @@
                 <pre id="codexLogs"></pre>
               </section>
               <button id="modelConnectButton" class="primary hidden" type="submit">连接提供商</button>
+              <section class="settings-runtime-block wide">
+                <div class="model-section-title">
+                  <strong>Hermes 本地运行时</strong>
+                  <span>Aimashi 自己管理的 Hermes 后端</span>
+                </div>
+                <dl class="runtime-list">
+                  <div><dt>Status</dt><dd id="engineStatus">Checking...</dd></div>
+                  <div><dt>Hermes Home</dt><dd id="hermesHome"></dd></div>
+                  <div><dt>Manifest</dt><dd id="manifestPath"></dd></div>
+                </dl>
+                <div class="inline-actions">
+                  <button id="initialize" class="secondary" type="button">Initialize</button>
+                  <button id="installEngine" class="secondary" type="button">Install Engine</button>
+                  <button id="startEngine" class="secondary" type="button">Start</button>
+                  <button id="stopEngine" class="secondary" type="button">Stop</button>
+                </div>
+                <article id="engineWarning" class="notice hidden">Engine 尚未安装到 Aimashi 私有 runtime。</article>
+                <pre id="engineLogs"></pre>
+              </section>
             </form>
-          </section>
-
-          <section class="settings-panel hidden" data-settings-panel="runtime">
-            <div class="runtime-card">
-              <dl class="runtime-list">
-                <div><dt>Status</dt><dd id="engineStatus">Checking...</dd></div>
-                <div><dt>Hermes Home</dt><dd id="hermesHome"></dd></div>
-                <div><dt>Manifest</dt><dd id="manifestPath"></dd></div>
-              </dl>
-              <div class="inline-actions">
-                <button id="initialize" class="secondary" type="button">Initialize</button>
-                <button id="installEngine" class="secondary" type="button">Install Engine</button>
-                <button id="startEngine" class="secondary" type="button">Start</button>
-                <button id="stopEngine" class="secondary" type="button">Stop</button>
-              </div>
-              <article id="engineWarning" class="notice hidden">Engine 尚未安装到 Aimashi 私有 runtime。</article>
-              <pre id="engineLogs"></pre>
-            </div>
           </section>
 
           <section class="settings-panel hidden" data-settings-panel="mobile">
