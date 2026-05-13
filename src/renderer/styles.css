@@ -20,6 +20,8 @@
   --faint: rgba(0, 0, 0, 0.36);
   --accent: #5e5ce6;
   --accent-2: #30d158;
+  --user-bubble: #dedcff;
+  --user-bubble-text: rgba(0, 0, 0, 0.90);
   --danger: #d14343;
   --warn: #9a5a00;
   --warn-bg: #fff6df;
@@ -46,6 +48,8 @@
   --faint: rgba(255, 255, 255, 0.44);
   --accent: #7c74ff;
   --accent-2: #30d158;
+  --user-bubble: #dedcff;
+  --user-bubble-text: rgba(0, 0, 0, 0.90);
   --warn: #f6b954;
   --warn-bg: #302713;
   --code-bg: #111318;
@@ -1839,11 +1843,13 @@ body.topbar-click-capture .topbar {
 }
 
 .user .bubble {
-  background: rgb(var(--accent-rgb) / 0.32);
+  background: var(--user-bubble);
+  color: var(--user-bubble-text);
 }
 
 :root[data-theme="dark"] .user .bubble {
-  background: rgb(var(--accent-rgb) / 0.40);
+  background: var(--user-bubble);
+  color: var(--user-bubble-text);
 }
 
 :root[data-theme="dark"] .message-time {
@@ -3003,7 +3009,8 @@ body.topbar-click-capture .topbar {
 }
 
 .settings-row:last-of-type,
-.settings-row.accent-settings-row {
+.settings-row.accent-settings-row,
+.settings-row.appearance-last-row {
   border-bottom: 1px solid var(--line);
   border-radius: 0 0 12px 12px;
 }
@@ -3109,6 +3116,14 @@ body.topbar-click-capture .topbar {
 
 .form-save-status[data-kind="error"] {
   color: var(--danger);
+}
+
+.appearance-autosave-status {
+  justify-self: end;
+  min-height: 18px;
+  margin-top: 7px;
+  padding-right: 2px;
+  font-size: 11px;
 }
 
 .settings-panel[data-settings-panel="model"] .form-grid,

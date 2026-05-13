@@ -16,6 +16,8 @@ const SIDEBAR_WIDTH_MAX = 380;
 const SIDEBAR_WIDTH_DEFAULT = 280;
 const scrollbarTimers = new WeakMap();
 let appearanceSaveStatusTimer = 0;
+let appearanceAutoSaveTimer = 0;
+let appearanceAutoSaveSeq = 0;
 const qrSvgCache = new Map();
 
 function clampSidebarWidth(value) {
@@ -240,6 +242,9 @@ const els = {
   appearanceAccentColor: document.getElementById("appearanceAccentColor"),
   appearanceAccentPreview: document.getElementById("appearanceAccentPreview"),
   appearanceAccentReset: document.getElementById("appearanceAccentReset"),
+  appearanceUserBubbleColor: document.getElementById("appearanceUserBubbleColor"),
+  appearanceUserBubblePreview: document.getElementById("appearanceUserBubblePreview"),
+  appearanceUserBubbleReset: document.getElementById("appearanceUserBubbleReset"),
   appearanceSaveStatus: document.getElementById("appearanceSaveStatus"),
   authMethod: document.getElementById("authMethod"),
   modelPreset: document.getElementById("modelPreset"),
@@ -960,6 +965,7 @@ const fontPresets = {
 };
 
 const DEFAULT_ACCENT_COLOR = "#5e5ce6";
+const DEFAULT_USER_BUBBLE_COLOR = "#dedcff";
 const DEFAULT_LIST_STYLE = "card";
 const DEFAULT_SELECTION_STYLE = "soft";
 
@@ -1017,6 +1023,9 @@ function applyAppearance(appearance = {}) {
   const theme = appearance.theme === "dark" ? "dark" : "light";
   const accentColor = normalizeHexColor(appearance.accentColor);
   const rgb = hexToRgb(accentColor);
+  const userBubbleColor = normalizeHexColor(appearance.userBubbleColor, DEFAULT_USER_BUBBLE_COLOR);
+  const userBubbleRgb = hexToRgb(userBubbleColor);
+  const userBubbleText = selectionTextColors(userBubbleRgb).text;
   const listStyle = normalizeListStyle(appearance.listStyle);
   const selectionStyle = normalizeSelectionStyle(appearance.selectionStyle);
   const softActive = `rgb(${rgb.r} ${rgb.g} ${rgb.b} / ${theme === "dark" ? "0.22" : "0.16"})`;
@@ -1027,6 +1036,8 @@ function applyAppearance(appearance = {}) {
   document.documentElement.style.setProperty("--accent", accentColor);
   document.documentElement.style.setProperty("--accent-rgb", `${rgb.r} ${rgb.g} ${rgb.b}`);
   document.documentElement.style.setProperty("--active", softActive);
+  document.documentElement.style.setProperty("--user-bubble", userBubbleColor);
+  document.documentElement.style.setProperty("--user-bubble-text", userBubbleText);
   if (selectionStyle === "solid") {
     const textColors = selectionTextColors(rgb);
     document.documentElement.style.setProperty("--list-active", accentColor);
@@ -1046,6 +1057,7 @@ function currentAppearanceDraft() {
     theme: els.appearanceTheme?.value || "light",
     fontPreset: els.appearanceFontPreset?.value || "system",
     accentColor: normalizeHexColor(els.appearanceAccentColor?.value),
+    userBubbleColor: normalizeHexColor(els.appearanceUserBubbleColor?.value, DEFAULT_USER_BUBBLE_COLOR),
     listStyle: normalizeListStyle(els.appearanceListStyle?.value),
     selectionStyle: normalizeSelectionStyle(els.appearanceSelectionStyle?.value)
   };
@@ -1076,6 +1088,47 @@ function syncAppearanceControls(appearance = currentAppearanceDraft()) {
   const accentColor = normalizeHexColor(appearance.accentColor);
   if (els.appearanceAccentColor) els.appearanceAccentColor.value = accentColor;
   if (els.appearanceAccentPreview) els.appearanceAccentPreview.style.backgroundColor = accentColor;
+  const userBubbleColor = normalizeHexColor(appearance.userBubbleColor, DEFAULT_USER_BUBBLE_COLOR);
+  if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = userBubbleColor;
+  if (els.appearanceUserBubblePreview) els.appearanceUserBubblePreview.style.backgroundColor = userBubbleColor;
+}
+
+function mergeRuntimeAppearance(appearance) {
+  state.runtime = {
+    ...(state.runtime || {}),
+    appearance: {
+      ...(state.runtime?.appearance || {}),
+      ...appearance
+    }
+  };
+}
+
+async function persistAppearanceDraft(appearance) {
+  if (!window.aimashi?.saveAppearance) return;
+  const seq = ++appearanceAutoSaveSeq;
+  try {
+    const runtime = await window.aimashi.saveAppearance(appearance);
+    if (seq !== appearanceAutoSaveSeq) return;
+    state.runtime = runtime;
+    applyAppearance(runtime.appearance || appearance);
+    showAppearanceSaveStatus("已保存");
+  } catch (error) {
+    console.error(error);
+    showAppearanceSaveStatus("保存失败", "error");
+  }
+}
+
+function scheduleAppearanceSave(delay = 160) {
+  const next = currentAppearanceDraft();
+  applyAppearance(next);
+  syncAppearanceControls(next);
+  mergeRuntimeAppearance(next);
+  showAppearanceSaveStatus("正在保存...");
+  if (appearanceAutoSaveTimer) window.clearTimeout(appearanceAutoSaveTimer);
+  appearanceAutoSaveTimer = window.setTimeout(() => {
+    appearanceAutoSaveTimer = 0;
+    persistAppearanceDraft(currentAppearanceDraft());
+  }, delay);
 }
 
 function initials(name) {
@@ -1756,6 +1809,7 @@ function render() {
     theme: "light",
     fontPreset: "system",
     accentColor: DEFAULT_ACCENT_COLOR,
+    userBubbleColor: DEFAULT_USER_BUBBLE_COLOR,
     listStyle: DEFAULT_LIST_STYLE,
     selectionStyle: DEFAULT_SELECTION_STYLE
   };
@@ -4191,76 +4245,48 @@ els.profileForm?.addEventListener("submit", async (event) => {
 
 els.appearanceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const next = currentAppearanceDraft();
-  const submitButton = els.appearanceForm.querySelector('button[type="submit"]');
-  const previousText = submitButton?.textContent || "保存外观";
-  applyAppearance(next);
-  showAppearanceSaveStatus("正在保存...");
-  if (submitButton) {
-    submitButton.disabled = true;
-    submitButton.textContent = "保存中";
-  }
-  try {
-    state.runtime = await window.aimashi.saveAppearance(next);
-    render();
-    showAppearanceSaveStatus("已保存");
-    if (submitButton) submitButton.textContent = "已保存";
-    window.setTimeout(() => {
-      if (submitButton) submitButton.textContent = previousText;
-    }, 1000);
-  } catch (error) {
-    console.error(error);
-    showAppearanceSaveStatus("保存失败", "error");
-    if (submitButton) submitButton.textContent = previousText;
-  } finally {
-    if (submitButton) submitButton.disabled = false;
-  }
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceTheme.addEventListener("change", () => {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceFontPreset.addEventListener("change", () => {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceFontChoices?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-font-preset]");
   if (!button || !els.appearanceFontChoices.contains(button)) return;
   els.appearanceFontPreset.value = button.dataset.fontPreset || "system";
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceListStyle?.addEventListener("change", () => {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceSelectionStyle?.addEventListener("change", () => {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
 });
 
 els.appearanceAccentColor?.addEventListener("input", () => {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave();
 });
 
 els.appearanceAccentReset?.addEventListener("click", () => {
   if (els.appearanceAccentColor) els.appearanceAccentColor.value = DEFAULT_ACCENT_COLOR;
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
+  scheduleAppearanceSave(0);
+});
+
+els.appearanceUserBubbleColor?.addEventListener("input", () => {
+  scheduleAppearanceSave();
+});
+
+els.appearanceUserBubbleReset?.addEventListener("click", () => {
+  if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = DEFAULT_USER_BUBBLE_COLOR;
+  scheduleAppearanceSave(0);
 });
 
 els.fellowForm?.addEventListener("submit", async (event) => {

@@ -249,10 +249,10 @@
                   <option value="solid">实色</option>
                 </select>
               </section>
-              <section class="settings-row accent-settings-row">
+              <section class="settings-row">
                 <div>
                   <strong>主题色</strong>
-                  <p>影响选中状态、链接、按钮和用户消息气泡。</p>
+                  <p>影响选中状态、链接和按钮。</p>
                 </div>
                 <div class="accent-picker">
                   <button id="appearanceAccentReset" class="icon-button" type="button" title="恢复默认主题色" aria-label="恢复默认主题色">↺</button>
@@ -262,10 +262,20 @@
                   </label>
                 </div>
               </section>
-              <div class="settings-actions">
-                <span id="appearanceSaveStatus" class="form-save-status" role="status" aria-live="polite"></span>
-                <button class="primary" type="submit">保存外观</button>
-              </div>
+              <section class="settings-row appearance-last-row">
+                <div>
+                  <strong>用户气泡</strong>
+                  <p>只影响你发出的消息气泡。</p>
+                </div>
+                <div class="accent-picker">
+                  <button id="appearanceUserBubbleReset" class="icon-button" type="button" title="恢复默认用户气泡" aria-label="恢复默认用户气泡">↺</button>
+                  <label class="accent-swatch" title="选择用户气泡颜色">
+                    <span id="appearanceUserBubblePreview"></span>
+                    <input id="appearanceUserBubbleColor" type="color" value="#dedcff" aria-label="用户消息气泡底色">
+                  </label>
+                </div>
+              </section>
+              <span id="appearanceSaveStatus" class="form-save-status appearance-autosave-status" role="status" aria-live="polite"></span>
             </form>
           </section>
 

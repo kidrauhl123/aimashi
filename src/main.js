@@ -225,6 +225,7 @@ function defaultAppearanceSettings() {
     theme: "light",
     fontPreset: "system",
     accentColor: "#5e5ce6",
+    userBubbleColor: "#dedcff",
     listStyle: "card",
     selectionStyle: "soft"
   };
@@ -5339,12 +5340,15 @@ ipcMain.handle("appearance:save", (_event, settings) => {
   const theme = String(settings.theme || current.theme || "light").trim();
   const fontPreset = String(settings.fontPreset || current.fontPreset || "system").trim();
   const accentColor = String(settings.accentColor || current.accentColor || "#5e5ce6").trim();
+  const userBubbleColor = String(settings.userBubbleColor || current.userBubbleColor || "#dedcff").trim();
   const listStyle = String(settings.listStyle || current.listStyle || "card").trim();
   const selectionStyle = String(settings.selectionStyle || current.selectionStyle || "soft").trim();
+  const validHex = (value, fallback) => /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback;
   const next = {
     theme: ["light", "dark"].includes(theme) ? theme : "light",
     fontPreset: ["system", "sf-pro", "pingfang", "mono"].includes(fontPreset) ? fontPreset : "system",
-    accentColor: /^#[0-9a-fA-F]{6}$/.test(accentColor) ? accentColor.toLowerCase() : "#5e5ce6",
+    accentColor: validHex(accentColor, "#5e5ce6"),
+    userBubbleColor: validHex(userBubbleColor, "#dedcff"),
     listStyle: ["card", "flush"].includes(listStyle) ? listStyle : "card",
     selectionStyle: ["soft", "solid"].includes(selectionStyle) ? selectionStyle : "soft"
   };
