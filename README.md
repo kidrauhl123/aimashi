@@ -100,12 +100,16 @@ Aimashi 是一个基于 Electron 的桌面应用。
 ##### （六）桌宠功能
 
 - 基于多伙伴设定，每个 Fellow 都可以生成一个桌宠。
-- 桌宠资产优先查找：
+- 桌宠播放窗口在 Aimashi 内部实现，使用透明 Electron 窗口播放 `pet.json` + `spritesheet.webp/png`。
+- 桌宠生成器已经内置在：
+	- `resources/pet-generator`
+- 生成结果默认写入：
 	- `runtime/engine-home/pets`
+- 兼容读取：
 	- `~/.alkaka/pets`
 	- `~/.codex/pets`
-- 生成流程当前调用本机 `~/github/alkaka-pet/pet-app/hatch_generate.py`。
-- 因此桌宠生成现在偏开发环境能力，正式发布前需要改成随包工具或云端任务。
+- 生成仍依赖用户本机可用的 Codex CLI imagegen 能力。
+- 生成脚本依赖 Python 和 Pillow；正式发布最好复用随包 Python runtime，避免新用户缺依赖。
 
 ##### （七）多端互通
 
@@ -143,10 +147,10 @@ AIMASHI_PYTHON=/path/to/python3.11 npm start
 
 ##### （九）当前发布缺口
 
-1. 还没有 Electron 打包配置。
+1. Electron 打包配置已接入，当前先做 macOS unsigned dmg。
 2. 还没有把 Hermes runtime 作为安装包资源内置。
 3. 首次安装 Hermes 依赖用户机器有 Python 3.11+、pip 和可访问 GitHub 的网络。
-4. 桌宠生成依赖本机 `alkaka-pet` checkout。
+4. 桌宠生成器已内置，但仍依赖 Codex CLI imagegen、Python 和 Pillow。
 5. macOS 签名、公证、自动更新还没有接入。
 
 发布前最重要的是先补 runtime 封装：构建阶段固定 Hermes 版本，生成 `vendor/hermes-runtime/current`，打包进 App；首次启动只初始化 `engine-home`，不要现场下载 Hermes。

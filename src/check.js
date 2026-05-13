@@ -11,7 +11,16 @@ const required = [
   "src/mobile/index.html",
   "src/mobile/app.js",
   "src/mobile/styles.css",
-  "src/relay/server.js"
+  "src/relay/server.js",
+  "scripts/create-mac-dmg.js",
+  "resources/pet-generator/hatch_generate.py",
+  "resources/pet-generator/petctl.py",
+  "resources/pet-generator/skills/alkaka-friend-pet/SKILL.md",
+  "resources/pet-generator/skills/alkaka-friend-pet/assets/alkaka-style-reference.jpg",
+  "resources/pet-generator/skills/alkaka-friend-pet/scripts/prepare_pet_run.py",
+  "resources/pet-generator/skills/alkaka-friend-pet/scripts/finalize_pet_run.py",
+  "resources/pet-generator/skills/alkaka-friend-pet/scripts/package_custom_pet.py",
+  "resources/pet-generator/skills/alkaka-friend-pet/scripts/record_imagegen_result.py"
 ];
 
 for (const file of required) {

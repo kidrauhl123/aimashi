@@ -2,21 +2,60 @@
   "name": "aimashi",
   "version": "0.1.0",
   "private": true,
+  "productName": "Aimashi",
   "description": "Aimashi desktop demo with an app-owned Hermes runtime home.",
   "main": "src/main.js",
   "scripts": {
     "open": "electron .",
     "start": "electron .",
     "relay": "node src/relay/server.js",
-    "check": "node src/check.js"
+    "check": "node src/check.js",
+    "pack": "electron-builder --dir",
+    "dist": "npm run dist:mac",
+    "dist:mac": "electron-builder --mac dir && node scripts/create-mac-dmg.js"
   },
   "devDependencies": {
-    "electron": "^39.2.6"
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.139",
     "@openai/codex-sdk": "^0.130.0",
     "qrcode": "^1.5.4",
     "ws": "^8.20.1"
+  },
+  "build": {
+    "appId": "ai.aimashi.app",
+    "productName": "Aimashi",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "files": [
+      "package.json",
+      "src/**/*",
+      "!src/**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/pet-generator",
+        "to": "pet-generator",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "sign": false
+    }
   }
 }

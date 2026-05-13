@@ -1113,16 +1113,7 @@ function saveChatAttachment(input = {}) {
 function styleSettingsForPet(stylePreset) {
   const preset = String(stylePreset || "codex").trim();
   if (preset === "alkaka") {
-    const styleReference = path.join(
-      app.getPath("home"),
-      "github",
-      "alkaka-pet",
-      "pet-app",
-      "skills",
-      "alkaka-friend-pet",
-      "assets",
-      "alkaka-style-reference.jpg"
-    );
+    const styleReference = path.join(petGeneratorRoot(), "skills", "alkaka-friend-pet", "assets", "alkaka-style-reference.jpg");
     return {
       styleNotes: "Alkaka Q版贴纸风：紧凑可爱的伙伴桌宠，清晰线条，大眼睛，保留头像身份特征，适合 192x208 小尺寸动画。",
       styleContract: "Cute anime sticker-like partner desktop pet, compact chibi proportions, clean dark linework, soft cel shading, readable at 192x208 cells. Avoid realistic rendering, scene backgrounds, tiny noisy detail, shadows, glows, text, and UI elements.",
@@ -1141,6 +1132,15 @@ function styleSettingsForPet(stylePreset) {
     styleContract: "Codex built-in digital pet style: small pixel-art-adjacent mascot, compact chibi proportions, chunky readable silhouette, thick dark outline, limited palette, flat cel shading, transparent sprite atlas.",
     styleReferences: []
   };
+}
+
+function petGeneratorRoot() {
+  const candidates = [
+    path.join(app.getAppPath(), "resources", "pet-generator"),
+    path.join(process.resourcesPath || "", "pet-generator"),
+    path.join(__dirname, "..", "resources", "pet-generator")
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(path.join(candidate, "hatch_generate.py"))) || candidates[0];
 }
 
 function buildFellowPetPrompt(fellow, userPrompt = "") {
@@ -1232,8 +1232,9 @@ function startFellowPetGeneration(input = {}) {
   const manifest = loadFellowManifest();
   const fellow = (manifest.fellows || []).find((item) => item.key === key);
   if (!fellow) throw new Error("Fellow not found.");
-  const script = path.join(app.getPath("home"), "github", "alkaka-pet", "pet-app", "hatch_generate.py");
-  if (!fs.existsSync(script)) throw new Error(`AlkakaPet generator not found: ${script}`);
+  const generatorRoot = petGeneratorRoot();
+  const script = path.join(generatorRoot, "hatch_generate.py");
+  if (!fs.existsSync(script)) throw new Error(`Aimashi pet generator not found: ${script}`);
 
   const p = runtimePaths();
   const jobId = crypto.randomUUID();
@@ -1256,7 +1257,7 @@ function startFellowPetGeneration(input = {}) {
     status: "running",
     startedAt: new Date().toISOString(),
     runDir,
-    packageDir: path.join(app.getPath("home"), ".alkaka", "pets", petId),
+    packageDir: path.join(p.petDir, petId),
     logPath: path.join(runDir, "generation.log"),
     userPrompt,
     stylePreset,
@@ -1275,13 +1276,15 @@ function startFellowPetGeneration(input = {}) {
     "--style-notes", style.styleNotes,
     "--style-contract", style.styleContract,
     "--row-concurrency", "3",
-    "--run-dir", runDir
+    "--run-dir", runDir,
+    "--package-dir", path.join(p.petDir, petId),
+    "--no-partial-preview"
   ];
   for (const reference of references) args.push("--reference", reference);
   for (const reference of style.styleReferences) args.push("--style-reference", reference);
 
   const child = spawn("python3", args, {
-    cwd: path.dirname(path.dirname(script)),
+    cwd: generatorRoot,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"]
   });

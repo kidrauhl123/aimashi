@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alkaka Friend Pet"
+  short_description: "Generate Alkaka partner desktop pet spritesheets"
+  default_prompt: "Generate an Alkaka partner/friend desktop pet from a concept, reference images, or both. Infer missing names/descriptions, use $imagegen for the base and grounded row strips, skip all running rows, then use this skill's deterministic scripts to ingest outputs, validate frames, assemble the compatibility spritesheet, and package the pet."
