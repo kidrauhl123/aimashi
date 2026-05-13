@@ -226,6 +226,9 @@ function defaultAppearanceSettings() {
     fontPreset: "system",
     accentColor: "#5e5ce6",
     userBubbleColor: "#dedcff",
+    showHoverBackground: true,
+    showUserAvatar: true,
+    showAssistantAvatar: true,
     listStyle: "card",
     selectionStyle: "soft"
   };
@@ -502,15 +505,30 @@ function agentSessionKey(engine, fellowKey, sessionId) {
 }
 
 function getAgentSessionId(engine, fellowKey, sessionId) {
-  const store = loadAgentSessionMap();
-  return String(store[agentSessionKey(engine, fellowKey, sessionId)] || "").trim();
+  return getAgentSessionEntry(engine, fellowKey, sessionId).id;
 }
 
 function setAgentSessionId(engine, fellowKey, sessionId, externalSessionId) {
+  setAgentSessionEntry(engine, fellowKey, sessionId, externalSessionId, "");
+}
+
+function getAgentSessionEntry(engine, fellowKey, sessionId) {
+  const store = loadAgentSessionMap();
+  const entry = store[agentSessionKey(engine, fellowKey, sessionId)];
+  if (!entry) return { id: "", fingerprint: "" };
+  if (typeof entry === "string") return { id: entry.trim(), fingerprint: "" };
+  return {
+    id: String(entry.id || "").trim(),
+    fingerprint: String(entry.fingerprint || "").trim()
+  };
+}
+
+function setAgentSessionEntry(engine, fellowKey, sessionId, externalSessionId, fingerprint) {
   const id = String(externalSessionId || "").trim();
   if (!id) return;
+  const fp = String(fingerprint || "").trim();
   const store = loadAgentSessionMap();
-  store[agentSessionKey(engine, fellowKey, sessionId)] = id;
+  store[agentSessionKey(engine, fellowKey, sessionId)] = fp ? { id, fingerprint: fp } : id;
   saveAgentSessionMap(store);
 }
 
@@ -549,7 +567,7 @@ function defaultFellowManifest() {
         platform: "api_server",
         color: "#0f766e",
         avatarImage: "",
-        avatarCrop: { x: 50, y: 50, offsetX: 0, offsetY: 0, zoom: 1 },
+        avatarCrop: { x: 50, y: 50, zoom: 1 },
         bio: "Aimashi App 里的第一个本地伙伴"
       }
     ]
@@ -641,8 +659,6 @@ function normalizeAvatarCrop(input = {}) {
   return {
     x: num(value.x, 50, 0, 100),
     y: num(value.y, 50, 0, 100),
-    offsetX: num(value.offsetX, 0, -320, 320),
-    offsetY: num(value.offsetY, 0, -320, 320),
     zoom: num(value.zoom, 1, 1, 2.4)
   };
 }
@@ -810,7 +826,7 @@ function fellowMetadata(fellow) {
     engine_config: normalizeFellowEngineConfig(fellow.engineConfig || fellow.engine_config),
     accent_color: fellow.color || "#0f766e",
     avatar_image: fellow.avatarImage || "",
-    avatar_crop: fellow.avatarCrop || { x: 50, y: 50, offsetX: 0, offsetY: 0, zoom: 1 },
+    avatar_crop: fellow.avatarCrop || { x: 50, y: 50, zoom: 1 },
     pinned: Boolean(fellow.pinned),
     pinned_at: fellow.pinnedAt || "",
     bio: fellow.bio || "",
@@ -1446,6 +1462,72 @@ function migrateLegacyPersonas(created) {
   }
 }
 
+function ensureClaudeBridgePlugin() {
+  const p = runtimePaths();
+  const bridgeDir = path.join(p.runtime, "claude-bridge-plugin");
+  const manifestDir = path.join(bridgeDir, ".claude-plugin");
+  const manifestPath = path.join(manifestDir, "plugin.json");
+  const bridgeSkillsDir = path.join(bridgeDir, "skills");
+
+  fs.mkdirSync(manifestDir, { recursive: true });
+  if (!fs.existsSync(manifestPath)) {
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      name: "aimashi-skills",
+      version: "1.0.0",
+      description: "Aimashi bridge: surfaces Hermes runtime skills to Claude Code engine."
+    }, null, 2) + "\n");
+  }
+
+  fs.rmSync(bridgeSkillsDir, { recursive: true, force: true });
+  fs.mkdirSync(bridgeSkillsDir, { recursive: true });
+
+  const sourceRoots = [
+    { key: "aimashi", root: path.join(p.home, "skills") },
+    { key: "hermes", root: path.join(os.homedir(), ".hermes", "skills") }
+  ];
+  const seen = new Set();
+  for (const source of sourceRoots) {
+    const root = source.root;
+    if (!fs.existsSync(root)) continue;
+    let categories = [];
+    try { categories = fs.readdirSync(root); } catch { continue; }
+    for (const category of categories) {
+      const categoryPath = path.join(root, category);
+      let stat;
+      try { stat = fs.statSync(categoryPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let skills = [];
+      try { skills = fs.readdirSync(categoryPath); } catch { continue; }
+      for (const skill of skills) {
+        const skillPath = path.join(categoryPath, skill);
+        let skillStat;
+        try { skillStat = fs.statSync(skillPath); } catch { continue; }
+        if (!skillStat.isDirectory()) continue;
+        if (!fs.existsSync(path.join(skillPath, "SKILL.md"))) continue;
+        const candidates = [
+          skill,
+          `${source.key}-${skill}`,
+          skill.startsWith(`${category}-`) ? `${source.key}-${category}-${skill}` : `${category}-${skill}`
+        ];
+        const linkName = candidates.find((candidate) => !seen.has(candidate));
+        if (!linkName) continue;
+        seen.add(linkName);
+        try {
+          fs.symlinkSync(skillPath, path.join(bridgeSkillsDir, linkName), "dir");
+        } catch {
+          // ignore individual symlink failures (FS permission, exists, etc.)
+        }
+      }
+    }
+  }
+  const fingerprint = crypto
+    .createHash("sha256")
+    .update([...seen].sort().join("\n"))
+    .digest("hex")
+    .slice(0, 16);
+  return { path: bridgeDir, fingerprint };
+}
+
 function initializeRuntime() {
   const p = runtimePaths();
   const created = [];
@@ -1475,8 +1557,9 @@ function initializeRuntime() {
     apiKey = fs.readFileSync(p.apiKey, "utf8").trim();
   }
 
-  if (!fs.existsSync(p.config)) {
-    writeRuntimeConfig(8642);
+  const configExisted = fs.existsSync(p.config);
+  writeRuntimeConfig(readConfiguredPort());
+  if (!configExisted) {
     created.push("runtime/engine-home/config.yaml");
   }
 
@@ -1538,6 +1621,12 @@ function initializeRuntime() {
   }
 
   migrateLegacyPersonas(created);
+
+  try {
+    ensureClaudeBridgePlugin();
+  } catch (error) {
+    appendEngineLog(`Claude bridge plugin setup failed: ${error?.message || error}`);
+  }
 
   return getRuntimeStatus(created);
 }
@@ -1661,6 +1750,35 @@ function connectedProviderSummaries(codexAuth = getCodexAuthStatus()) {
   return summaries.sort((a, b) => String(a.providerLabel).localeCompare(String(b.providerLabel)));
 }
 
+function externalSkillDirs() {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".hermes", "skills"),
+    path.join(home, ".claude", "skills"),
+    path.join(home, ".codex", "skills")
+  ];
+  const registry = readJson(path.join(home, ".claude", "plugins", "installed_plugins.json"), {});
+  for (const installs of Object.values(registry.plugins || {})) {
+    for (const install of Array.isArray(installs) ? installs : []) {
+      const installPath = String(install?.installPath || "").trim();
+      if (!installPath) continue;
+      candidates.push(path.join(installPath, "skills"));
+    }
+  }
+  const seen = new Set();
+  const result = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    try {
+      if (fs.statSync(candidate).isDirectory()) result.push(candidate);
+    } catch {
+      // skip missing/inaccessible paths
+    }
+  }
+  return result;
+}
+
 function writeRuntimeConfig(port) {
   const p = runtimePaths();
   const settings = modelSettings();
@@ -1699,7 +1817,16 @@ function writeRuntimeConfig(port) {
     "",
     "agent:",
     `  reasoning_effort: ${JSON.stringify(reasoningEffort)}`,
-    "",
+    ""
+  );
+  const extDirs = externalSkillDirs();
+  if (extDirs.length) {
+    lines.push("skills:");
+    lines.push("  external_dirs:");
+    for (const dir of extDirs) lines.push(`    - ${JSON.stringify(dir)}`);
+    lines.push("");
+  }
+  lines.push(
     "aimashi:",
     "  runtime_schema: 1",
     "  fellows_manifest: fellows/manifest.json",
@@ -2383,46 +2510,482 @@ function findSkillFiles(root, maxDepth = 8) {
   return files;
 }
 
-function loadLocalSkills() {
-  const roots = skillRoots();
-  const skills = [];
-  const seenNames = new Set();
+function countDirectoryFiles(dir, predicate = () => true, maxDepth = 2) {
+  let count = 0;
+  function walk(current, depth) {
+    if (depth > maxDepth) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.isFile() && predicate(full, entry)) count += 1;
+    }
+  }
+  walk(dir, 0);
+  return count;
+}
+
+function simpleYamlValue(text, key) {
+  const match = String(text || "").match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+  return match ? cleanYamlScalar(match[1]) : "";
+}
+
+function simpleYamlList(text, key) {
+  const lines = String(text || "").split(/\r?\n/);
+  const out = [];
+  let inList = false;
+  for (const line of lines) {
+    if (new RegExp(`^${key}:\\s*$`).test(line)) {
+      inList = true;
+      continue;
+    }
+    if (!inList) continue;
+    if (/^\S/.test(line)) break;
+    const item = line.match(/^\s*-\s+(.+)$/);
+    if (item) out.push(cleanYamlScalar(item[1]));
+  }
+  return out;
+}
+
+function readClaudeInstalledPlugins() {
+  const home = os.homedir();
+  const registry = readJson(path.join(home, ".claude", "plugins", "installed_plugins.json"), {});
+  const out = [];
+  for (const [qualifiedName, installs] of Object.entries(registry.plugins || {})) {
+    for (const install of Array.isArray(installs) ? installs : []) {
+      const installPath = String(install?.installPath || "").trim();
+      if (!installPath) continue;
+      const manifest = readJson(path.join(installPath, ".claude-plugin", "plugin.json"), {});
+      const bareName = String(manifest.name || qualifiedName.split("@")[0]).trim() || qualifiedName;
+      out.push({ qualifiedName, install, installPath, manifest, name: bareName });
+    }
+  }
+  return out;
+}
+
+function readCodexPluginManifests() {
+  const root = path.join(os.homedir(), ".codex", ".tmp", "plugins", "plugins");
+  if (!fs.existsSync(root)) return [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const installPath = path.join(root, entry.name);
+      const manifest = readJson(path.join(installPath, ".codex-plugin", "plugin.json"), null);
+      if (!manifest) return null;
+      const name = String(manifest.name || entry.name).trim() || entry.name;
+      const appConfig = readJson(path.join(installPath, ".app.json"), {});
+      return { name, installPath, manifest, appConfig };
+    })
+    .filter(Boolean);
+}
+
+function readHermesPluginManifests() {
+  const home = os.homedir();
+  const roots = [
+    { scope: "builtin", label: "Hermes 内置插件", root: path.join(home, ".hermes", "hermes-agent", "plugins") },
+    { scope: "user", label: "Hermes 用户插件", root: path.join(home, ".hermes", "plugins") }
+  ];
+  const out = [];
   for (const rootInfo of roots) {
     if (!fs.existsSync(rootInfo.root)) continue;
-    for (const filePath of findSkillFiles(rootInfo.root)) {
+    const stack = [{ dir: rootInfo.root, depth: 0 }];
+    while (stack.length) {
+      const { dir, depth } = stack.pop();
+      if (depth > 3) continue;
+      let entries = [];
       try {
-        const skill = parseSkillMarkdown(filePath, rootInfo);
-        const nameKey = skill.name.toLowerCase();
-        if (rootInfo.source !== "aimashi" && seenNames.has(nameKey)) continue;
-        seenNames.add(nameKey);
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (!entry.isDirectory()) continue;
+        const manifestPath = path.join(full, "plugin.yaml");
+        if (!fs.existsSync(manifestPath)) {
+          stack.push({ dir: full, depth: depth + 1 });
+          continue;
+        }
+        let raw = "";
+        try {
+          raw = fs.readFileSync(manifestPath, "utf8");
+        } catch {
+          raw = "";
+        }
+        out.push({
+          scope: rootInfo.scope,
+          scopeLabel: rootInfo.label,
+          name: simpleYamlValue(raw, "name") || entry.name,
+          installPath: full,
+          manifestPath,
+          description: simpleYamlValue(raw, "description"),
+          kind: simpleYamlValue(raw, "kind"),
+          version: simpleYamlValue(raw, "version"),
+          tools: simpleYamlList(raw, "provides_tools"),
+          hooks: simpleYamlList(raw, "hooks"),
+          platforms: simpleYamlList(raw, "platforms")
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function extensionCapabilitySummary(extension) {
+  const parts = [];
+  if (extension.skillCount) parts.push(`${extension.skillCount} Skills`);
+  if (extension.commandCount) parts.push(`${extension.commandCount} Commands`);
+  if (extension.agentCount) parts.push(`${extension.agentCount} Agents`);
+  if (extension.toolCount) parts.push(`${extension.toolCount} Tools`);
+  if (extension.hookCount) parts.push(`${extension.hookCount} Hooks`);
+  if (extension.mcpCount) parts.push(`${extension.mcpCount} MCP`);
+  return parts.join(" · ") || extension.status || "已发现";
+}
+
+function enumerateExtensions() {
+  const extensions = [];
+  for (const item of readClaudeInstalledPlugins()) {
+    const skillsRoot = path.join(item.installPath, "skills");
+    extensions.push({
+      id: `claude:${item.qualifiedName}`,
+      kind: "plugin",
+      engine: "claude-code",
+      engineLabel: "Claude Code",
+      source: "claude",
+      name: item.name,
+      label: item.name,
+      qualifiedName: item.qualifiedName,
+      description: String(item.manifest.description || "").trim(),
+      version: String(item.install.version || item.manifest.version || "").trim(),
+      root: item.installPath,
+      skillRoot: skillsRoot,
+      skillCount: findSkillFiles(skillsRoot).length,
+      commandCount: countDirectoryFiles(path.join(item.installPath, "commands"), (file) => /\.md$/.test(file), 1),
+      agentCount: countDirectoryFiles(path.join(item.installPath, "agents"), (file) => /\.md$/.test(file), 1),
+      hookCount: countDirectoryFiles(path.join(item.installPath, "hooks"), (file) => /\.md$/.test(file), 1),
+      mcpCount: countDirectoryFiles(path.join(item.installPath, "mcp"), (file) => /\.json$|\.js$|\.ts$/.test(file), 2),
+      status: "已安装，Claude Code 会话可加载"
+    });
+  }
+  for (const item of readCodexPluginManifests()) {
+    const manifest = item.manifest || {};
+    const skillsRoot = path.join(item.installPath, "skills");
+    extensions.push({
+      id: `codex:${item.name}`,
+      kind: "plugin",
+      engine: "codex",
+      engineLabel: "Codex",
+      source: "codex",
+      name: item.name,
+      label: manifest.interface?.displayName || item.name,
+      description: String(manifest.description || manifest.interface?.shortDescription || "").trim(),
+      version: String(manifest.version || "").trim(),
+      root: item.installPath,
+      skillRoot: skillsRoot,
+      skillCount: findSkillFiles(skillsRoot).length,
+      commandCount: countDirectoryFiles(path.join(item.installPath, "commands"), (file) => /\.md$/.test(file), 1),
+      agentCount: countDirectoryFiles(path.join(item.installPath, "agents"), (file) => /\.md$/.test(file), 1),
+      hookCount: 0,
+      mcpCount: item.appConfig?.apps ? Object.keys(item.appConfig.apps).length : 0,
+      status: "本机 Codex 插件缓存；当前 Aimashi Codex SDK 会话尚未接入插件加载"
+    });
+  }
+  for (const item of readHermesPluginManifests()) {
+    const skillsRoot = path.join(item.installPath, "skills");
+    extensions.push({
+      id: `hermes:${item.scope}:${item.name}`,
+      kind: "plugin",
+      engine: "hermes",
+      engineLabel: "Hermes",
+      source: "hermes",
+      name: item.name,
+      label: item.name,
+      description: item.description,
+      version: item.version,
+      root: item.installPath,
+      skillRoot: skillsRoot,
+      skillCount: findSkillFiles(skillsRoot).length + (fs.existsSync(path.join(item.installPath, "SKILL.md")) ? 1 : 0),
+      commandCount: 0,
+      agentCount: 0,
+      toolCount: item.tools.length,
+      hookCount: item.hooks.length,
+      mcpCount: 0,
+      pluginKind: item.kind,
+      status: item.scopeLabel
+    });
+  }
+  return extensions
+    .map((extension) => ({ ...extension, capabilitySummary: extensionCapabilitySummary(extension) }))
+    .sort((a, b) => (
+      String(a.engineLabel || "").localeCompare(String(b.engineLabel || ""))
+      || String(a.label || a.name || "").localeCompare(String(b.label || b.name || ""))
+    ));
+}
+
+function enumeratePlugins() {
+  const home = os.homedir();
+  const p = runtimePaths();
+  const out = [];
+  out.push({
+    id: "aimashi:builtin",
+    name: "aimashi",
+    label: "Aimashi 内置",
+    description: "随 Aimashi 一起安装的 Hermes seed Skill 库",
+    source: "aimashi",
+    kind: "skill-source",
+    engine: "hermes",
+    root: path.join(p.home, "skills"),
+    idPrefix: "aimashi"
+  });
+  out.push({
+    id: "hermes:user",
+    name: "hermes",
+    label: "Hermes 用户库",
+    description: "本机 ~/.hermes/skills/ 下的 Skill",
+    source: "hermes",
+    kind: "skill-source",
+    engine: "hermes",
+    root: path.join(home, ".hermes", "skills"),
+    idPrefix: "hermes:user"
+  });
+  out.push({
+    id: "claude:user",
+    name: "claude",
+    label: "Claude 用户库",
+    description: "本机 ~/.claude/skills/ 下的 Skill",
+    source: "claude",
+    kind: "skill-source",
+    engine: "claude-code",
+    root: path.join(home, ".claude", "skills"),
+    idPrefix: "claude:user"
+  });
+  out.push({
+    id: "codex:user",
+    name: "codex",
+    label: "Codex 用户库",
+    description: "本机 ~/.codex/skills/ 下的 Skill",
+    source: "codex",
+    kind: "skill-source",
+    engine: "codex",
+    root: path.join(home, ".codex", "skills"),
+    idPrefix: "codex:user"
+  });
+  for (const item of readClaudeInstalledPlugins()) {
+    out.push({
+      id: `claude:${item.qualifiedName}`,
+      name: item.name,
+      label: item.name,
+      description: String(item.manifest.description || "").trim(),
+      source: "claude",
+      kind: "plugin-skill-source",
+      engine: "claude-code",
+      extensionId: `claude:${item.qualifiedName}`,
+      root: path.join(item.installPath, "skills"),
+      idPrefix: `claude:${item.qualifiedName}`
+    });
+  }
+  for (const item of readCodexPluginManifests()) {
+    out.push({
+      id: `codex:${item.name}`,
+      name: item.name,
+      label: item.manifest.interface?.displayName || item.name,
+      description: String(item.manifest.description || item.manifest.interface?.shortDescription || "").trim(),
+      source: "codex",
+      kind: "plugin-skill-source",
+      engine: "codex",
+      extensionId: `codex:${item.name}`,
+      root: path.join(item.installPath, "skills"),
+      idPrefix: `codex:${item.name}`
+    });
+  }
+  return out;
+}
+
+async function fetchHermesSkillsCatalog(timeoutMs = 1500) {
+  if (!engineState.running || !engineState.baseUrl) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${engineState.baseUrl}/api/skills`, {
+      headers: { Authorization: `Bearer ${apiKey()}` },
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.skills)) return data.skills;
+    if (Array.isArray(data?.items)) return data.items;
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadLocalSkills() {
+  const pluginDefs = enumeratePlugins();
+  const extensions = enumerateExtensions();
+  const skills = [];
+  const seenByName = new Set();
+  const plugins = [];
+  for (const plugin of pluginDefs) {
+    if (!fs.existsSync(plugin.root)) {
+      plugins.push({
+        id: plugin.id,
+        name: plugin.name,
+        label: plugin.label,
+        description: plugin.description,
+        source: plugin.source,
+        kind: plugin.kind || "skill-source",
+        engine: plugin.engine || "",
+        extensionId: plugin.extensionId || "",
+        root: plugin.root,
+        skillCount: 0
+      });
+      continue;
+    }
+    let pluginSkills = 0;
+    for (const filePath of findSkillFiles(plugin.root)) {
+      try {
+        const skill = parseSkillMarkdown(filePath, plugin);
+        if (plugin.source !== "aimashi" && seenByName.has(skill.name.toLowerCase())) continue;
+        seenByName.add(skill.name.toLowerCase());
+        skill.pluginId = plugin.id;
+        skill.pluginLabel = plugin.label;
+        skill.pluginSource = plugin.source;
+        skill.extensionId = plugin.extensionId || "";
+        skill.sourceKind = plugin.kind || "skill-source";
         skills.push(skill);
+        pluginSkills += 1;
       } catch (error) {
         appendEngineLog(`Skill scan skipped ${filePath}: ${error.message}`);
       }
     }
+    plugins.push({
+      id: plugin.id,
+      name: plugin.name,
+      label: plugin.label,
+      description: plugin.description,
+      source: plugin.source,
+      kind: plugin.kind || "skill-source",
+      engine: plugin.engine || "",
+      extensionId: plugin.extensionId || "",
+      root: plugin.root,
+      skillCount: pluginSkills
+    });
   }
-  const sourceRank = { aimashi: 0, hermes: 1, codex: 2, claude: 3 };
+  const hermes = await fetchHermesSkillsCatalog();
+  if (hermes) {
+    const enabledByName = new Map();
+    for (const item of hermes) {
+      const name = String(item?.name || "").trim();
+      if (!name) continue;
+      enabledByName.set(name, item?.enabled !== false);
+    }
+    for (const skill of skills) {
+      if (enabledByName.has(skill.name)) skill.enabled = enabledByName.get(skill.name);
+      else skill.enabled = true;
+    }
+  } else {
+    for (const skill of skills) skill.enabled = true;
+  }
   skills.sort((a, b) => (
-    (sourceRank[a.source] ?? 9) - (sourceRank[b.source] ?? 9)
-    || String(a.category).localeCompare(String(b.category))
+    String(a.pluginLabel || "").localeCompare(String(b.pluginLabel || ""))
+    || String(a.category || "").localeCompare(String(b.category || ""))
     || String(a.name).localeCompare(String(b.name))
   ));
   return {
-    roots: roots.map((root) => ({ source: root.source, label: root.label, root: root.root, exists: fs.existsSync(root.root) })),
-    skills
+    plugins,
+    sources: plugins,
+    extensions,
+    skills,
+    roots: plugins.map((p) => ({ source: p.source, label: p.label, root: p.root, exists: fs.existsSync(p.root) }))
   };
 }
 
+function resolveLocalSkill(identifier) {
+  const target = String(identifier || "").trim();
+  if (!target) return null;
+  for (const plugin of enumeratePlugins()) {
+    if (!fs.existsSync(plugin.root)) continue;
+    const inAimashiPrivate = plugin.source === "aimashi" && isChildPath(runtimePaths().home, plugin.root);
+    for (const filePath of findSkillFiles(plugin.root)) {
+      try {
+        const raw = fs.readFileSync(filePath, "utf8");
+        const skill = parseSkillMarkdown(filePath, plugin);
+        skill.pluginId = plugin.id;
+        skill.pluginLabel = plugin.label;
+        skill.pluginSource = plugin.source;
+        const aliases = [
+          skill.id,
+          skill.name,
+          `${plugin.idPrefix || plugin.source}:${skill.relPath}`,
+          path.basename(path.dirname(filePath))
+        ].filter(Boolean);
+        if (aliases.some((alias) => String(alias).trim() === target)) {
+          return { filePath, root: plugin.root, inAimashiPrivate, raw, skill };
+        }
+      } catch {
+        // skip unreadable
+      }
+    }
+  }
+  return null;
+}
+
 function readLocalSkill(skillId) {
-  const id = String(skillId || "");
-  const found = loadLocalSkills().skills.find((skill) => skill.id === id);
+  const found = resolveLocalSkill(skillId);
   if (!found) throw new Error("Skill not found.");
   const stat = fs.statSync(found.filePath);
   if (stat.size > 2 * 1024 * 1024) throw new Error("Skill file is too large to preview.");
   return {
-    ...found,
-    body: fs.readFileSync(found.filePath, "utf8")
+    ...found.skill,
+    body: found.raw,
+    filePath: found.filePath
   };
+}
+
+function expandLeadingSkillCommand(text, { mode = "inline" } = {}) {
+  const trimmed = String(text || "");
+  const match = trimmed.match(/^\s*\/([A-Za-z0-9_\/-]+)(?:[\s:]+([\s\S]+))?$/);
+  if (!match) return null;
+  const name = match[1];
+  const userRequest = (match[2] || "").trim();
+  const found = resolveLocalSkill(name);
+  if (!found) return null;
+  if (mode === "native") {
+    return [
+      `用户选择了 Aimashi Skill：${name}。`,
+      "请优先使用运行环境里同名的 Skill；如果 Skill 工具需要命名空间，请选择最匹配这个名称的 Skill。",
+      "",
+      userRequest
+        ? `用户请求：\n${userRequest}`
+        : "用户还没有补充具体请求，请基于这个 Skill 询问必要细节或开始执行。"
+    ].join("\n");
+  }
+  return [
+    "请严格按以下 Skill 指南完成任务。",
+    "",
+    `=== Skill: ${name} ===`,
+    found.raw.trim(),
+    "=== End Skill ===",
+    "",
+    userRequest
+      ? `用户请求：\n${userRequest}`
+      : "（用户已选定此 skill，请按 skill 指南询问需要的细节或开始执行。）"
+  ].join("\n");
 }
 
 function isChildPath(parentPath, targetPath) {
@@ -2432,21 +2995,19 @@ function isChildPath(parentPath, targetPath) {
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-function deleteLocalSkill(skillId) {
-  const id = String(skillId || "");
-  const found = loadLocalSkills().skills.find((skill) => skill.id === id);
+async function deleteLocalSkill(skillId) {
+  const found = resolveLocalSkill(skillId);
   if (!found) throw new Error("Skill not found.");
-  if (found.source !== "aimashi") throw new Error("只能删除 Aimashi 本地 Skill。");
-  const root = skillRoots().find((item) => item.source === "aimashi")?.root;
+  if (!found.inAimashiPrivate) throw new Error("只能删除 Aimashi 私有 Skill 目录里的 Skill。");
+  const aimashiRoot = path.join(runtimePaths().home, "skills");
   const skillDir = path.dirname(found.filePath);
-  if (!root || !isChildPath(root, skillDir)) throw new Error("Skill path is outside the Aimashi skills directory.");
+  if (!isChildPath(aimashiRoot, skillDir)) throw new Error("Skill path is outside the Aimashi skills directory.");
   fs.rmSync(skillDir, { recursive: true, force: true });
   return loadLocalSkills();
 }
 
 async function openLocalSkillDirectory(skillId) {
-  const id = String(skillId || "");
-  const found = loadLocalSkills().skills.find((skill) => skill.id === id);
+  const found = resolveLocalSkill(skillId);
   if (!found) throw new Error("Skill not found.");
   const skillDir = path.dirname(found.filePath);
   if (!fs.existsSync(skillDir)) throw new Error("Skill directory not found.");
@@ -2545,7 +3106,7 @@ function runExternalSlashCommand({ text, fellow, engine, sessionId }) {
       "Claude Code 自定义命令会从 .claude/commands 和 ~/.claude/commands 扫描。"
     ].join("\n");
   }
-  return `${command} 暂时不是 ${engine === "claude-code" ? "Claude Code" : "Codex"} Fellow 的 Aimashi 本地命令。`;
+  return null;
 }
 
 function runHermesSlashCommand({ text, fellow, sessionId }) {
@@ -4641,21 +5202,6 @@ function lastUserPrompt(messages) {
   return [last.content, attachmentText ? `附件上下文：\n${attachmentText}` : ""].filter(Boolean).join("\n\n");
 }
 
-function externalAgentPrompt({ fellow, messages, includePersona }) {
-  const prompt = lastUserPrompt(messages);
-  if (!includePersona) return prompt;
-  const persona = readFellowPersona(fellow.key, fellow.name, fellow.bio).trim();
-  if (!persona) return prompt;
-  return [
-    "以下是 Aimashi 给当前 Fellow 的人设，请在本次对话中遵守：",
-    "",
-    persona,
-    "",
-    "用户消息：",
-    prompt
-  ].join("\n");
-}
-
 function claudeMessageText(message) {
   if (!message || typeof message !== "object") return "";
   const direct = firstTextValue(message.text || message.content || message.delta);
@@ -4694,10 +5240,23 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
   const engine = "claude-code";
   const commandPath = shellCommandPath("claude");
   if (!commandPath) throw new Error("本机没有检测到 Claude Code CLI。请先安装并确认 `claude --version` 可用。");
-  const externalSessionId = getAgentSessionId(engine, fellow.key, sessionId);
-  const prompt = externalAgentPrompt({ fellow, messages, includePersona: false });
+  const lastUser = lastUserPrompt(messages);
+  const prompt = expandLeadingSkillCommand(lastUser, { mode: "native" }) || lastUser;
   const persona = readFellowPersona(fellow.key, fellow.name, fellow.bio).trim();
   const { query } = await claudeAgentSdk();
+  let bridgePluginPath = "";
+  let bridgeFingerprint = "";
+  try {
+    const bridge = ensureClaudeBridgePlugin();
+    bridgePluginPath = bridge.path;
+    bridgeFingerprint = bridge.fingerprint;
+  } catch (error) {
+    appendEngineLog(`Claude bridge plugin refresh failed: ${error?.message || error}`);
+  }
+  const savedEntry = getAgentSessionEntry(engine, fellow.key, sessionId);
+  const externalSessionId = savedEntry.id && savedEntry.fingerprint === bridgeFingerprint
+    ? savedEntry.id
+    : "";
   const options = {
     abortController: activeChatAbortController,
     cwd: process.cwd(),
@@ -4711,7 +5270,8 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
       preset: "claude_code",
       append: persona
     },
-    includePartialMessages: Boolean(emit)
+    includePartialMessages: Boolean(emit),
+    ...(bridgePluginPath ? { plugins: [{ type: "local", path: bridgePluginPath }], skills: "all" } : {})
   };
   if (externalSessionId) options.resume = externalSessionId;
   if (fellow.engineConfig?.model) options.model = String(fellow.engineConfig.model);
@@ -4729,7 +5289,7 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
     if (signal?.aborted) break;
     if (message?.session_id && !capturedSessionId) {
       capturedSessionId = message.session_id;
-      setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
+      setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
     }
 
     // Token-level streaming (when includePartialMessages: true)
@@ -4804,7 +5364,7 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
       }
     }
   }
-  if (capturedSessionId && !externalSessionId) setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
+  if (capturedSessionId && !externalSessionId) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
   if (signal?.aborted) {
     if (emit) emit("complete", { finishReason: "cancelled", aborted: true });
     const stopped = new Error("生成已停止");
@@ -4838,7 +5398,21 @@ async function sendCodexChat({ fellow, sessionId, messages, signal }) {
   const commandPath = shellCommandPath("codex");
   if (!commandPath) throw new Error("本机没有检测到 Codex CLI。请先安装并确认 `codex --version` 可用。");
   const externalSessionId = getAgentSessionId(engine, fellow.key, sessionId);
-  const prompt = externalAgentPrompt({ fellow, messages, includePersona: !externalSessionId });
+  const lastUser = lastUserPrompt(messages);
+  const userText = expandLeadingSkillCommand(lastUser, { mode: "inline" }) || lastUser;
+  const persona = !externalSessionId
+    ? readFellowPersona(fellow.key, fellow.name, fellow.bio).trim()
+    : "";
+  const prompt = persona
+    ? [
+        "以下是 Aimashi 给当前 Fellow 的人设，请在本次对话中遵守：",
+        "",
+        persona,
+        "",
+        "用户消息：",
+        userText
+      ].join("\n")
+    : userText;
   const { Codex } = await codexSdk();
   const codex = new Codex({
     codexPathOverride: commandPath,
@@ -4919,23 +5493,29 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, webContent
     const slashText = isSlashCommandText(messages);
     if (agentEngine === "claude-code") {
       if (slashText) {
-        return completeWithPetMessage(chatCompletionResponse({
-          id: `cmd_${crypto.randomUUID()}`,
-          model: "claude-code",
-          content: runExternalSlashCommand({ text: slashText, fellow, engine: agentEngine, sessionId }),
-          aimashi: { transport: "local-command", engine: agentEngine, fellow_key: fellow.key }
-        }));
+        const localResult = runExternalSlashCommand({ text: slashText, fellow, engine: agentEngine, sessionId });
+        if (localResult != null) {
+          return completeWithPetMessage(chatCompletionResponse({
+            id: `cmd_${crypto.randomUUID()}`,
+            model: "claude-code",
+            content: localResult,
+            aimashi: { transport: "local-command", engine: agentEngine, fellow_key: fellow.key }
+          }));
+        }
       }
       return completeWithPetMessage(await sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit }));
     }
     if (agentEngine === "codex") {
       if (slashText) {
-        return completeWithPetMessage(chatCompletionResponse({
-          id: `cmd_${crypto.randomUUID()}`,
-          model: "codex-cli",
-          content: runExternalSlashCommand({ text: slashText, fellow, engine: agentEngine, sessionId }),
-          aimashi: { transport: "local-command", engine: agentEngine, fellow_key: fellow.key }
-        }));
+        const localResult = runExternalSlashCommand({ text: slashText, fellow, engine: agentEngine, sessionId });
+        if (localResult != null) {
+          return completeWithPetMessage(chatCompletionResponse({
+            id: `cmd_${crypto.randomUUID()}`,
+            model: "codex-cli",
+            content: localResult,
+            aimashi: { transport: "local-command", engine: agentEngine, fellow_key: fellow.key }
+          }));
+        }
       }
       return completeWithPetMessage(await sendCodexChat({ fellow, sessionId, messages, signal }));
     }
@@ -5341,6 +5921,9 @@ ipcMain.handle("appearance:save", (_event, settings) => {
   const fontPreset = String(settings.fontPreset || current.fontPreset || "system").trim();
   const accentColor = String(settings.accentColor || current.accentColor || "#5e5ce6").trim();
   const userBubbleColor = String(settings.userBubbleColor || current.userBubbleColor || "#dedcff").trim();
+  const showHoverBackground = settings.showHoverBackground == null ? current.showHoverBackground !== false : settings.showHoverBackground !== false;
+  const showUserAvatar = settings.showUserAvatar == null ? current.showUserAvatar !== false : settings.showUserAvatar !== false;
+  const showAssistantAvatar = settings.showAssistantAvatar == null ? current.showAssistantAvatar !== false : settings.showAssistantAvatar !== false;
   const listStyle = String(settings.listStyle || current.listStyle || "card").trim();
   const selectionStyle = String(settings.selectionStyle || current.selectionStyle || "soft").trim();
   const validHex = (value, fallback) => /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback;
@@ -5349,6 +5932,9 @@ ipcMain.handle("appearance:save", (_event, settings) => {
     fontPreset: ["system", "sf-pro", "pingfang", "mono"].includes(fontPreset) ? fontPreset : "system",
     accentColor: validHex(accentColor, "#5e5ce6"),
     userBubbleColor: validHex(userBubbleColor, "#dedcff"),
+    showHoverBackground,
+    showUserAvatar,
+    showAssistantAvatar,
     listStyle: ["card", "flush"].includes(listStyle) ? listStyle : "card",
     selectionStyle: ["soft", "solid"].includes(selectionStyle) ? selectionStyle : "soft"
   };

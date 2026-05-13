@@ -114,6 +114,13 @@
           <div id="composerAttachments" class="composer-attachments hidden"></div>
           <input id="composerAttachmentInput" class="hidden" type="file" multiple>
           <div id="slashCommandMenu" class="slash-command-menu hidden"></div>
+          <div id="skillPicker" class="skill-picker hidden">
+            <header class="skill-picker-head">
+              <input id="skillPickerSearch" autocomplete="off" placeholder="搜索插件或 Skill" type="search">
+              <button id="closeSkillPicker" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+            </header>
+            <div id="skillPickerBody" class="skill-picker-body"></div>
+          </div>
           <div class="composer-bottom">
             <div class="composer-controls">
               <label class="model-switcher" title="切换当前模型">
@@ -201,7 +208,8 @@
         <div class="settings-content">
           <section class="settings-panel" data-settings-panel="appearance">
             <form id="appearanceForm" class="form-grid">
-              <section class="settings-row">
+              <div class="settings-section-label">通用</div>
+              <section class="settings-row settings-group-start">
                 <div>
                   <strong>界面主题</strong>
                   <p>切换浅色或深色界面。</p>
@@ -219,7 +227,7 @@
                 <div class="font-choice-grid" id="appearanceFontChoices" role="radiogroup" aria-label="字体">
                   <button class="font-choice" type="button" data-font-preset="system"><span>系统</span><small>System</small></button>
                   <button class="font-choice" type="button" data-font-preset="sf-pro"><span>SF Pro</span><small>Apple</small></button>
-                  <button class="font-choice" type="button" data-font-preset="pingfang"><span>苹方</span><small>PingFang</small></button>
+                  <button class="font-choice" type="button" data-font-preset="pingfang"><span>苹方</span><small>PingFang SC</small></button>
                   <button class="font-choice" type="button" data-font-preset="mono"><span>等宽</span><small>Mono</small></button>
                 </div>
                 <select id="appearanceFontPreset" class="visually-hidden" aria-hidden="true" tabindex="-1">
@@ -251,6 +259,15 @@
               </section>
               <section class="settings-row">
                 <div>
+                  <strong>悬停底色</strong>
+                  <p>鼠标移到可点击组件上时显示浅色底。</p>
+                </div>
+                <button id="appearanceShowHoverBackground" class="settings-switch" type="button" role="switch" aria-checked="true" aria-label="显示悬停底色">
+                  <span></span>
+                </button>
+              </section>
+              <section class="settings-row settings-group-end">
+                <div>
                   <strong>主题色</strong>
                   <p>影响选中状态、链接和按钮。</p>
                 </div>
@@ -262,7 +279,8 @@
                   </label>
                 </div>
               </section>
-              <section class="settings-row appearance-last-row">
+              <div class="settings-section-label">聊天界面</div>
+              <section class="settings-row settings-group-start">
                 <div>
                   <strong>用户气泡</strong>
                   <p>只影响你发出的消息气泡。</p>
@@ -274,6 +292,24 @@
                     <input id="appearanceUserBubbleColor" type="color" value="#dedcff" aria-label="用户消息气泡底色">
                   </label>
                 </div>
+              </section>
+              <section class="settings-row">
+                <div>
+                  <strong>用户头像</strong>
+                  <p>在聊天里显示你的头像。</p>
+                </div>
+                <button id="appearanceShowUserAvatar" class="settings-switch" type="button" role="switch" aria-checked="true" aria-label="显示用户头像">
+                  <span></span>
+                </button>
+              </section>
+              <section class="settings-row appearance-last-row">
+                <div>
+                  <strong>伙伴头像</strong>
+                  <p>在聊天里显示 Fellow 头像。</p>
+                </div>
+                <button id="appearanceShowAssistantAvatar" class="settings-switch" type="button" role="switch" aria-checked="true" aria-label="显示伙伴头像">
+                  <span></span>
+                </button>
               </section>
               <span id="appearanceSaveStatus" class="form-save-status appearance-autosave-status" role="status" aria-live="polite"></span>
             </form>
@@ -539,6 +575,7 @@
     </section>
     <div id="skillContextMenu" class="skill-context-menu hidden" role="menu"></div>
     <div id="fellowContextMenu" class="skill-context-menu fellow-context-menu hidden" role="menu"></div>
+    <div id="messageContextMenu" class="skill-context-menu message-context-menu hidden" role="menu"></div>
     <button id="petJobButton" class="pet-job-button hidden" type="button"></button>
     <div id="petJobPanel" class="pet-job-panel hidden"></div>
   </main>

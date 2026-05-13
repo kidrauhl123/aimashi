@@ -15,6 +15,9 @@ const SIDEBAR_WIDTH_MIN = 220;
 const SIDEBAR_WIDTH_MAX = 380;
 const SIDEBAR_WIDTH_DEFAULT = 280;
 const scrollbarTimers = new WeakMap();
+let scrollbarOverlayEl = null;
+let scrollbarOverlayTarget = null;
+let skillPickerHoverCloseTimer = 0;
 let appearanceSaveStatusTimer = 0;
 let appearanceAutoSaveTimer = 0;
 let appearanceAutoSaveSeq = 0;
@@ -57,10 +60,10 @@ const state = {
   contactFilter: "",
   skillFilter: "",
   skillCategoryFilter: "",
-  skillSourceFilter: "aimashi",
   skillStatusFilter: "all",
   skillContextMenu: { open: false, x: 0, y: 0, skillId: "" },
   fellowContextMenu: { open: false, x: 0, y: 0, fellowKey: "" },
+  messageContextMenu: { open: false, x: 0, y: 0, messageIndex: -1 },
   fellowMenuOpen: false,
   profileDialogOpen: false,
   fellowDialogOpen: false,
@@ -89,7 +92,13 @@ const state = {
   },
   settingsOpen: false,
   modelCatalog: [],
-  skillLibrary: { roots: [], skills: [] },
+  skillLibrary: { plugins: [], sources: [], extensions: [], skills: [], roots: [] },
+  skillPluginFilter: "",
+  skillLibraryMode: "skills",
+  selectedExtensionId: "",
+  skillPickerOpen: false,
+  skillPickerFilter: "",
+  skillPickerPluginId: "",
   selectedSkillId: "",
   selectedSkillDetail: null,
   skillPreviewOpen: false,
@@ -183,6 +192,7 @@ const els = {
   skillPreviewBody: document.getElementById("skillPreviewBody"),
   skillContextMenu: document.getElementById("skillContextMenu"),
   fellowContextMenu: document.getElementById("fellowContextMenu"),
+  messageContextMenu: document.getElementById("messageContextMenu"),
   profileDialog: document.getElementById("profileDialog"),
   profileForm: document.getElementById("profileForm"),
   profileDisplayName: document.getElementById("profileDisplayName"),
@@ -218,6 +228,10 @@ const els = {
   composerAttachments: document.getElementById("composerAttachments"),
   composerAttachmentInput: document.getElementById("composerAttachmentInput"),
   slashCommandMenu: document.getElementById("slashCommandMenu"),
+  skillPicker: document.getElementById("skillPicker"),
+  skillPickerSearch: document.getElementById("skillPickerSearch"),
+  skillPickerBody: document.getElementById("skillPickerBody"),
+  closeSkillPicker: document.getElementById("closeSkillPicker"),
   sendChat: document.getElementById("sendChat"),
   quickModelSelect: document.getElementById("quickModelSelect"),
   quickModelLabel: document.getElementById("quickModelLabel"),
@@ -245,6 +259,9 @@ const els = {
   appearanceUserBubbleColor: document.getElementById("appearanceUserBubbleColor"),
   appearanceUserBubblePreview: document.getElementById("appearanceUserBubblePreview"),
   appearanceUserBubbleReset: document.getElementById("appearanceUserBubbleReset"),
+  appearanceShowHoverBackground: document.getElementById("appearanceShowHoverBackground"),
+  appearanceShowUserAvatar: document.getElementById("appearanceShowUserAvatar"),
+  appearanceShowAssistantAvatar: document.getElementById("appearanceShowAssistantAvatar"),
   appearanceSaveStatus: document.getElementById("appearanceSaveStatus"),
   authMethod: document.getElementById("authMethod"),
   modelPreset: document.getElementById("modelPreset"),
@@ -353,10 +370,47 @@ function showNarrowSidebar() {
   syncNarrowLayout();
 }
 
+function ensureScrollbarOverlay() {
+  if (scrollbarOverlayEl) return scrollbarOverlayEl;
+  scrollbarOverlayEl = document.createElement("div");
+  scrollbarOverlayEl.className = "scrollbar-overlay";
+  document.body.appendChild(scrollbarOverlayEl);
+  return scrollbarOverlayEl;
+}
+
+function updateScrollbarOverlay(target) {
+  if (!(target instanceof Element)) return;
+  const maxScroll = target.scrollHeight - target.clientHeight;
+  if (maxScroll <= 0) return;
+  const rect = target.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+
+  const overlay = ensureScrollbarOverlay();
+  const trackInset = 3;
+  const trackHeight = Math.max(0, rect.height - trackInset * 2);
+  const thumbHeight = Math.max(28, Math.min(trackHeight, (target.clientHeight / target.scrollHeight) * trackHeight));
+  const travel = Math.max(0, trackHeight - thumbHeight);
+  const thumbTop = rect.top + trackInset + (target.scrollTop / maxScroll) * travel;
+  const thumbLeft = rect.right - 8;
+
+  overlay.style.height = `${thumbHeight}px`;
+  overlay.style.transform = `translate3d(${Math.round(thumbLeft)}px, ${Math.round(thumbTop)}px, 0)`;
+  overlay.classList.add("visible");
+  scrollbarOverlayTarget = target;
+}
+
+function hideScrollbarOverlay(target) {
+  if (target && scrollbarOverlayTarget !== target) return;
+  if (!scrollbarOverlayEl) return;
+  scrollbarOverlayEl.classList.remove("visible");
+  scrollbarOverlayTarget = null;
+}
+
 function showScrollingScrollbar(target) {
   if (!(target instanceof Element)) return;
   if (target === document.documentElement || target === document.body) return;
   if (target.scrollHeight <= target.clientHeight && target.scrollWidth <= target.clientWidth) return;
+  updateScrollbarOverlay(target);
   target.classList.add("scrollbar-visible");
   target.classList.add("scrollbar-active");
   const previous = scrollbarTimers.get(target);
@@ -366,6 +420,7 @@ function showScrollingScrollbar(target) {
     target.classList.remove("scrollbar-visible");
     target.classList.remove("scrollbar-active");
     scrollbarTimers.delete(target);
+    hideScrollbarOverlay(target);
   };
   scrollbarTimers.set(target, window.setTimeout(hide, 850));
 }
@@ -1032,6 +1087,9 @@ function applyAppearance(appearance = {}) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.listStyle = listStyle;
   document.documentElement.dataset.selectionStyle = selectionStyle;
+  document.documentElement.dataset.hoverBackground = appearance.showHoverBackground === false ? "false" : "true";
+  document.documentElement.dataset.showUserAvatar = appearance.showUserAvatar === false ? "false" : "true";
+  document.documentElement.dataset.showAssistantAvatar = appearance.showAssistantAvatar === false ? "false" : "true";
   document.documentElement.style.setProperty("--app-font", fontStackForAppearance(appearance));
   document.documentElement.style.setProperty("--accent", accentColor);
   document.documentElement.style.setProperty("--accent-rgb", `${rgb.r} ${rgb.g} ${rgb.b}`);
@@ -1058,9 +1116,24 @@ function currentAppearanceDraft() {
     fontPreset: els.appearanceFontPreset?.value || "system",
     accentColor: normalizeHexColor(els.appearanceAccentColor?.value),
     userBubbleColor: normalizeHexColor(els.appearanceUserBubbleColor?.value, DEFAULT_USER_BUBBLE_COLOR),
+    showHoverBackground: els.appearanceShowHoverBackground?.getAttribute("aria-checked") !== "false",
+    showUserAvatar: els.appearanceShowUserAvatar?.getAttribute("aria-checked") !== "false",
+    showAssistantAvatar: els.appearanceShowAssistantAvatar?.getAttribute("aria-checked") !== "false",
     listStyle: normalizeListStyle(els.appearanceListStyle?.value),
     selectionStyle: normalizeSelectionStyle(els.appearanceSelectionStyle?.value)
   };
+}
+
+function setSettingsSwitch(button, enabled) {
+  if (!button) return;
+  button.classList.toggle("active", Boolean(enabled));
+  button.setAttribute("aria-checked", enabled ? "true" : "false");
+}
+
+function toggleSettingsSwitch(button) {
+  const next = button?.getAttribute("aria-checked") !== "true";
+  setSettingsSwitch(button, next);
+  scheduleAppearanceSave(0);
 }
 
 function syncAppearanceControls(appearance = currentAppearanceDraft()) {
@@ -1091,6 +1164,9 @@ function syncAppearanceControls(appearance = currentAppearanceDraft()) {
   const userBubbleColor = normalizeHexColor(appearance.userBubbleColor, DEFAULT_USER_BUBBLE_COLOR);
   if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = userBubbleColor;
   if (els.appearanceUserBubblePreview) els.appearanceUserBubblePreview.style.backgroundColor = userBubbleColor;
+  setSettingsSwitch(els.appearanceShowHoverBackground, appearance.showHoverBackground !== false);
+  setSettingsSwitch(els.appearanceShowUserAvatar, appearance.showUserAvatar !== false);
+  setSettingsSwitch(els.appearanceShowAssistantAvatar, appearance.showAssistantAvatar !== false);
 }
 
 function mergeRuntimeAppearance(appearance) {
@@ -1599,7 +1675,13 @@ async function loadSkills() {
   renderSkillLibrary();
   try {
     const library = await window.aimashi.loadSkills();
+    const sources = Array.isArray(library?.sources)
+      ? library.sources
+      : (Array.isArray(library?.plugins) ? library.plugins : []);
     state.skillLibrary = {
+      plugins: Array.isArray(library?.plugins) ? library.plugins : sources,
+      sources,
+      extensions: Array.isArray(library?.extensions) ? library.extensions : [],
       roots: Array.isArray(library?.roots) ? library.roots : [],
       skills: Array.isArray(library?.skills) ? library.skills : []
     };
@@ -1610,12 +1692,13 @@ async function loadSkills() {
     if (state.selectedSkillId) await selectSkill(state.selectedSkillId, false);
   } catch (error) {
     console.error("Failed to load local skills", error);
-    state.skillLibrary = { roots: [], skills: [] };
+    state.skillLibrary = { plugins: [], sources: [], extensions: [], roots: [], skills: [] };
     state.selectedSkillId = "";
     state.selectedSkillDetail = null;
   } finally {
     state.skillsLoading = false;
     renderSkillLibrary();
+    renderSkillPicker();
   }
 }
 
@@ -1810,6 +1893,9 @@ function render() {
     fontPreset: "system",
     accentColor: DEFAULT_ACCENT_COLOR,
     userBubbleColor: DEFAULT_USER_BUBBLE_COLOR,
+    showHoverBackground: true,
+    showUserAvatar: true,
+    showAssistantAvatar: true,
     listStyle: DEFAULT_LIST_STYLE,
     selectionStyle: DEFAULT_SELECTION_STYLE
   };
@@ -2036,12 +2122,12 @@ function skillInitials(name = "") {
   return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : String(name || "?").slice(0, 2)).toUpperCase();
 }
 
-function skillSourceLabel(source = "") {
+function pluginSourceLabel(source = "") {
   const labels = {
-    aimashi: "本地 Skill",
-    hermes: "Hermes 外部库",
-    codex: "Codex 外部库",
-    claude: "Claude Code 外部库"
+    aimashi: "Aimashi 内置",
+    hermes: "Hermes",
+    codex: "Codex",
+    claude: "Claude Code"
   };
   return labels[source] || "Skill";
 }
@@ -2083,7 +2169,7 @@ function skillSummaryZh(skill = {}) {
 
 function skillSourceStatusBase() {
   return (state.skillLibrary.skills || []).filter((skill) => {
-    if (state.skillSourceFilter && skill.source !== state.skillSourceFilter) return false;
+    if (state.skillPluginFilter && skill.pluginId !== state.skillPluginFilter) return false;
     if (state.skillStatusFilter === "updates" && !skillHasUpdate(skill)) return false;
     return true;
   });
@@ -2103,7 +2189,7 @@ function skillMatchesFilters(skill) {
     skill.relPath,
     ...(skill.tags || [])
   ].join(" ").toLowerCase();
-  if (state.skillSourceFilter && skill.source !== state.skillSourceFilter) return false;
+  if (state.skillPluginFilter && skill.pluginId !== state.skillPluginFilter) return false;
   if (state.skillStatusFilter === "updates" && !skillHasUpdate(skill)) return false;
   return (!needle || haystack.includes(needle)) && (!category || String(skill.category || "") === category);
 }
@@ -2235,12 +2321,72 @@ async function selectSkill(skillId, openPreview = true) {
 }
 
 function renderSkillFilterRow(row) {
-  const active = state.skillSourceFilter === row.source && state.skillStatusFilter === row.status;
+  const active = state.skillLibraryMode === "skills" && state.skillPluginFilter === row.pluginId && state.skillStatusFilter === row.status;
   return `
-    <button class="skill-filter-row${row.child ? " child" : ""}${active ? " active" : ""}" type="button" data-skill-source="${escapeHtml(row.source)}" data-skill-status="${escapeHtml(row.status)}">
-      <span><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.sub)}</small></span>
+    <button class="skill-filter-row${row.child ? " child" : ""}${active ? " active" : ""}" type="button" data-skill-plugin="${escapeHtml(row.pluginId)}" data-skill-status="${escapeHtml(row.status)}">
+      <span><strong>${escapeHtml(row.label)}</strong>${row.sub ? `<small>${escapeHtml(row.sub)}</small>` : ""}</span>
       <em>${row.count}</em>
     </button>
+  `;
+}
+
+function renderExtensionNavRow(extension) {
+  const active = state.skillLibraryMode === "extension" && state.selectedExtensionId === extension.id;
+  return `
+    <button class="skill-filter-row${active ? " active" : ""}" type="button" data-skill-extension="${escapeHtml(extension.id)}">
+      <span>
+        <strong>${escapeHtml(extension.label || extension.name)}</strong>
+        <small>${escapeHtml(extension.engineLabel || extension.source || "Plugin")} · ${escapeHtml(extension.capabilitySummary || extension.status || "已发现")}</small>
+      </span>
+      <em>${escapeHtml(String(extension.skillCount || extension.commandCount || extension.toolCount || ""))}</em>
+    </button>
+  `;
+}
+
+function extensionDetailMeta(extension) {
+  return [
+    extension.engineLabel || extension.engine || "",
+    extension.version ? `v${extension.version}` : "",
+    extension.status || ""
+  ].filter(Boolean).join(" · ");
+}
+
+function renderExtensionDetail(extension) {
+  const relatedSkills = (state.skillLibrary.skills || []).filter((skill) => skill.extensionId === extension.id);
+  const stats = [
+    ["Skills", extension.skillCount],
+    ["Commands", extension.commandCount],
+    ["Agents", extension.agentCount],
+    ["Tools", extension.toolCount],
+    ["Hooks", extension.hookCount],
+    ["MCP", extension.mcpCount]
+  ].filter(([, value]) => Number(value) > 0);
+  return `
+    <article class="extension-detail">
+      <header>
+        <div>
+          <small>${escapeHtml(extension.engineLabel || "Plugin")}</small>
+          <h2>${escapeHtml(extension.label || extension.name)}</h2>
+          <p>${escapeHtml(extension.description || extensionDetailMeta(extension) || "本地发现的插件/扩展。")}</p>
+        </div>
+        <span>${escapeHtml(extension.kind || "plugin")}</span>
+      </header>
+      <dl class="extension-detail-grid">
+        <div><dt>状态</dt><dd>${escapeHtml(extension.status || "已发现")}</dd></div>
+        <div><dt>路径</dt><dd title="${escapeHtml(extension.root || "")}">${escapeHtml(extension.root || "未知")}</dd></div>
+        ${extension.pluginKind ? `<div><dt>类型</dt><dd>${escapeHtml(extension.pluginKind)}</dd></div>` : ""}
+        ${stats.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`).join("")}
+      </dl>
+      <section class="extension-skill-list">
+        <h3>包含的 Skill</h3>
+        ${relatedSkills.length ? relatedSkills.map((skill) => `
+          <button type="button" data-skill-select="${escapeHtml(skill.id)}">
+            <strong>${escapeHtml(skillDisplayName(skill))}</strong>
+            <small>${escapeHtml(skill.category || skill.name || "Skill")}</small>
+          </button>
+        `).join("") : `<div class="skill-empty-state compact">这个插件没有可扫描到的 SKILL.md</div>`}
+      </section>
+    </article>
   `;
 }
 
@@ -2253,61 +2399,92 @@ function skillEmptyText() {
 function renderSkillLibrary() {
   if (!els.skillNav || !els.skillCardGrid) return;
   const skills = state.skillLibrary.skills || [];
+  const sources = state.skillLibrary.sources || state.skillLibrary.plugins || [];
+  const extensions = state.skillLibrary.extensions || [];
   const shown = visibleSkills();
-  const sourceCounts = skills.reduce((acc, skill) => {
-    acc[skill.source] = (acc[skill.source] || 0) + 1;
-    return acc;
-  }, {});
-  const localCount = sourceCounts.aimashi || 0;
-  const updateCount = skills.filter((skill) => skill.source === "aimashi" && skillHasUpdate(skill)).length;
-  const currentSource = skillSourceLabel(state.skillSourceFilter);
-  setText(els.skillPageTitle, state.skillsLoading ? "正在扫描 Skill" : currentSource);
+  const totalCount = skills.length;
+  const activeSource = sources.find((p) => p.id === state.skillPluginFilter);
+  const activeExtension = extensions.find((extension) => extension.id === state.selectedExtensionId);
+  setText(
+    els.skillPageTitle,
+    state.skillsLoading
+      ? "正在扫描 Skill"
+      : (state.skillLibraryMode === "extension" && activeExtension ? activeExtension.label || activeExtension.name : (activeSource?.label || "全部 Skill"))
+  );
 
   const categories = skillCategories();
-  els.skillChipRow.innerHTML = [
-    `<button class="${state.skillCategoryFilter ? "" : "active"}" type="button" data-skill-filter="">全部</button>`,
-    ...categories.slice(0, 10).map(([category, count]) => `
-      <button class="${state.skillCategoryFilter === category ? "active" : ""}" type="button" data-skill-filter="${escapeHtml(category)}">
-        ${escapeHtml(category)} <span>${count}</span>
-      </button>
-    `)
-  ].join("");
+  els.skillChipRow.innerHTML = state.skillLibraryMode === "extension" && activeExtension
+    ? `
+      <button class="active" type="button" data-skill-filter="">插件详情</button>
+      <button type="button" data-skill-filter="">${escapeHtml(activeExtension.engineLabel || activeExtension.engine || "Plugin")}</button>
+      ${activeExtension.capabilitySummary ? `<button type="button" data-skill-filter="">${escapeHtml(activeExtension.capabilitySummary)}</button>` : ""}
+    `
+    : [
+      `<button class="${state.skillCategoryFilter ? "" : "active"}" type="button" data-skill-filter="">全部</button>`,
+      ...categories.slice(0, 10).map(([category, count]) => `
+        <button class="${state.skillCategoryFilter === category ? "active" : ""}" type="button" data-skill-filter="${escapeHtml(category)}">
+          ${escapeHtml(category)} <span>${count}</span>
+        </button>
+      `)
+    ].join("");
 
   const navRows = [
-    { label: "已安装", sub: "Aimashi 自己管理的技能", source: "aimashi", status: "all", count: localCount, child: true },
-    { label: "可更新", sub: "来自市场的可升级版本", source: "aimashi", status: "updates", count: updateCount, child: true },
-    { label: "Hermes", sub: "外部 Hermes 技能目录", source: "hermes", status: "all", count: sourceCounts.hermes || 0 },
-    { label: "Codex", sub: "外部 Codex 技能目录", source: "codex", status: "all", count: sourceCounts.codex || 0 },
-    { label: "Claude Code", sub: "外部 Claude 技能目录", source: "claude", status: "all", count: sourceCounts.claude || 0 }
+    { label: "全部 Skill", sub: "聚合所有本地 Skill 来源", pluginId: "", status: "all", count: totalCount }
   ];
+  for (const plugin of sources.filter((source) => source.kind !== "plugin-skill-source")) {
+    navRows.push({
+      label: plugin.label || plugin.name,
+      sub: plugin.description || pluginSourceLabel(plugin.source),
+      pluginId: plugin.id,
+      status: "all",
+      count: plugin.skillCount || 0,
+      child: true
+    });
+  }
   els.skillNav.innerHTML = `
-    <div class="skill-section-label">本地 Skill</div>
-    ${navRows.slice(0, 2).map((row) => renderSkillFilterRow(row)).join("")}
-    <div class="skill-section-label">外部来源</div>
-    ${navRows.slice(2).map((row) => renderSkillFilterRow(row)).join("")}
-    <div class="skill-section-label">市场</div>
+    <div class="skill-section-label">Skill 来源</div>
+    ${navRows.map((row) => renderSkillFilterRow(row)).join("")}
+    <div class="skill-section-label">插件 / 扩展</div>
+    ${extensions.length
+      ? extensions.map((extension) => renderExtensionNavRow(extension)).join("")
+      : `<button class="skill-filter-row disabled" type="button" disabled><span><strong>未发现插件</strong><small>后端没有扫描到已安装插件 manifest</small></span><em>0</em></button>`}
+    <div class="skill-section-label">Skill 市场</div>
     <button class="skill-filter-row disabled" type="button" disabled>
       <span><strong>Skill 市场</strong><small>下载、更新和删除会放在这里收口</small></span>
       <em>Soon</em>
     </button>
   `;
 
-  els.skillCardGrid.innerHTML = shown.length
+  els.skillCardGrid.innerHTML = state.skillLibraryMode === "extension" && activeExtension
+    ? renderExtensionDetail(activeExtension)
+    : shown.length
     ? shown.map((skill) => `
       <article class="skill-card${skill.id === state.selectedSkillId ? " featured" : ""}" data-skill-select="${escapeHtml(skill.id)}">
         <header>
           <strong>${escapeHtml(skillDisplayName(skill))}</strong>
-          <small>${escapeHtml(skillAuthorLabel(skill))}</small>
+          <small>${escapeHtml(skill.pluginLabel || skillAuthorLabel(skill))}</small>
         </header>
         <p>${escapeHtml(skillSummaryZh(skill))}</p>
       </article>
     `).join("")
     : `<div class="skill-empty-state">${skillEmptyText()}</div>`;
 
-  els.skillNav.querySelectorAll("[data-skill-source]").forEach((button) => {
+  els.skillNav.querySelectorAll("[data-skill-plugin]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.skillSourceFilter = button.dataset.skillSource || "aimashi";
+      state.skillLibraryMode = "skills";
+      state.selectedExtensionId = "";
+      state.skillPluginFilter = button.dataset.skillPlugin || "";
       state.skillStatusFilter = button.dataset.skillStatus || "all";
+      state.skillCategoryFilter = "";
+      closeSkillContextMenu();
+      showNarrowContent();
+      renderSkillLibrary();
+    });
+  });
+  els.skillNav.querySelectorAll("[data-skill-extension]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.skillLibraryMode = "extension";
+      state.selectedExtensionId = button.dataset.skillExtension || "";
       state.skillCategoryFilter = "";
       closeSkillContextMenu();
       showNarrowContent();
@@ -2377,10 +2554,12 @@ function renderSkillContextMenu() {
   menu.innerHTML = `
     <button type="button" data-skill-action="preview">预览</button>
     <button type="button" data-skill-action="open-directory">打开目录</button>
+    <div class="skill-context-menu-separator" role="separator"></div>
     <button class="danger" type="button" data-skill-action="delete" ${canDelete ? "" : "disabled"}>删除</button>
   `;
-  const width = 150;
-  const height = 96;
+  const rect = menu.getBoundingClientRect();
+  const width = rect.width || 158;
+  const height = rect.height || 122;
   menu.style.left = `${Math.max(8, Math.min(state.skillContextMenu.x, window.innerWidth - width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(state.skillContextMenu.y, window.innerHeight - height - 8))}px`;
   menu.querySelector('[data-skill-action="preview"]')?.addEventListener("click", () => {
@@ -2586,10 +2765,11 @@ function renderFellowContextMenu() {
     <button type="button" data-fellow-action="pin">${fellow.pinned ? "取消置顶" : "置顶"}</button>
     <button type="button" data-fellow-action="edit">编辑</button>
     ${petAction}
-    ${fellow.key === "aimashi" ? "" : `<button class="danger" type="button" data-fellow-action="delete">删除伙伴</button>`}
+    ${fellow.key === "aimashi" ? "" : `<div class="skill-context-menu-separator" role="separator"></div><button class="danger" type="button" data-fellow-action="delete">删除伙伴</button>`}
   `;
-  const width = 168;
-  const height = fellow.key === "aimashi" ? 100 : 129;
+  const rect = menu.getBoundingClientRect();
+  const width = rect.width || 158;
+  const height = rect.height || (fellow.key === "aimashi" ? 114 : 158);
   menu.style.left = `${Math.max(8, Math.min(state.fellowContextMenu.x, window.innerWidth - width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(state.fellowContextMenu.y, window.innerHeight - height - 8))}px`;
   menu.querySelector('[data-fellow-action="edit"]')?.addEventListener("click", () => {
@@ -2772,7 +2952,13 @@ async function deleteSkill(skillId) {
   if (!window.confirm(`删除本地 Skill「${label}」？\n\n会移除 Aimashi Runtime skills 目录下对应文件夹。`)) return;
   try {
     const library = await window.aimashi.deleteSkill(skillId);
+    const sources = Array.isArray(library?.sources)
+      ? library.sources
+      : (Array.isArray(library?.plugins) ? library.plugins : []);
     state.skillLibrary = {
+      plugins: Array.isArray(library?.plugins) ? library.plugins : sources,
+      sources,
+      extensions: Array.isArray(library?.extensions) ? library.extensions : [],
       roots: Array.isArray(library?.roots) ? library.roots : [],
       skills: Array.isArray(library?.skills) ? library.skills : []
     };
@@ -3010,7 +3196,7 @@ function renderChat() {
     const attachmentHtml = renderAttachmentChips(message.attachments);
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? escapeHtml(label) : ""}</div>
-      <div class="message-stack">${traceHtml}<div class="bubble has-time">${bodyHtml}${attachmentHtml}${timeHtml}</div></div>
+      <div class="message-stack">${traceHtml}<div class="bubble">${bodyHtml}${attachmentHtml}</div>${timeHtml}</div>
     `;
     els.chat.appendChild(article);
   }
@@ -3053,7 +3239,7 @@ function renderChat() {
       expanded: true,
       scopeKey: `run:${s.runId || ""}`
     });
-    const textHtml = s.text ? `<div class="bubble has-time">${renderMarkdown(s.text)}${renderMessageTime(s.createdAt)}</div>` : "";
+    const textHtml = s.text ? `<div class="bubble">${renderMarkdown(s.text)}</div>${renderMessageTime(s.createdAt)}` : "";
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}"></div>
       <div class="message-stack">${traceHtml}${textHtml}</div>
@@ -3234,6 +3420,121 @@ function closeComposerAddMenu() {
   if (!state.composerAddMenuOpen) return;
   state.composerAddMenuOpen = false;
   renderComposerAddMenu();
+}
+
+function composerSkillMenuItem() {
+  return els.composerAddMenu?.querySelector('[data-composer-add="skill"]') || null;
+}
+
+function targetIsSkillPickerZone(target) {
+  if (!(target instanceof Node)) return false;
+  return Boolean(els.skillPicker?.contains(target) || composerSkillMenuItem()?.contains(target));
+}
+
+function cancelSkillPickerHoverClose() {
+  if (!skillPickerHoverCloseTimer) return;
+  clearTimeout(skillPickerHoverCloseTimer);
+  skillPickerHoverCloseTimer = 0;
+}
+
+function scheduleSkillPickerHoverClose() {
+  cancelSkillPickerHoverClose();
+  skillPickerHoverCloseTimer = window.setTimeout(() => {
+    skillPickerHoverCloseTimer = 0;
+    closeSkillPicker();
+  }, 120);
+}
+
+function openSkillPicker() {
+  cancelSkillPickerHoverClose();
+  if (!state.skillLibrary.skills?.length && !state.skillsLoading) {
+    loadSkills();
+  }
+  state.skillPickerOpen = true;
+  state.skillPickerFilter = "";
+  const firstPlugin = (state.skillLibrary.plugins || []).find((plugin) => plugin.skillCount > 0);
+  if (!state.skillPickerPluginId && firstPlugin) state.skillPickerPluginId = firstPlugin.id;
+  if (els.skillPickerSearch) els.skillPickerSearch.value = "";
+  renderSkillPicker();
+  setTimeout(() => els.skillPickerSearch?.focus(), 0);
+}
+
+function closeSkillPicker() {
+  cancelSkillPickerHoverClose();
+  if (!state.skillPickerOpen) return;
+  state.skillPickerOpen = false;
+  renderSkillPicker();
+}
+
+function renderSkillPicker() {
+  if (!els.skillPicker) return;
+  els.skillPicker.classList.toggle("hidden", !state.skillPickerOpen);
+  if (!state.skillPickerOpen || !els.skillPickerBody) return;
+  const needle = String(state.skillPickerFilter || "").trim().toLowerCase();
+  const skills = state.skillLibrary.skills || [];
+  const plugins = (state.skillLibrary.plugins || []).filter((plugin) => plugin.skillCount > 0);
+  if (!state.skillPickerPluginId && plugins.length) state.skillPickerPluginId = plugins[0].id;
+  if (state.skillPickerPluginId && plugins.length && !plugins.some((plugin) => plugin.id === state.skillPickerPluginId)) {
+    state.skillPickerPluginId = plugins[0].id;
+  }
+  const filtered = needle
+    ? skills.filter((skill) => {
+        const hay = [
+          skill.name,
+          skill.title,
+          skill.description,
+          skill.pluginLabel,
+          skill.category,
+          ...(skill.tags || [])
+        ].join(" ").toLowerCase();
+        return hay.includes(needle);
+      })
+    : skills.filter((skill) => !state.skillPickerPluginId || skill.pluginId === state.skillPickerPluginId);
+  if (!filtered.length && !plugins.length) {
+    els.skillPickerBody.innerHTML = `<div class="skill-picker-empty">${state.skillsLoading ? "正在加载…" : "没有匹配的 Skill"}</div>`;
+    return;
+  }
+  const pluginCounts = skills.reduce((acc, skill) => {
+    const pluginId = skill.pluginId || "_other";
+    acc[pluginId] = (acc[pluginId] || 0) + 1;
+    return acc;
+  }, {});
+  const currentPlugin = plugins.find((plugin) => plugin.id === state.skillPickerPluginId);
+  els.skillPickerBody.innerHTML = `
+    <aside class="skill-picker-plugins">
+      ${plugins.map((plugin) => `
+        <button class="${plugin.id === state.skillPickerPluginId ? "active" : ""}" type="button" data-skill-picker-plugin="${escapeHtml(plugin.id)}">
+          <span>${escapeHtml(plugin.label || plugin.name)}</span>
+          <em>${pluginCounts[plugin.id] || plugin.skillCount || 0}</em>
+        </button>
+      `).join("")}
+    </aside>
+    <section class="skill-picker-skills">
+      <header>
+        <span>${escapeHtml(needle ? "搜索结果" : (currentPlugin?.label || "Skills"))}</span>
+        <em>${filtered.length}</em>
+      </header>
+      <div class="skill-picker-list">
+        ${filtered.length ? filtered.map((skill) => `
+          <button class="skill-picker-item" type="button" data-skill-pick="${escapeHtml(skill.name)}">
+            <strong>${escapeHtml(skill.name)}</strong>
+            <small>${escapeHtml((skill.description || skillSummaryZh(skill) || "").slice(0, 108))}</small>
+          </button>
+        `).join("") : `<div class="skill-picker-empty">${state.skillsLoading ? "正在加载…" : "没有匹配的 Skill"}</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function insertSkillIntoComposer(name) {
+  if (!els.chatInput) return;
+  const trigger = `/${name} `;
+  const current = els.chatInput.value || "";
+  els.chatInput.value = current.trim().startsWith("/")
+    ? current.replace(/^\s*\/[A-Za-z0-9_/-]+(?:\s+)?/, trigger)
+    : `${trigger}${current}`;
+  els.chatInput.focus();
+  renderSendButton();
 }
 
 async function addComposerFiles(fileList) {
@@ -3426,7 +3727,7 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (!state.composerAddMenuOpen) return;
-  if (els.composerAddMenu?.contains(event.target) || els.composerAdd?.contains(event.target)) return;
+  if (els.composerAddMenu?.contains(event.target) || els.skillPicker?.contains(event.target) || els.composerAdd?.contains(event.target)) return;
   closeComposerAddMenu();
 });
 document.addEventListener("click", (event) => {
@@ -3517,6 +3818,7 @@ document.addEventListener("mouseover", (event) => {
     window.clearTimeout(previous);
     scrollbarTimers.delete(target);
   }
+  updateScrollbarOverlay(target);
   target.classList.add("scrollbar-visible");
 }, { capture: true, passive: true });
 document.addEventListener("mouseout", (event) => {
@@ -3529,9 +3831,11 @@ document.addEventListener("mouseout", (event) => {
     target.classList.remove("scrollbar-visible");
     target.classList.remove("scrollbar-active");
     scrollbarTimers.delete(target);
+    hideScrollbarOverlay(target);
   }, 500));
 }, { capture: true, passive: true });
 window.addEventListener("resize", () => {
+  if (scrollbarOverlayTarget) updateScrollbarOverlay(scrollbarOverlayTarget);
   const isNarrow = window.innerWidth <= 720;
   if (!state.isNarrowWindow && isNarrow) {
     state.narrowPane = "content";
@@ -4289,6 +4593,18 @@ els.appearanceUserBubbleReset?.addEventListener("click", () => {
   scheduleAppearanceSave(0);
 });
 
+els.appearanceShowHoverBackground?.addEventListener("click", () => {
+  toggleSettingsSwitch(els.appearanceShowHoverBackground);
+});
+
+els.appearanceShowUserAvatar?.addEventListener("click", () => {
+  toggleSettingsSwitch(els.appearanceShowUserAvatar);
+});
+
+els.appearanceShowAssistantAvatar?.addEventListener("click", () => {
+  toggleSettingsSwitch(els.appearanceShowAssistantAvatar);
+});
+
 els.fellowForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const fellow = {
@@ -4387,6 +4703,7 @@ els.composerAdd?.addEventListener("click", (event) => {
   event.stopPropagation();
   state.composerAddMenuOpen = !state.composerAddMenuOpen;
   state.slashMenuOpen = false;
+  if (state.composerAddMenuOpen) closeSkillPicker();
   renderSlashCommandMenu();
   renderComposerAddMenu();
 });
@@ -4394,12 +4711,83 @@ els.composerAddMenu?.addEventListener("click", (event) => {
   const action = event.target.closest("[data-composer-add]")?.dataset.composerAdd;
   if (!action) return;
   event.preventDefault();
-  closeComposerAddMenu();
   if (action === "attachment") {
+    closeComposerAddMenu();
     els.composerAttachmentInput?.click();
     return;
   }
+  if (action === "skill") {
+    openSkillPicker();
+    return;
+  }
   els.chatInput?.focus();
+});
+els.composerAddMenu?.addEventListener("pointerover", (event) => {
+  const action = event.target.closest("[data-composer-add]")?.dataset.composerAdd;
+  if (action === "skill") {
+    openSkillPicker();
+    return;
+  }
+  if (action) scheduleSkillPickerHoverClose();
+});
+els.composerAddMenu?.addEventListener("pointerout", (event) => {
+  const item = event.target.closest('[data-composer-add="skill"]');
+  if (!item) return;
+  if (targetIsSkillPickerZone(event.relatedTarget)) return;
+  scheduleSkillPickerHoverClose();
+});
+els.skillPicker?.addEventListener("pointerenter", cancelSkillPickerHoverClose);
+els.skillPicker?.addEventListener("pointerleave", (event) => {
+  if (targetIsSkillPickerZone(event.relatedTarget)) return;
+  scheduleSkillPickerHoverClose();
+});
+
+els.skillPickerSearch?.addEventListener("input", () => {
+  state.skillPickerFilter = els.skillPickerSearch.value || "";
+  renderSkillPicker();
+});
+els.closeSkillPicker?.addEventListener("click", () => closeSkillPicker());
+els.skillPickerBody?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-skill-pick]");
+  if (!button) return;
+  insertSkillIntoComposer(button.dataset.skillPick);
+  closeComposerAddMenu();
+  closeSkillPicker();
+});
+els.skillPickerBody?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-skill-picker-plugin]");
+  if (!button) return;
+  state.skillPickerPluginId = button.dataset.skillPickerPlugin || "";
+  state.skillPickerFilter = "";
+  if (els.skillPickerSearch) els.skillPickerSearch.value = "";
+  renderSkillPicker();
+});
+els.skillPickerBody?.addEventListener("pointerover", (event) => {
+  const button = event.target.closest("[data-skill-picker-plugin]");
+  if (!button || button.dataset.skillPickerPlugin === state.skillPickerPluginId) return;
+  state.skillPickerPluginId = button.dataset.skillPickerPlugin || "";
+  state.skillPickerFilter = "";
+  if (els.skillPickerSearch) els.skillPickerSearch.value = "";
+  renderSkillPicker();
+});
+els.skillPickerSearch?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeSkillPicker();
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const first = els.skillPickerBody?.querySelector("[data-skill-pick]");
+    if (first) {
+      insertSkillIntoComposer(first.dataset.skillPick);
+      closeComposerAddMenu();
+      closeSkillPicker();
+    }
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!state.skillPickerOpen) return;
+  if (els.skillPicker?.contains(event.target)) return;
+  if (els.composerAddMenu?.contains(event.target)) return;
+  if (els.composerAdd?.contains(event.target)) return;
+  closeSkillPicker();
 });
 els.composerAttachmentInput?.addEventListener("change", () => {
   addComposerFiles(els.composerAttachmentInput.files);
