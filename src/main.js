@@ -3720,7 +3720,21 @@ function copyMarketplacePluginSource(item, destinationRoot, sourceOverride = "")
   if (!sourcePath || !fs.existsSync(sourcePath)) {
     throw new Error("这个插件没有可用的本机源目录，暂不能一键安装。");
   }
-  const dest = path.join(destinationRoot, item.marketplace || "marketplace", item.name, marketplaceVersionSegment(item));
+  const safeSegment = (value) => {
+    const trimmed = String(value || "").trim();
+    return /^[A-Za-z0-9._-]+$/.test(trimmed) ? trimmed : "";
+  };
+  const marketplaceSegment = safeSegment(item.marketplace) || "marketplace";
+  const nameSegment = safeSegment(item.name);
+  if (!nameSegment) {
+    throw new Error("插件名称含有不允许的字符，无法安装。");
+  }
+  const dest = path.join(destinationRoot, marketplaceSegment, nameSegment, marketplaceVersionSegment(item));
+  const resolvedRoot = path.resolve(destinationRoot);
+  const resolvedDest = path.resolve(dest);
+  if (resolvedDest !== resolvedRoot && !resolvedDest.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error("插件目标路径越界，已拒绝写入。");
+  }
   if (fs.existsSync(dest)) return dest;
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.cpSync(sourcePath, dest, {
