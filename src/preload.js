@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld("aimashi", {
   loadModelCatalog: () => ipcRenderer.invoke("model:catalog"),
   loadEngineCapabilities: () => ipcRenderer.invoke("engine:capabilities"),
   loadSkills: () => ipcRenderer.invoke("skills:list"),
+  showEditContextMenu: (point) => ipcRenderer.invoke("edit:context-menu", point),
   installPlugin: (extensionId) => ipcRenderer.invoke("plugins:install", extensionId),
   readSkill: (skillId) => ipcRenderer.invoke("skills:read", skillId),
   deleteSkill: (skillId) => ipcRenderer.invoke("skills:delete", skillId),

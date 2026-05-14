@@ -41,8 +41,29 @@
         </label>
         <button id="newPersona" class="icon-button" type="button" title="新建">＋</button>
         <div id="fellowCreateMenu" class="create-menu hidden">
-          <button id="addFellow" type="button">添加伙伴</button>
-          <button id="createGroup" type="button" disabled>创建群组 <span>实验性</span></button>
+          <button id="addFellow" type="button">
+            <span class="create-menu-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                <circle cx="24" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M42 44C42 34.0589 33.9411 26 24 26C14.0589 26 6 34.0589 6 44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M19 39H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M24 34V44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="create-menu-label">添加伙伴</span>
+          </button>
+          <button id="createGroup" type="button" disabled>
+            <span class="create-menu-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                <path d="M19 20C22.866 20 26 16.866 26 13C26 9.13401 22.866 6 19 6C15.134 6 12 9.13401 12 13C12 16.866 15.134 20 19 20Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M32.6077 7C34.6405 8.2249 36.0001 10.4537 36.0001 13C36.0001 15.5463 34.6405 17.7751 32.6077 19" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 40.8V42H34V40.8C34 36.3196 34 34.0794 33.1281 32.3681C32.3611 30.8628 31.1372 29.6389 29.6319 28.8719C27.9206 28 25.6804 28 21.2 28H16.8C12.3196 28 10.0794 28 8.36808 28.8719C6.86278 29.6389 5.63893 30.8628 4.87195 32.3681C4 34.0794 4 36.3196 4 40.8Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M43.9999 42.0001V40.8001C43.9999 36.3197 43.9999 34.0795 43.128 32.3682C42.361 30.8629 41.1371 29.6391 39.6318 28.8721" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="create-menu-label">创建群组</span>
+            <span class="menu-badge">实验性</span>
+          </button>
         </div>
       </header>
 
@@ -94,7 +115,16 @@
             </button>
             <div id="sessionMenu" class="session-menu hidden">
               <div class="session-menu-head">
-                <strong>聊天记录</strong>
+                <strong>
+                  <span class="session-menu-head-icon" aria-hidden="true">
+                    <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                      <path d="M5.81836 6.72729V14H13.0911" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M4 24C4 35.0457 12.9543 44 24 44V44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C16.598 4 10.1351 8.02111 6.67677 13.9981" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M24.005 12L24.0038 24.0088L32.4832 32.4882" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  聊天记录
+                </strong>
                 <button id="newSession" class="icon-button" type="button" title="新建对话">＋</button>
               </div>
               <div id="sessionList" class="session-list"></div>

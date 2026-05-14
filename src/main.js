@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -6898,6 +6898,19 @@ ipcMain.handle("window:state", (event) => {
   const w = BrowserWindow.fromWebContents(event.sender);
   if (!w) return { focused: true, fullscreen: false };
   return { focused: w.isFocused(), fullscreen: w.isFullScreen() };
+});
+ipcMain.handle("edit:context-menu", (event, point = {}) => {
+  const w = BrowserWindow.fromWebContents(event.sender);
+  if (!w) return;
+  Menu.buildFromTemplate([
+    { label: "剪切", role: "cut" },
+    { label: "复制", role: "copy" },
+    { label: "粘贴", role: "paste" }
+  ]).popup({
+    window: w,
+    x: Number.isFinite(point.x) ? Math.round(point.x) : undefined,
+    y: Number.isFinite(point.y) ? Math.round(point.y) : undefined
+  });
 });
 
 ipcMain.handle("runtime:initialize", async () => {
