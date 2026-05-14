@@ -198,7 +198,7 @@ user 发送 msg (含或不含 @)
 
 ### Claude Code Fellow / Codex Fellow
 
-- 在 SDK 调用前，由 `groupAdapters.ts` 把群上下文拼到 user message 前面：
+- 在 SDK 调用前，由 `group-adapters.js` 把群上下文拼到 user message 前面：
   ```
   [群上下文]
   群名：<name>
@@ -223,23 +223,20 @@ user 发送 msg (含或不含 @)
 
 ## 8. 组件 & 文件清单
 
+**技术栈约束**：沿用现有 aimashi 风格——vanilla JS（无 React、无 TS、无构建链），扁平文件布局（与 `src/renderer/app.js`、`src/renderer/pet.js` 同级），renderer 侧 IPC 通过现有 `preload.js` 暴露 API。
+
 ### 新增
 
 ```
-src/renderer/group/
-  GroupChat.tsx                     # 群聊主界面
-  GroupSidebar.tsx                  # 侧边栏群条目
-  GroupCreateDialog.tsx             # 建群对话框
-  GroupInfoDrawer.tsx               # 群信息抽屉（成员、目标、群主切换）
-  ComposerMentionPicker.tsx         # @ 时的 Fellow 选择弹窗
+src/renderer/
+  group.js                          # 群聊全部 renderer 逻辑（UI 渲染、@ 解析、composer、抽屉）
+                                    # 跟 pet.js 同级；从 app.js 调用入口
+  conductor.js                      # 调度 + 摘要 + nudge 协调层（renderer 侧无状态调用）
+  group-prompts.js                  # dispatch / summarize / nudge prompt 拼装函数
 
-src/renderer/conductor/
-  ConductorService.ts               # 调度 + 摘要 + nudge 的协调层
-  ConductorPrompts.ts               # dispatch / summarize / nudge prompt 模板
-
-src/main/group/
-  groupStore.ts                     # 读写 engine-home/groups/
-  groupAdapters.ts                  # 三种引擎的群上下文注入
+src/main/
+  group-store.js                    # 读写 engine-home/groups/，IPC 入口（main 进程）
+  group-adapters.js                 # 三种引擎的群上下文注入（main 进程，与现有 chat adapter 同侧）
 
 resources/conductor/
   default-prompts/
@@ -250,10 +247,12 @@ resources/conductor/
 
 ### 改动
 
-- `aimashi_plugins/fellow_overlay.py`：识别 `X-Aimashi-Group-Context` header
-- `aimashi-sessions.json`：扩展 schema 支持 group sessions
-- 侧边栏渲染：能识别"群"和"1v1"两种条目
-- Fellow 引擎适配层（现有的 `normalizeMessage` 风格）：增加 group context 注入 hook
+- `src/main.js`：注册 group-store / group-adapters 的 IPC handler
+- `src/preload.js`：暴露 `aimashi.groups.*` API
+- `src/renderer/app.js`：侧边栏渲染能区分"群"和"1v1"条目；@ composer 复用现有 input；从 app.js 转发到 `group.js`
+- `src/renderer/index.html` / `styles.css`：群相关 DOM 节点和样式
+- `runtime/hermes-engine/aimashi_plugins/fellow_overlay.py`：识别 `X-Aimashi-Group-Context` header
+- `engine-home/aimashi-sessions.json`：扩展 schema 支持 group sessions（保持向前兼容旧 1v1 session）
 
 ## 9. 测试策略
 
