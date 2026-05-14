@@ -6558,7 +6558,10 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, webContent
     const manifest = loadFellowManifest();
     const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : [];
     const key = fellowKey || personaKey;
-    const fellow = fellows.find((item) => item.key === key) || fellows[0] || defaultFellowManifest().fellows[0];
+    const fellow = fellows.find((item) => item.key === key) || fellows[0];
+    if (!fellow) {
+      throw new Error("还没有可用的 fellow，请先在引导里创建一个再发起对话。");
+    }
     const agentEngine = normalizeFellowAgentEngine(fellow.agentEngine || fellow.agent_engine || fellow.engine);
     const shouldNotifyPet = !String(sessionId || "").startsWith("title:");
     const completeWithPetMessage = (response) => {
