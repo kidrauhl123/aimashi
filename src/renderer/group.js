@@ -263,6 +263,88 @@
 
     refreshMembers();
 
+    // Render addable-members section
+    const addableBox = document.getElementById("groupInfoAddable");
+    function refreshAddable() {
+      if (!addableBox) return;
+      addableBox.innerHTML = "";
+      if (group.members.length >= 5) {
+        const full = document.createElement("p");
+        full.className = "group-info-addable-full";
+        full.textContent = "已满员（最多 5 位 Fellow）";
+        addableBox.appendChild(full);
+        return;
+      }
+      const eligible = currentFellows().filter((f) => {
+        const fid = f.id || f.key;
+        return !group.members.includes(fid);
+      });
+      if (eligible.length === 0) {
+        const none = document.createElement("p");
+        none.className = "group-info-addable-full";
+        none.textContent = "没有可添加的 Fellow";
+        addableBox.appendChild(none);
+        return;
+      }
+      for (const fellow of eligible) {
+        const fellowId = fellow.id || fellow.key;
+        const row = document.createElement("div");
+        row.className = "group-create-member-row group-info-add-row";
+        const avatarEl = document.createElement("span");
+        avatarEl.className = "member-avatar";
+        if (typeof avatarThumbBackgroundStyle === "function") {
+          const image = fellow.avatarImage || (typeof avatarAssetForKey === "function" ? avatarAssetForKey(fellowId) : "");
+          avatarEl.style.cssText = avatarThumbBackgroundStyle(image, fellow.avatarCrop, fellow.color || "#5e5ce6");
+        } else {
+          avatarEl.style.background = fellow.color || "#5e5ce6";
+        }
+        const nameEl = document.createElement("span");
+        nameEl.className = "member-name";
+        nameEl.textContent = fellow.name || fellowId;
+        const addIndicator = document.createElement("span");
+        addIndicator.className = "group-info-add-indicator";
+        addIndicator.textContent = "+";
+        row.appendChild(avatarEl);
+        row.appendChild(nameEl);
+        row.appendChild(addIndicator);
+        row.addEventListener("click", async () => {
+          if (group.members.length >= 5) return;
+          const newMembers = [...group.members, fellowId];
+          group.members = newMembers;
+          try {
+            await window.aimashi.groups.update(group.id, { members: newMembers });
+          } catch (e) {
+            console.warn("[group] addMember persist failed:", e);
+            group.members = newMembers.filter((id) => id !== fellowId);
+            return;
+          }
+          const fellowName = infoFellowNamesById[fellowId] || fellow.name || fellowId;
+          const sysMsg = {
+            id: "m-" + Date.now() + "-join",
+            groupId: group.id,
+            role: "system",
+            content: fellowName + " 加入了群",
+            mentions: [],
+            turnId: "t-sys-" + Date.now(),
+            createdAt: Date.now(),
+            status: "complete",
+          };
+          try {
+            await window.aimashi.groups.appendMessage(group.id, sysMsg);
+          } catch (e) {
+            console.warn("[group] system bubble persist failed:", e);
+          }
+          const msgs = moduleState.messagesByGroup.get(group.id) || [];
+          msgs.push(sysMsg);
+          const chatEl = document.getElementById("chat");
+          if (chatEl) renderGroupMessagesIntoChat(group, msgs, chatEl);
+          openInfoDialog(group);
+        });
+        addableBox.appendChild(row);
+      }
+    }
+    refreshAddable();
+
     hostSelect.innerHTML = "";
     for (const memberId of group.members) {
       const opt = document.createElement("option");

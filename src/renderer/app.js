@@ -2684,13 +2684,25 @@ function render() {
   const active = personas.find((persona) => persona.key === state.activeKey) || personas[0];
   const groupInfoBtn = document.getElementById("groupInfoButton");
   if (groupActive) {
-    // Render composite group avatar in topbar
+    // Render composite group avatar in topbar (Boss first, then all Fellows)
     if (els.activeChatAvatar) {
       els.activeChatAvatar.textContent = "";
       els.activeChatAvatar.setAttribute("style", "");
       els.activeChatAvatar.className = "profile-avatar group-avatar";
-      const tiles = (groupActive.members || []).slice(0, 4);
-      for (const mid of tiles) {
+      const topbarUser = state.runtime?.user || {};
+      const topbarBossColor = topbarUser.avatarColor || "#111827";
+      const bossTileTopbar = document.createElement("span");
+      bossTileTopbar.className = "group-avatar-tile";
+      let topbarBossStyle = "";
+      if (typeof avatarThumbBackgroundStyle === "function" && topbarUser.avatarImage) {
+        topbarBossStyle = avatarThumbBackgroundStyle(topbarUser.avatarImage, topbarUser.avatarCrop, topbarBossColor);
+      }
+      if (!topbarBossStyle || topbarBossStyle.trim() === "") {
+        topbarBossStyle = "background-color:" + topbarBossColor + ";";
+      }
+      bossTileTopbar.style.cssText = topbarBossStyle;
+      els.activeChatAvatar.appendChild(bossTileTopbar);
+      for (const mid of (groupActive.members || [])) {
         const tile = document.createElement("span");
         tile.className = "group-avatar-tile";
         const fellow = personas.find((p) => (p.id || p.key) === mid);
@@ -2705,6 +2717,7 @@ function render() {
         tile.style.cssText = styleStr;
         els.activeChatAvatar.appendChild(tile);
       }
+      els.activeChatAvatar.setAttribute("data-count", String(1 + (groupActive.members || []).length));
     }
     setText(els.activeChatName, groupActive.name || "未命名群聊");
     if (els.activeChatMeta) {
@@ -2789,10 +2802,22 @@ function render() {
         <span class="persona-time">${escapeHtml(updated)}</span>
       </span>
     `;
-    // Build composite avatar tiles
+    // Build composite avatar tiles (Boss first, then all Fellows)
     const avatarEl = btn.querySelector(".avatar.group-avatar");
-    const tiles = (group.members || []).slice(0, 4);
-    for (const mid of tiles) {
+    const sidebarUser = state.runtime?.user || {};
+    const sidebarBossColor = sidebarUser.avatarColor || "#111827";
+    const bossTileSidebar = document.createElement("span");
+    bossTileSidebar.className = "group-avatar-tile";
+    let sidebarBossStyle = "";
+    if (typeof avatarThumbBackgroundStyle === "function" && sidebarUser.avatarImage) {
+      sidebarBossStyle = avatarThumbBackgroundStyle(sidebarUser.avatarImage, sidebarUser.avatarCrop, sidebarBossColor);
+    }
+    if (!sidebarBossStyle || sidebarBossStyle.trim() === "") {
+      sidebarBossStyle = "background-color:" + sidebarBossColor + ";";
+    }
+    bossTileSidebar.style.cssText = sidebarBossStyle;
+    avatarEl.appendChild(bossTileSidebar);
+    for (const mid of (group.members || [])) {
       const tile = document.createElement("span");
       tile.className = "group-avatar-tile";
       const fellow = personas.find((p) => (p.id || p.key) === mid);
@@ -2807,6 +2832,7 @@ function render() {
       tile.style.cssText = styleStr;
       avatarEl.appendChild(tile);
     }
+    avatarEl.setAttribute("data-count", String(1 + (group.members || []).length));
     btn.addEventListener("click", () => {
       state.activeKey = group.id;
       state.activeGroupId = group.id;

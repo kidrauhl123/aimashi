@@ -6080,30 +6080,67 @@ pre {
 }
 
 /* ── Group composite avatar — sidebar and topbar ── */
-.group-avatar.composite,
 .persona .group-avatar,
-.profile-avatar.group-avatar {
+.profile-avatar.group-avatar,
+.group-avatar.composite {
   display: grid !important;
-  grid-template-columns: 1fr 1fr !important;
-  grid-template-rows: 1fr 1fr !important;
   place-items: stretch !important;
   gap: 1px;
   overflow: hidden;
   border-radius: 12px;
   background: var(--line);
   padding: 0;
-  flex-shrink: 0;
 }
 .persona .group-avatar {
   width: 42px;
   height: 42px;
-  border-radius: 12px;
 }
 .profile-avatar.group-avatar {
   width: 42px;
   height: 42px;
   border-radius: 12px;
 }
+
+/* Default to 2x2 for safety */
+.group-avatar[data-count] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 2 tiles: side by side */
+.group-avatar[data-count="2"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 3 tiles: top spans both, bottom split */
+.group-avatar[data-count="3"] {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.group-avatar[data-count="3"] > .group-avatar-tile:nth-child(1) {
+  grid-column: 1 / span 2;
+}
+
+/* 4 tiles: 2x2 — covered by default */
+
+/* 5 tiles: top 2 (each 3 cols), bottom 3 (each 2 cols), using 6-col grid */
+.group-avatar[data-count="5"] {
+  grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: 1fr 1fr;
+}
+.group-avatar[data-count="5"] > .group-avatar-tile:nth-child(1) { grid-column: 1 / span 3; grid-row: 1; }
+.group-avatar[data-count="5"] > .group-avatar-tile:nth-child(2) { grid-column: 4 / span 3; grid-row: 1; }
+.group-avatar[data-count="5"] > .group-avatar-tile:nth-child(3) { grid-column: 1 / span 2; grid-row: 2; }
+.group-avatar[data-count="5"] > .group-avatar-tile:nth-child(4) { grid-column: 3 / span 2; grid-row: 2; }
+.group-avatar[data-count="5"] > .group-avatar-tile:nth-child(5) { grid-column: 5 / span 2; grid-row: 2; }
+
+/* 6 tiles: 3x2 */
+.group-avatar[data-count="6"] {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
 .group-avatar-tile {
   width: 100%;
   height: 100%;
