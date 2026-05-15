@@ -6591,6 +6591,124 @@ async function sendCodexChat({ fellow, sessionId, messages, group, signal }) {
   });
 }
 
+async function sendChatStateless({ fellowKey, systemPrompt, userPrompt, signal }) {
+  const manifest = loadFellowManifest();
+  const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : [];
+  const fellow = fellows.find((item) => item.key === fellowKey) || fellows[0];
+  if (!fellow) {
+    throw new Error("还没有可用的 fellow，请先在引导里创建一个再发起对话。");
+  }
+  const agentEngine = normalizeFellowAgentEngine(fellow.agentEngine || fellow.agent_engine || fellow.engine);
+
+  // --- Claude Code branch ---
+  if (agentEngine === "claude-code") {
+    const commandPath = shellCommandPath("claude");
+    if (!commandPath) throw new Error("本机没有检测到 Claude Code CLI。请先安装并确认 `claude --version` 可用。");
+    const { query } = await claudeAgentSdk();
+    // Prepend the system prompt to the user prompt so we don't touch the Fellow's
+    // existing session or inject their persona. No `resume` so it starts fresh.
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
+    const options = {
+      cwd: process.cwd(),
+      pathToClaudeCodeExecutable: commandPath,
+      env: processEnvStrings(),
+      tools: { type: "preset", preset: "claude_code" },
+      settingSources: ["project", "user", "local"],
+      systemPrompt: { type: "preset", preset: "claude_code" }
+    };
+    const stream = query({ prompt: fullPrompt, options });
+    const chunks = [];
+    for await (const message of stream) {
+      if (signal?.aborted) break;
+      if (message?.type === "assistant") {
+        const text = claudeMessageText(message);
+        if (text) chunks.push(text);
+      }
+    }
+    if (signal?.aborted) {
+      const stopped = new Error("生成已停止");
+      stopped.code = "AIMASHI_STOPPED";
+      throw stopped;
+    }
+    return { content: chunks.join("\n").trim() };
+  }
+
+  // --- Codex branch ---
+  if (agentEngine === "codex") {
+    const commandPath = shellCommandPath("codex");
+    if (!commandPath) throw new Error("本机没有检测到 Codex CLI。请先安装并确认 `codex --version` 可用。");
+    const { Codex } = await codexSdk();
+    const codex = new Codex({
+      codexPathOverride: commandPath,
+      env: processEnvStrings()
+    });
+    const thread = codex.startThread({
+      workingDirectory: process.cwd(),
+      skipGitRepoCheck: true,
+      modelReasoningEffort: normalizeEffortLevel("medium", "codex"),
+      ...mapCodexPermissionMode("default")
+    });
+    const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
+    const turn = await thread.run(fullPrompt, { signal });
+    if (signal?.aborted) {
+      const stopped = new Error("生成已停止");
+      stopped.code = "AIMASHI_STOPPED";
+      throw stopped;
+    }
+    return { content: String(turn?.finalResponse || "").trim() };
+  }
+
+  // --- Hermes branch (default) ---
+  if (!engineState.running || !engineState.baseUrl) {
+    await startEngine();
+  }
+  const accountId = fellow.account_id || fellow.key;
+  const routeProfile = fellow.route_profile || accountId;
+  // Use a unique ephemeral session id so Hermes doesn't resume the Fellow's real thread.
+  const ephemeralSessionId = `_stateless_${crypto.randomUUID()}`;
+  const runBody = {
+    model: "hermes-agent",
+    input: userPrompt,
+    session_id: ephemeralSessionId,
+    account_id: accountId,
+    metadata: {
+      fellow_key: fellow.key,
+      persona_key: fellow.key,
+      account_id: accountId,
+      route_profile: routeProfile,
+      display_name: fellow.name
+    }
+  };
+  // Inject caller-supplied system prompt as instructions (no persona).
+  if (systemPrompt) runBody.instructions = systemPrompt;
+  // Omit X-Aimashi-Fellow so fellow_overlay.py doesn't inject the Fellow's persona.
+  const hermesHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey()}`
+  };
+  const response = await fetch(`${engineState.baseUrl}/v1/runs`, {
+    method: "POST",
+    headers: hermesHeaders,
+    body: JSON.stringify(runBody),
+    signal
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    let message = text;
+    try {
+      message = JSON.parse(text).error?.message || text;
+    } catch {
+      // Keep the raw response text.
+    }
+    throw new Error(normalizeHermesError(message) || `${response.status} ${response.statusText}`);
+  }
+  const run = JSON.parse(text);
+  const hermesRunId = run.run_id || run.id;
+  if (!hermesRunId) throw new Error("Hermes did not return a run_id.");
+  const stream = await readRunEventStream({ runId: hermesRunId, signal, emit: null });
+  return { content: stream.content || "" };
+}
+
 async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents }) {
   if (activeChatAbortController) {
     activeChatAbortController.abort();
@@ -7049,6 +7167,7 @@ ipcMain.handle("auth:codex-cancel", () => cancelCodexOAuth());
 ipcMain.handle("auth:provider-start", (_event, provider) => startProviderOAuth(provider));
 ipcMain.handle("auth:provider-cancel", () => cancelProviderOAuth());
 ipcMain.handle("chat:send", (event, payload) => sendChat({ ...payload, webContents: event.sender }));
+ipcMain.handle("chat:send-stateless", (_event, payload) => sendChatStateless(payload));
 ipcMain.handle("chat:stop", () => stopChat());
 ipcMain.handle("chat:attachment-save", (_event, payload) => saveChatAttachment(payload));
 ipcMain.handle("commands:slash", () => loadHermesSlashCommands());

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("aimashi", {
   startProviderOAuth: (provider) => ipcRenderer.invoke("auth:provider-start", provider),
   cancelProviderOAuth: () => ipcRenderer.invoke("auth:provider-cancel"),
   sendChat: (payload) => ipcRenderer.invoke("chat:send", payload),
+  sendChatStateless: (payload) => ipcRenderer.invoke("chat:send-stateless", payload),
   stopChat: () => ipcRenderer.invoke("chat:stop"),
   saveAttachment: (payload) => ipcRenderer.invoke("chat:attachment-save", payload),
   filePathForFile: (file) => {
