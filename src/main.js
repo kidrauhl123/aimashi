@@ -12,6 +12,8 @@ const QRCode = require("qrcode");
 const WebSocket = require("ws");
 const { normalizePermissionMode, permissionModeLabel } = require("./permission-modes");
 const runtimeResources = require("./runtime-resource-paths");
+const { createGroupStore } = require("./main/group-store.js");
+const { buildHermesGroupHeader, injectGroupContextForSdk } = require("./main/group-adapters.js");
 
 app.setName("Aimashi");
 
@@ -115,6 +117,13 @@ function readJson(filePath, fallback) {
   }
 }
 
+let _groupStore = null;
+function ensureGroupStore() {
+  if (_groupStore) return _groupStore;
+  _groupStore = createGroupStore(runtimePaths().groupsDir);
+  return _groupStore;
+}
+
 function defaultModelSettings() {
   return {
     provider: "",
@@ -160,6 +169,7 @@ function runtimePaths() {
     appearanceSettings: path.join(home, "aimashi-appearance.json"),
     chatSessions: path.join(home, "aimashi-sessions.json"),
     attachmentsDir: path.join(home, "attachments"),
+    groupsDir: path.join(home, "groups"),
     petDir: path.join(home, "pets"),
     petJobsDir: path.join(home, "pet-jobs"),
     logsDir: path.join(home, "logs"),
@@ -7263,6 +7273,13 @@ ipcMain.handle("fellow:save", (_event, fellow) => saveFellow(fellow));
 ipcMain.handle("fellow:engine-save", (_event, payload) => saveFellowEngineConfig(payload));
 ipcMain.handle("fellow:pin", (_event, payload) => setFellowPinned(payload));
 ipcMain.handle("fellow:delete", (_event, payload) => deleteFellow(payload));
+ipcMain.handle("group:create", (_event, payload) => ensureGroupStore().create(payload));
+ipcMain.handle("group:list", () => ensureGroupStore().list());
+ipcMain.handle("group:get", (_event, id) => ensureGroupStore().get(id));
+ipcMain.handle("group:update", (_event, payload) => ensureGroupStore().updateGroup(payload.id, payload.patch));
+ipcMain.handle("group:append-message", (_event, payload) => { ensureGroupStore().appendMessage(payload.id, payload.message); return true; });
+ipcMain.handle("group:list-messages", (_event, id) => ensureGroupStore().listMessages(id));
+ipcMain.handle("group:save-context-card", (_event, payload) => { ensureGroupStore().saveContextCard(payload.id, payload.card); return true; });
 ipcMain.handle("persona:save", (_event, persona) => saveFellow(persona));
 ipcMain.handle("pet:jobs", () => getPetJobs());
 ipcMain.handle("pet:generate", (_event, payload) => startFellowPetGeneration(payload));
