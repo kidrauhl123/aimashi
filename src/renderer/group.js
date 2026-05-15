@@ -22,6 +22,7 @@
     promptTemplates: null,
     conductor: null,
     deps: null,
+    personaWatcherBound: false,
   };
 
   async function initGroupModule(deps) {
@@ -47,6 +48,7 @@
     }
     renderGroupSidebarEntries();
     bindCreateButton();
+    bindPersonaListWatcher();
   }
 
   function renderGroupSidebarEntries() {
@@ -93,6 +95,23 @@
     if (!btn) return;
     btn.disabled = false;
     btn.addEventListener("click", openCreateDialog);
+  }
+
+  function bindPersonaListWatcher() {
+    if (moduleState.personaWatcherBound) return;
+    const list = document.getElementById("personaList");
+    if (!list) return;
+    list.addEventListener("click", () => {
+      // If user clicked a 1v1 persona, hide the group view and let app.js show chatView
+      const view = document.getElementById("group-view");
+      if (view && !view.classList.contains("hidden")) {
+        view.classList.add("hidden");
+        moduleState.activeGroupId = null;
+        const chatView = document.getElementById("chatView");
+        if (chatView) chatView.classList.remove("hidden");
+      }
+    });
+    moduleState.personaWatcherBound = true;
   }
 
   function openCreateDialog() {
@@ -182,6 +201,10 @@
     }
     moduleState.activeGroupId = groupId;
 
+    // Hide the 1v1 chat view (it's controlled by app.js)
+    const chatView = document.getElementById("chatView");
+    if (chatView) chatView.classList.add("hidden");
+
     // Hide any other view; show group view
     // (Other views are managed by app.js; we only flip our own.)
     const view = document.getElementById("group-view");
@@ -257,6 +280,19 @@
     const picker = document.getElementById("group-mention-picker");
     if (!picker) return;
     picker.innerHTML = "";
+
+    function close() {
+      picker.classList.add("hidden");
+      document.removeEventListener("click", outsideClick, true);
+      document.removeEventListener("keydown", escKey);
+    }
+    function outsideClick(e) {
+      if (!picker.contains(e.target) && e.target.id !== "group-input") close();
+    }
+    function escKey(e) {
+      if (e.key === "Escape") close();
+    }
+
     for (const memberId of group.members) {
       const item = document.createElement("div");
       item.className = "mention-item";
@@ -265,7 +301,7 @@
         const input = document.getElementById("group-input");
         const name = moduleState.fellowNamesById[memberId] || memberId;
         input.value = input.value + name + " ";
-        picker.classList.add("hidden");
+        close();
         input.focus();
       });
       picker.appendChild(item);
@@ -278,6 +314,11 @@
       picker.style.top = (rect.top - 240) + "px";
     }
     picker.classList.remove("hidden");
+    // Defer listener attachment so the current keydown doesn't immediately close it
+    setTimeout(() => {
+      document.addEventListener("click", outsideClick, true);
+      document.addEventListener("keydown", escKey);
+    }, 0);
   }
 
   async function sendInGroup(group) {
@@ -399,7 +440,11 @@
       placeholderMsg.status = "error";
     }
     // Persist the now-completed (or errored) message
-    await window.aimashi.groups.appendMessage(group.id, placeholderMsg);
+    try {
+      await window.aimashi.groups.appendMessage(group.id, placeholderMsg);
+    } catch (e) {
+      console.warn("[group] appendMessage failed for fellow " + fellowId + ":", e);
+    }
     renderGroupMessages(group, msgs);
   }
 
