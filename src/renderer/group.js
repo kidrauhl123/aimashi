@@ -620,6 +620,21 @@
       relayedTurns += 1;
     }
 
+    // Soft wrap-up when the relay hit the hard cap (not when the LLM ended
+    // naturally and not when the user interrupted). Host Fellow says one line
+    // in-persona, checking with the user whether to keep going. Avoids the
+    // abrupt mid-game cut-off when 6 turns runs out.
+    if (
+      relayedTurns >= MAX_RELAY_TURNS &&
+      moduleState.relayToken === myRelayToken &&
+      group.hostFellowId
+    ) {
+      const wrapupCue = "（你们已经在群里自由接了好几轮了。请基于你的人设，用一句自然的话问用户：是想继续看你们接下去，还是先聊点别的。承接前面对话，不要重新开场，也不要解释规则。）";
+      const wrapupMsg = { ...userMsg, content: wrapupCue, mentions: [] };
+      await dispatchToFellow(group, group.hostFellowId, wrapupMsg, turnId)
+        .catch((err) => console.error("[group] wrapup dispatch error", err));
+    }
+
     await maybeUpdateSummary(group);
   }
 
