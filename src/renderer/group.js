@@ -25,6 +25,21 @@
     personaWatcherBound: false,
   };
 
+  function currentFellows() {
+    if (moduleState.deps && typeof moduleState.deps.getFellows === "function") {
+      return moduleState.deps.getFellows();
+    }
+    return moduleState.fellows || [];
+  }
+
+  function currentFellowNamesById() {
+    const map = {};
+    for (const f of currentFellows()) {
+      map[f.id || f.key] = f.name || f.key;
+    }
+    return map;
+  }
+
   async function initGroupModule(deps) {
     moduleState.deps = deps;
     moduleState.fellows = (deps.getFellows && deps.getFellows()) || [];
@@ -94,19 +109,20 @@
 
     const selected = new Set();
 
+    const fellowNamesById = currentFellowNamesById();
     function refreshHostOptions() {
       hostSelect.innerHTML = "";
       for (const id of selected) {
         const opt = document.createElement("option");
         opt.value = id;
-        opt.textContent = moduleState.fellowNamesById[id] || id;
+        opt.textContent = fellowNamesById[id] || id;
         hostSelect.appendChild(opt);
       }
     }
 
     // Build member rows
     membersBox.innerHTML = "";
-    for (const fellow of moduleState.fellows) {
+    for (const fellow of currentFellows()) {
       const fellowId = fellow.id || fellow.key;
       const row = document.createElement("div");
       row.className = "group-create-member-row";
@@ -177,7 +193,7 @@
       }
       const hostFellowId = hostSelect.value || members[0];
       const name = nameInput.value.trim() || members
-        .map((id) => moduleState.fellowNamesById[id] || id)
+        .map((id) => fellowNamesById[id] || id)
         .join(" · ");
       try {
         const group = await window.aimashi.groups.create({ name, members, hostFellowId });
@@ -214,6 +230,7 @@
     const goalSaveBtn = document.getElementById("groupInfoGoalSave");
     const resetCtxBtn = document.getElementById("groupInfoResetCtx");
 
+    const infoFellowNamesById = currentFellowNamesById();
     function refreshMembers() {
       membersBox.innerHTML = "";
       for (const memberId of group.members) {
@@ -221,7 +238,7 @@
         row.className = "group-info-member-row";
         const label = document.createElement("span");
         label.className = "group-info-member-name";
-        label.textContent = (moduleState.fellowNamesById[memberId] || memberId) +
+        label.textContent = (infoFellowNamesById[memberId] || memberId) +
           (memberId === group.hostFellowId ? " 👑" : "");
         row.appendChild(label);
         if (group.members.length > 1) {
@@ -242,7 +259,7 @@
     for (const memberId of group.members) {
       const opt = document.createElement("option");
       opt.value = memberId;
-      opt.textContent = moduleState.fellowNamesById[memberId] || memberId;
+      opt.textContent = infoFellowNamesById[memberId] || memberId;
       if (memberId === group.hostFellowId) opt.selected = true;
       hostSelect.appendChild(opt);
     }
@@ -362,7 +379,7 @@
       } else if (msg.role === "fellow") {
         article.className = "message assistant";
         const fellow = allFellows.find((f) => (f.id || f.key) === msg.senderFellowId);
-        const fellowName = moduleState.fellowNamesById[msg.senderFellowId] || msg.senderFellowId || "?";
+        const fellowName = currentFellowNamesById()[msg.senderFellowId] || msg.senderFellowId || "?";
         const fellowColor = fellow?.color || "#5e5ce6";
         const isHost = msg.senderFellowId === group.hostFellowId;
         let avatarStyle = "";
@@ -436,17 +453,20 @@
       console.warn("[group] conductor not initialized; only explicit @ will dispatch");
     }
 
-    const members = moduleState.fellows.filter((f) => group.members.includes(f.id || f.key));
+    const members = currentFellows().filter((f) => group.members.includes(f.id || f.key));
 
     let dispatch;
     if (moduleState.conductor) {
       dispatch = await moduleState.conductor.decideDispatch({
         group,
         members,
-        fellowNamesById: moduleState.fellowNamesById,
+        fellowNamesById: currentFellowNamesById(),
         userMessage: userMsg,
         messages: msgs,
       });
+      if (members.length > 0 && dispatch.speak && dispatch.speak.length === 0 && !dispatch.degraded) {
+        console.warn("[group] dispatch returned empty speak list despite non-empty members:", members.map((f) => f.id || f.key));
+      }
     } else {
       dispatch = { speak: mentions.filter((id) => group.members.includes(id)) };
     }
@@ -476,7 +496,7 @@
   }
 
   function parseMentionsFor(group, text) {
-    const fellows = moduleState.fellows
+    const fellows = currentFellows()
       .filter((f) => group.members.includes(f.id || f.key))
       .map((f) => ({ id: f.id || f.key, name: f.name || f.key }));
     if (!promptsModule || typeof promptsModule.parseMentions !== "function") return [];
@@ -493,7 +513,7 @@
           groupName: group.name,
           summary: group.contextCard ? group.contextCard.summary : null,
           recentForFellow: recent,
-          fellowNamesById: moduleState.fellowNamesById,
+          fellowNamesById: currentFellowNamesById(),
         })
       : "";
 
@@ -550,7 +570,7 @@
     if (!promptsModule.shouldSummarize(group, msgs)) return;
     const card = await moduleState.conductor.summarize({
       group,
-      fellowNamesById: moduleState.fellowNamesById,
+      fellowNamesById: currentFellowNamesById(),
       messages: msgs,
     });
     if (!card) return;
@@ -585,9 +605,10 @@
     }
 
     const msgs = moduleState.messagesByGroup.get(group.id) || [];
-    const removedName = moduleState.fellowNamesById[memberId] || memberId;
+    const removeFellowNames = currentFellowNamesById();
+    const removedName = removeFellowNames[memberId] || memberId;
     const sysContent = hostChanged
-      ? `${removedName} 离开了群，${moduleState.fellowNamesById[newHost] || newHost} 成为群主`
+      ? `${removedName} 离开了群，${removeFellowNames[newHost] || newHost} 成为群主`
       : `${removedName} 离开了群`;
     const sysMsg = {
       id: "m-" + Date.now() + "-leave",

@@ -2704,11 +2704,13 @@ function render() {
     }
     setText(els.activeChatName, groupActive.name || "未命名群聊");
     if (els.activeChatMeta) {
-      els.activeChatMeta.textContent = "群聊 · " + (groupActive.members || []).length + " 人";
+      els.activeChatMeta.textContent = "群聊 · " + ((groupActive.members || []).length + 1) + " 人";
     }
     if (groupInfoBtn) groupInfoBtn.classList.remove("hidden");
     // Hide session menu (not relevant for group chats)
     if (els.sessionMenuButton) els.sessionMenuButton.classList.add("hidden");
+    const composerBottom = document.querySelector(".composer-bottom");
+    if (composerBottom) composerBottom.classList.add("hidden");
   } else if (active) {
     if (els.activeChatAvatar) {
       els.activeChatAvatar.innerHTML = "";
@@ -2719,6 +2721,8 @@ function render() {
     renderHeaderStatus();
     if (groupInfoBtn) groupInfoBtn.classList.add("hidden");
     if (els.sessionMenuButton) els.sessionMenuButton.classList.remove("hidden");
+    const composerBottom = document.querySelector(".composer-bottom");
+    if (composerBottom) composerBottom.classList.remove("hidden");
   }
   const filter = state.personaFilter.trim().toLowerCase();
   const visiblePersonas = sortFellowsForSidebar(filter
@@ -2769,7 +2773,7 @@ function render() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `persona group-persona${group.id === state.activeKey ? " active" : ""}`;
-    const previewText = "群聊 · " + (group.members || []).length + " 人";
+    const previewText = "群聊 · " + ((group.members || []).length + 1) + " 人";
     const updated = group.updatedAt ? formatConversationTime(group.updatedAt) : "";
     btn.innerHTML = `
       <span class="avatar group-avatar"></span>
