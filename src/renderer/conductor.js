@@ -15,7 +15,7 @@
     }
   }
 
-  function createConductor({ engineCall, dispatchTemplate, summarizeTemplate }) {
+  function createConductor({ engineCall, dispatchTemplate, summarizeTemplate, relayTemplate }) {
     async function decideDispatch(ctx) {
       if (ctx.userMessage.mentions && ctx.userMessage.mentions.length > 0) {
         const valid = ctx.userMessage.mentions.filter((id) =>
@@ -74,7 +74,30 @@
       };
     }
 
-    return { decideDispatch, summarize };
+    async function decideRelay(ctx) {
+      if (!relayTemplate) return { speak: [] };
+      const prompt = buildDispatchPrompt(relayTemplate, {
+        members: ctx.members,
+        summary: ctx.group.contextCard ? ctx.group.contextCard.summary : null,
+        recentMessages: (ctx.messages || []).slice(-8),
+        fellowNamesById: ctx.fellowNamesById,
+        userMessage: "",
+      });
+      let raw;
+      try {
+        raw = await engineCall({ kind: "relay", prompt, group: ctx.group });
+      } catch {
+        return { speak: [], degraded: true };
+      }
+      const parsed = safeParseJSON(raw);
+      if (!parsed || !Array.isArray(parsed.speak)) {
+        return { speak: [], degraded: true };
+      }
+      const valid = parsed.speak.filter((id) => ctx.group.members.includes(id));
+      return { speak: valid };
+    }
+
+    return { decideDispatch, summarize, decideRelay };
   }
 
   if (typeof module !== "undefined" && module.exports) {

@@ -1530,7 +1530,7 @@ function readLocalFileAttachment(input = {}) {
 function styleSettingsForPet(stylePreset) {
   const preset = String(stylePreset || "codex").trim();
   if (preset === "alkaka") {
-    const styleReference = path.join(petGeneratorRoot(), "skills", "alkaka-friend-pet", "assets", "alkaka-style-reference.jpg");
+    const styleReference = path.join(aimashiSkillsRoot(), "alkaka-friend-pet", "assets", "alkaka-style-reference.jpg");
     return {
       styleNotes: "Alkaka Q版贴纸风：紧凑可爱的伙伴桌宠，清晰线条，大眼睛，保留头像身份特征，适合 192x208 小尺寸动画。",
       styleContract: "Cute anime sticker-like partner desktop pet, compact chibi proportions, clean dark linework, soft cel shading, readable at 192x208 cells. Avoid realistic rendering, scene backgrounds, tiny noisy detail, shadows, glows, text, and UI elements.",
@@ -1560,6 +1560,15 @@ function petGeneratorRoot() {
   return candidates.find((candidate) => candidate && fs.existsSync(path.join(candidate, "hatch_generate.py"))) || candidates[0];
 }
 
+function aimashiSkillsRoot() {
+  const candidates = [
+    path.join(process.resourcesPath || "", "skills"),
+    path.join(app.getAppPath(), "skills"),
+    path.join(__dirname, "..", "skills")
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(path.join(candidate, "alkaka-friend-pet", "SKILL.md"))) || candidates[0];
+}
+
 function officialLibraryManifestPath() {
   const candidates = [
     path.join(app.getAppPath(), "resources", "official-library", "library.json"),
@@ -1576,6 +1585,10 @@ function resolveOfficialLibraryRoot(root = "") {
   if (value === "pet-generator" || value.startsWith("pet-generator/")) {
     const rel = value.slice("pet-generator".length).replace(/^[\\/]/, "");
     return path.join(petGeneratorRoot(), rel);
+  }
+  if (value === "skills" || value.startsWith("skills/")) {
+    const rel = value.slice("skills".length).replace(/^[\\/]/, "");
+    return path.join(aimashiSkillsRoot(), rel);
   }
   return path.join(path.dirname(officialLibraryManifestPath()), value);
 }
@@ -1921,8 +1934,7 @@ function ensureClaudeBridgePlugin() {
   fs.mkdirSync(bridgeSkillsDir, { recursive: true });
 
   const sourceRoots = [
-    { key: "aimashi", root: path.join(p.home, "skills") },
-    { key: "hermes", root: path.join(os.homedir(), ".hermes", "skills") }
+    { key: "aimashi", root: path.join(p.home, "skills") }
   ];
   const seen = new Set();
   for (const source of sourceRoots) {
@@ -2196,7 +2208,6 @@ function connectedProviderSummaries(codexAuth = getCodexAuthStatus()) {
 function externalSkillDirs() {
   const home = os.homedir();
   const candidates = [
-    path.join(home, ".hermes", "skills"),
     path.join(home, ".claude", "skills"),
     path.join(home, ".codex", "skills")
   ];
@@ -2908,7 +2919,6 @@ function skillRoots() {
   const p = runtimePaths();
   return [
     { source: "aimashi", label: "Aimashi Runtime", root: path.join(p.home, "skills") },
-    { source: "hermes", label: "Hermes", root: path.join(home, ".hermes", "skills") },
     { source: "codex", label: "Codex", root: path.join(home, ".codex", "skills") },
     { source: "claude", label: "Claude Code", root: path.join(home, ".claude", "skills"), idPrefix: "claude:user" },
     ...claudeCodePluginSkillRoots(home)
@@ -3356,58 +3366,6 @@ function marketplaceKey(item) {
   return `${item.engine}:${item.marketplace || ""}:${item.name}`;
 }
 
-function readHermesPluginManifests() {
-  const home = os.homedir();
-  const roots = [
-    { scope: "builtin", label: "Hermes 内置插件", root: path.join(home, ".hermes", "hermes-agent", "plugins") },
-    { scope: "user", label: "Hermes 用户插件", root: path.join(home, ".hermes", "plugins") }
-  ];
-  const out = [];
-  for (const rootInfo of roots) {
-    if (!fs.existsSync(rootInfo.root)) continue;
-    const stack = [{ dir: rootInfo.root, depth: 0 }];
-    while (stack.length) {
-      const { dir, depth } = stack.pop();
-      if (depth > 3) continue;
-      let entries = [];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (!entry.isDirectory()) continue;
-        const manifestPath = path.join(full, "plugin.yaml");
-        if (!fs.existsSync(manifestPath)) {
-          stack.push({ dir: full, depth: depth + 1 });
-          continue;
-        }
-        let raw = "";
-        try {
-          raw = fs.readFileSync(manifestPath, "utf8");
-        } catch {
-          raw = "";
-        }
-        out.push({
-          scope: rootInfo.scope,
-          scopeLabel: rootInfo.label,
-          name: simpleYamlValue(raw, "name") || entry.name,
-          installPath: full,
-          manifestPath,
-          description: simpleYamlValue(raw, "description"),
-          kind: simpleYamlValue(raw, "kind"),
-          version: simpleYamlValue(raw, "version"),
-          tools: simpleYamlList(raw, "provides_tools"),
-          hooks: simpleYamlList(raw, "hooks"),
-          platforms: simpleYamlList(raw, "platforms")
-        });
-      }
-    }
-  }
-  return out;
-}
-
 function readJsonConnectorEntries(filePath, { source, sourceLabel, scope, provider }) {
   const raw = readJson(filePath, null);
   if (!raw || typeof raw !== "object") return [];
@@ -3582,33 +3540,6 @@ function enumerateExtensions() {
       status: "本机 Codex 插件缓存；当前 Aimashi Codex SDK 会话尚未接入插件加载"
     });
   }
-  for (const item of readHermesPluginManifests()) {
-    const skillsRoot = path.join(item.installPath, "skills");
-    extensions.push({
-      id: `hermes:${item.scope}:${item.name}`,
-      kind: "plugin",
-      engine: "hermes",
-      engineLabel: "Hermes",
-      source: "hermes",
-      name: item.name,
-      label: item.name,
-      description: item.description,
-      version: item.version,
-      iconUrl: pluginIconUrl(item.installPath, {}),
-      root: item.installPath,
-      skillRoot: skillsRoot,
-      skillCount: findSkillFiles(skillsRoot).length + (fs.existsSync(path.join(item.installPath, "SKILL.md")) ? 1 : 0),
-      commandCount: 0,
-      agentCount: 0,
-      toolCount: item.tools.length,
-      hookCount: item.hooks.length,
-      mcpCount: 0,
-      pluginKind: item.kind,
-      installState: "installed",
-      installable: false,
-      status: item.scopeLabel
-    });
-  }
   for (const item of [...readCodexMarketplacePlugins(), ...readClaudeMarketplacePlugins()]) {
     if (installedKeys.has(marketplaceKey(item))) continue;
     extensions.push(item);
@@ -3625,33 +3556,10 @@ function enumerateExtensions() {
 
 function enumeratePlugins() {
   const home = os.homedir();
-  const p = runtimePaths();
   const out = [];
   for (const source of readAimashiOfficialSkillSources()) {
     out.push(source);
   }
-  out.push({
-    id: "aimashi:builtin",
-    name: "aimashi",
-    label: "Hermes 内置技能",
-    description: "Hermes 官方随运行时提供并同步到 Aimashi runtime 的 Skill",
-    source: "aimashi",
-    kind: "skill-source",
-    engine: "hermes",
-    root: path.join(p.home, "skills"),
-    idPrefix: "aimashi"
-  });
-  out.push({
-    id: "hermes:user",
-    name: "hermes",
-    label: "Hermes 用户库",
-    description: "本机 ~/.hermes/skills/ 下的 Skill",
-    source: "hermes",
-    kind: "skill-source",
-    engine: "hermes",
-    root: path.join(home, ".hermes", "skills"),
-    idPrefix: "hermes:user"
-  });
   out.push({
     id: "claude:user",
     name: "claude",
@@ -7761,6 +7669,7 @@ ipcMain.handle("group:load-prompts", () => {
     dispatch: fs.readFileSync(path.join(dir, "dispatch.md"), "utf8"),
     summarize: fs.readFileSync(path.join(dir, "summarize.md"), "utf8"),
     nudge: fs.readFileSync(path.join(dir, "nudge.md"), "utf8"),
+    relay: fs.readFileSync(path.join(dir, "relay.md"), "utf8"),
   };
 });
 ipcMain.handle("persona:save", (_event, persona) => saveFellow(persona));

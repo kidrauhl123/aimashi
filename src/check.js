@@ -16,14 +16,14 @@ const required = [
   "src/mobile/styles.css",
   "src/relay/server.js",
   "scripts/create-mac-dmg.js",
+  "skills/alkaka-friend-pet/SKILL.md",
+  "skills/alkaka-friend-pet/assets/alkaka-style-reference.jpg",
+  "skills/alkaka-friend-pet/scripts/prepare_pet_run.py",
+  "skills/alkaka-friend-pet/scripts/finalize_pet_run.py",
+  "skills/alkaka-friend-pet/scripts/package_custom_pet.py",
+  "skills/alkaka-friend-pet/scripts/record_imagegen_result.py",
   "resources/pet-generator/hatch_generate.py",
   "resources/pet-generator/petctl.py",
-  "resources/pet-generator/skills/alkaka-friend-pet/SKILL.md",
-  "resources/pet-generator/skills/alkaka-friend-pet/assets/alkaka-style-reference.jpg",
-  "resources/pet-generator/skills/alkaka-friend-pet/scripts/prepare_pet_run.py",
-  "resources/pet-generator/skills/alkaka-friend-pet/scripts/finalize_pet_run.py",
-  "resources/pet-generator/skills/alkaka-friend-pet/scripts/package_custom_pet.py",
-  "resources/pet-generator/skills/alkaka-friend-pet/scripts/record_imagegen_result.py",
   "src/main/group-store.js",
   "src/main/group-adapters.js",
   "src/renderer/group-prompts.js",
@@ -31,7 +31,8 @@ const required = [
   "src/renderer/group.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
-  "resources/conductor/default-prompts/nudge.md"
+  "resources/conductor/default-prompts/nudge.md",
+  "resources/conductor/default-prompts/relay.md"
 ];
 
 for (const file of required) {

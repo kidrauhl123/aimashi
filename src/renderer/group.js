@@ -22,6 +22,7 @@
     deps: null,
     personaWatcherBound: false,
     typingFellowIds: new Set(),
+    relayToken: 0,
   };
 
   function sleep(ms) {
@@ -29,6 +30,7 @@
   }
 
   const STAGGER_MS = 300;
+  const MAX_RELAY_TURNS = 6;
 
   function currentFellows() {
     if (moduleState.deps && typeof moduleState.deps.getFellows === "function") {
@@ -64,6 +66,7 @@
         engineCall: deps.engineCall,
         dispatchTemplate: moduleState.promptTemplates.dispatch,
         summarizeTemplate: moduleState.promptTemplates.summarize,
+        relayTemplate: moduleState.promptTemplates.relay,
       });
     }
     bindCreateButton();
@@ -468,6 +471,8 @@
   }
 
   async function sendInGroup(group, text) {
+    moduleState.relayToken++; // invalidate any prior relay loop
+    const myRelayToken = moduleState.relayToken;
     moduleState.typingFellowIds.clear();
     const turnId = "t-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
     const mentions = parseMentionsFor(group, text);
@@ -542,6 +547,46 @@
       );
     }
     await Promise.all(dispatchPromises);
+
+    // Relay: after initial Fellow replies, keep asking conductor if anyone else should chime in.
+    // Bounded by MAX_RELAY_TURNS and interruptible via relayToken.
+    let relayedTurns = 0;
+    while (
+      relayedTurns < MAX_RELAY_TURNS &&
+      moduleState.relayToken === myRelayToken &&
+      moduleState.conductor &&
+      typeof moduleState.conductor.decideRelay === "function"
+    ) {
+      const currentMsgs = moduleState.messagesByGroup.get(group.id) || [];
+      let relayDispatch;
+      try {
+        relayDispatch = await moduleState.conductor.decideRelay({
+          group,
+          members: currentFellows().filter((f) => group.members.includes(f.id || f.key)),
+          fellowNamesById: currentFellowNamesById(),
+          messages: currentMsgs,
+        });
+      } catch {
+        break;
+      }
+      // Token check after each await — user may have interrupted
+      if (moduleState.relayToken !== myRelayToken) break;
+      if (!relayDispatch || !relayDispatch.speak || relayDispatch.speak.length === 0) {
+        break;
+      }
+      // Stagger the relay fellow starts the same way
+      const relayPromises = [];
+      for (let i = 0; i < relayDispatch.speak.length; i++) {
+        if (moduleState.relayToken !== myRelayToken) break;
+        if (i > 0) await sleep(STAGGER_MS);
+        relayPromises.push(
+          dispatchToFellow(group, relayDispatch.speak[i], userMsg, turnId)
+            .catch((err) => console.error("[group] relay dispatch error", err))
+        );
+      }
+      await Promise.all(relayPromises);
+      relayedTurns += 1;
+    }
 
     await maybeUpdateSummary(group);
   }
