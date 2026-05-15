@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("aimashi", {
   sendChat: (payload) => ipcRenderer.invoke("chat:send", payload),
   stopChat: () => ipcRenderer.invoke("chat:stop"),
   saveAttachment: (payload) => ipcRenderer.invoke("chat:attachment-save", payload),
+  fetchFileAttachment: (payload) => ipcRenderer.invoke("chat:file-fetch", payload),
   filePathForFile: (file) => {
     try {
       return webUtils?.getPathForFile?.(file) || file?.path || "";

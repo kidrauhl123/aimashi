@@ -27,6 +27,9 @@
       <button class="rail-button" type="button" data-view="skills" title="能力库" aria-label="能力库">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14 M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
       </button>
+      <button class="rail-button" type="button" data-view="workbench" title="工作台" aria-label="工作台">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v7H4z M13 3h5a2 2 0 0 1 2 2v3h-7z M4 12h7v9H6a2 2 0 0 1-2-2z M13 10h7v9a2 2 0 0 1-2 2h-5z"/></svg>
+      </button>
       <div class="rail-spacer"></div>
       <button id="openSettings" class="rail-button" type="button" title="设置" aria-label="设置">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h16"/></svg>
@@ -96,6 +99,16 @@
       <section id="skillNav" class="skills-nav"></section>
     </aside>
 
+    <aside id="workbenchSidebar" class="sidebar workbench-sidebar hidden">
+      <header class="sidebar-tools workbench-sidebar-tools">
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="workbenchSearch" autocomplete="off" placeholder="搜索工作台">
+        </label>
+      </header>
+      <section id="workbenchNav" class="workbench-nav"></section>
+    </aside>
+
     <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整中栏宽度"></div>
 
     <section id="chatView" class="workspace">
@@ -148,6 +161,7 @@
             <textarea id="chatInput" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
             <button id="sendChat" class="send-button" type="submit" title="发送" aria-label="发送">↗</button>
           </div>
+          <div id="composerReply" class="composer-reply hidden"></div>
           <div id="composerAddMenu" class="composer-add-menu hidden">
             <button type="button" data-composer-add="attachment">添加附件或图片</button>
             <button type="button" data-composer-add="skill">插件 / 技能</button>
@@ -227,6 +241,21 @@
         <div id="skillChipRow" class="skill-chip-row" aria-label="Skill 分类"></div>
 
         <section id="skillCardGrid" class="skill-card-grid" aria-label="Skill 列表"></section>
+      </section>
+    </section>
+
+    <section id="workbenchView" class="workspace workbench-workspace hidden">
+      <header class="topbar">
+        <button class="narrow-back-button" type="button" data-narrow-back title="返回工作台" aria-label="返回工作台">‹</button>
+        <div class="group-title">
+          <div>
+            <h1><span id="workbenchPageTitle">工作台</span></h1>
+            <p id="workbenchPageMeta">把对话过程整理成可继续推进的东西</p>
+          </div>
+        </div>
+      </header>
+      <section class="workbench-layout">
+        <div id="workbenchContent" class="workbench-content"></div>
       </section>
     </section>
 
@@ -549,7 +578,10 @@
             <span>也可以把图片拖到这里</span>
           </div>
         </section>
-        <section class="avatar-defaults" aria-label="默认头像"></section>
+        <section class="avatar-default-panel" aria-label="默认头像">
+          <div class="avatar-default-tabs" role="tablist" aria-label="默认头像风格"></div>
+          <section class="avatar-defaults" aria-label="默认头像"></section>
+        </section>
         <label id="fellowAgentEngineField" class="hidden">
           Agent 引擎
           <select id="fellowAgentEngine">

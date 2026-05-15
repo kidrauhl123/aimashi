@@ -17,6 +17,7 @@ const SIDEBAR_WIDTH_DEFAULT = 280;
 const scrollbarTimers = new WeakMap();
 let scrollbarOverlayEl = null;
 let scrollbarOverlayTarget = null;
+let scrollbarDrag = null;
 let skillPickerHoverCloseTimer = 0;
 let appearanceSaveStatusTimer = 0;
 let appearanceAutoSaveTimer = 0;
@@ -46,6 +47,7 @@ const state = {
   chatStore: { schema_version: 1, readAt: {}, sessions: {} },
   activeSessionIdByPersona: {},
   generatingTitleIds: new Set(),
+  generatedFiles: new Map(),
   startupTasks: [],
   firstRun: false,
   setupGuideDismissed: localStorage.getItem(SETUP_GUIDE_DISMISSED_KEY) === "1",
@@ -64,16 +66,20 @@ const state = {
   mobileRelayLinkExpanded: false,
   personaFilter: "",
   contactFilter: "",
+  workbenchFilter: "",
+  workbenchSection: "recent",
   skillFilter: "",
   skillCategoryFilter: "",
   skillStatusFilter: "all",
   skillContextMenu: { open: false, x: 0, y: 0, skillId: "" },
   fellowContextMenu: { open: false, x: 0, y: 0, fellowKey: "" },
-  messageContextMenu: { open: false, x: 0, y: 0, messageIndex: -1 },
+  messageContextMenu: { open: false, x: 0, y: 0, messageIndex: -1, selectionText: "" },
+  replyDraft: null,
   fellowMenuOpen: false,
   profileDialogOpen: false,
   fellowDialogOpen: false,
   fellowDialogMode: "create",
+  fellowAvatarPresetGroup: "human",
   petGenerateOpen: false,
   petGenerateFellowKey: "",
   petReferences: [],
@@ -161,6 +167,7 @@ const els = {
   chooseFellowAvatar: document.getElementById("chooseFellowAvatar"),
   fellowAvatarDrop: document.getElementById("fellowAvatarDrop"),
   fellowAvatarPreview: document.getElementById("fellowAvatarPreview"),
+  fellowAvatarDefaultTabs: document.querySelector(".avatar-default-tabs"),
   fellowAvatarDefaults: document.querySelector(".avatar-defaults"),
   fellowPersonaDetails: document.getElementById("fellowPersonaDetails"),
   fellowSeed: document.getElementById("fellowSeed"),
@@ -174,11 +181,13 @@ const els = {
   conversationSidebar: document.getElementById("conversationSidebar"),
   contactsSidebar: document.getElementById("contactsSidebar"),
   skillsSidebar: document.getElementById("skillsSidebar"),
+  workbenchSidebar: document.getElementById("workbenchSidebar"),
   sidebarResizeHandle: document.getElementById("sidebarResizeHandle"),
   narrowBackButtons: document.querySelectorAll("[data-narrow-back]"),
   chatView: document.getElementById("chatView"),
   contactsView: document.getElementById("contactsView"),
   skillsView: document.getElementById("skillsView"),
+  workbenchView: document.getElementById("workbenchView"),
   settingsView: document.getElementById("settingsView"),
   engineStatus: document.getElementById("engineStatus"),
   hermesHome: document.getElementById("hermesHome"),
@@ -194,6 +203,11 @@ const els = {
   engineWarning: document.getElementById("engineWarning"),
   chat: document.getElementById("chat"),
   skillSearch: document.getElementById("skillSearch"),
+  workbenchSearch: document.getElementById("workbenchSearch"),
+  workbenchNav: document.getElementById("workbenchNav"),
+  workbenchPageTitle: document.getElementById("workbenchPageTitle"),
+  workbenchPageMeta: document.getElementById("workbenchPageMeta"),
+  workbenchContent: document.getElementById("workbenchContent"),
   skillNav: document.getElementById("skillNav"),
   skillPageTitle: document.getElementById("skillPageTitle"),
   skillChipRow: document.getElementById("skillChipRow"),
@@ -239,6 +253,7 @@ const els = {
   chatInput: document.getElementById("chatInput"),
   composerAdd: document.getElementById("composerAdd"),
   composerAddMenu: document.getElementById("composerAddMenu"),
+  composerReply: document.getElementById("composerReply"),
   composerAttachments: document.getElementById("composerAttachments"),
   composerAttachmentInput: document.getElementById("composerAttachmentInput"),
   slashCommandMenu: document.getElementById("slashCommandMenu"),
@@ -388,24 +403,48 @@ function ensureScrollbarOverlay() {
   if (scrollbarOverlayEl) return scrollbarOverlayEl;
   scrollbarOverlayEl = document.createElement("div");
   scrollbarOverlayEl.className = "scrollbar-overlay";
+  scrollbarOverlayEl.addEventListener("pointerdown", startScrollbarOverlayDrag);
+  scrollbarOverlayEl.addEventListener("pointerenter", () => {
+    const target = scrollbarOverlayTarget;
+    if (!target) return;
+    const previous = scrollbarTimers.get(target);
+    if (previous) {
+      window.clearTimeout(previous);
+      scrollbarTimers.delete(target);
+    }
+    target.classList.add("scrollbar-visible", "scrollbar-active");
+    updateScrollbarOverlay(target);
+  });
+  scrollbarOverlayEl.addEventListener("pointerleave", () => {
+    if (scrollbarDrag?.active) return;
+    const target = scrollbarOverlayTarget;
+    if (!target) return;
+    scheduleScrollbarHide(target, 500);
+  });
   document.body.appendChild(scrollbarOverlayEl);
   return scrollbarOverlayEl;
 }
 
-function updateScrollbarOverlay(target) {
+function scrollbarOverlayMetrics(target) {
   if (!(target instanceof Element)) return;
   const maxScroll = target.scrollHeight - target.clientHeight;
   if (maxScroll <= 0) return;
   const rect = target.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return;
-
-  const overlay = ensureScrollbarOverlay();
   const trackInset = 3;
   const trackHeight = Math.max(0, rect.height - trackInset * 2);
   const thumbHeight = Math.max(28, Math.min(trackHeight, (target.clientHeight / target.scrollHeight) * trackHeight));
   const travel = Math.max(0, trackHeight - thumbHeight);
+  return { rect, maxScroll, trackInset, trackHeight, thumbHeight, travel };
+}
+
+function updateScrollbarOverlay(target) {
+  const metrics = scrollbarOverlayMetrics(target);
+  if (!metrics) return;
+  const { rect, maxScroll, trackInset, thumbHeight, travel } = metrics;
+  const overlay = ensureScrollbarOverlay();
   const thumbTop = rect.top + trackInset + (target.scrollTop / maxScroll) * travel;
-  const thumbLeft = rect.right - 8;
+  const thumbLeft = rect.right - 10;
 
   overlay.style.height = `${thumbHeight}px`;
   overlay.style.transform = `translate3d(${Math.round(thumbLeft)}px, ${Math.round(thumbTop)}px, 0)`;
@@ -414,10 +453,25 @@ function updateScrollbarOverlay(target) {
 }
 
 function hideScrollbarOverlay(target) {
+  if (scrollbarDrag?.active) return;
   if (target && scrollbarOverlayTarget !== target) return;
   if (!scrollbarOverlayEl) return;
   scrollbarOverlayEl.classList.remove("visible");
   scrollbarOverlayTarget = null;
+}
+
+function scheduleScrollbarHide(target, delay = 850) {
+  if (!(target instanceof Element)) return;
+  const previous = scrollbarTimers.get(target);
+  if (previous) window.clearTimeout(previous);
+  scrollbarTimers.set(target, window.setTimeout(() => {
+    if (scrollbarDrag?.active && scrollbarDrag.target === target) return;
+    if (target.matches(":hover") || scrollbarOverlayEl?.matches(":hover")) return;
+    target.classList.remove("scrollbar-visible");
+    target.classList.remove("scrollbar-active");
+    scrollbarTimers.delete(target);
+    hideScrollbarOverlay(target);
+  }, delay));
 }
 
 function showScrollingScrollbar(target) {
@@ -427,16 +481,73 @@ function showScrollingScrollbar(target) {
   updateScrollbarOverlay(target);
   target.classList.add("scrollbar-visible");
   target.classList.add("scrollbar-active");
+  scheduleScrollbarHide(target);
+}
+
+function scrollableAncestor(node) {
+  let current = node instanceof Element ? node : node?.parentElement;
+  while (current && current !== document.body && current !== document.documentElement) {
+    const style = window.getComputedStyle(current);
+    const canScrollY = current.scrollHeight > current.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY);
+    if (canScrollY) return current;
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function maybeShowScrollbarForPointer(event) {
+  if (scrollbarDrag?.active) return;
+  if (scrollbarOverlayEl?.contains(event.target)) return;
+  const target = scrollableAncestor(event.target);
+  if (!target) return;
+  const rect = target.getBoundingClientRect();
+  const nearRightEdge = event.clientX >= rect.right - 18 && event.clientX <= rect.right + 4;
+  if (!nearRightEdge && scrollbarOverlayTarget !== target) return;
+  showScrollingScrollbar(target);
+}
+
+function startScrollbarOverlayDrag(event) {
+  const target = scrollbarOverlayTarget;
+  const metrics = scrollbarOverlayMetrics(target);
+  if (!target || !metrics || !scrollbarOverlayEl) return;
+  event.preventDefault();
+  event.stopPropagation();
   const previous = scrollbarTimers.get(target);
-  if (previous) window.clearTimeout(previous);
-  const hide = () => {
-    if (target.matches(":hover")) return;
-    target.classList.remove("scrollbar-visible");
-    target.classList.remove("scrollbar-active");
+  if (previous) {
+    window.clearTimeout(previous);
     scrollbarTimers.delete(target);
-    hideScrollbarOverlay(target);
+  }
+  scrollbarOverlayEl.setPointerCapture?.(event.pointerId);
+  scrollbarOverlayEl.classList.add("dragging");
+  target.classList.add("scrollbar-visible", "scrollbar-active");
+  scrollbarDrag = {
+    active: true,
+    pointerId: event.pointerId,
+    target,
+    startY: event.clientY,
+    startScrollTop: target.scrollTop,
+    maxScroll: metrics.maxScroll,
+    travel: metrics.travel || 1
   };
-  scrollbarTimers.set(target, window.setTimeout(hide, 850));
+}
+
+function updateScrollbarOverlayDrag(event) {
+  if (!scrollbarDrag?.active) return;
+  event.preventDefault();
+  const { target, startY, startScrollTop, maxScroll, travel } = scrollbarDrag;
+  const deltaY = event.clientY - startY;
+  target.scrollTop = Math.max(0, Math.min(maxScroll, startScrollTop + (deltaY / travel) * maxScroll));
+  updateScrollbarOverlay(target);
+}
+
+function stopScrollbarOverlayDrag(event) {
+  if (!scrollbarDrag?.active) return;
+  const { target, pointerId } = scrollbarDrag;
+  scrollbarOverlayEl?.releasePointerCapture?.(pointerId);
+  scrollbarOverlayEl?.classList.remove("dragging");
+  scrollbarDrag = null;
+  updateScrollbarOverlay(target);
+  scheduleScrollbarHide(target, 650);
 }
 
 applySidebarWidth(state.sidebarWidth);
@@ -1245,27 +1356,45 @@ const AVATAR_MIN_ZOOM = 1;
 const DEFAULT_AVATAR_CROP = { x: 50, y: 50, zoom: 1 };
 const DEFAULT_PRESET_AVATAR_CROP = { x: 50, y: 13.5, zoom: 1.72 };
 
-const avatarPresets = [
-  { name: "青羽", src: "./assets/avatars/01.png", crop: { x: 50.0687, y: 14.5495, zoom: 2.04 } },
-  { name: "桃奈", src: "./assets/avatars/02.png", crop: { x: 57.2536, y: 8.1635, zoom: 1.56 } },
-  { name: "紫音", src: "./assets/avatars/03.png", crop: { x: 50, y: 14, zoom: 1.48 } },
-  { name: "小栗", src: "./assets/avatars/04.png", crop: { x: 49.0079, y: 23.5736, zoom: 1.72 } },
-  { name: "墨川", src: "./assets/avatars/05.png", crop: { x: 47.6785, y: 11.3611, zoom: 1.88 } },
-  { name: "珊瑚", src: "./assets/avatars/06.png", crop: { x: 46.8749, y: 10.4285, zoom: 1.64 } },
-  { name: "雪璃", src: "./assets/avatars/07.png", crop: { x: 51.6741, y: 8.0209, zoom: 1.72 } },
-  { name: "赤焰", src: "./assets/avatars/08.png", crop: { x: 50.974, y: 12.8636, zoom: 1.88 } },
-  { name: "蓝汐", src: "./assets/avatars/09.png", crop: { x: 47.4999, y: 12.2142, zoom: 1.8 } },
-  { name: "棕野", src: "./assets/avatars/10.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-  { name: "夜莓", src: "./assets/avatars/11.png", crop: { x: 55.8037, y: 7.9731, zoom: 1.64 } },
-  { name: "空铃", src: "./assets/avatars/12.png", crop: { x: 47.3214, y: 16.9763, zoom: 1.8 } },
-  { name: "茉茶", src: "./assets/avatars/13.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-  { name: "星柚", src: "./assets/avatars/14.png", crop: { x: 50, y: 14, zoom: 1.72 } },
-  { name: "爱丽丝", src: "./assets/avatars/15.png", crop: { x: 45.1848, y: 5.1022, zoom: 1.56 } },
-  { name: "岚", src: "./assets/avatars/16.png", crop: { x: 51.0913, y: 15.7858, zoom: 1.72 } }
+const avatarPresetGroupTabs = [
+  { key: "human", label: "人形" },
+  { key: "pet", label: "宠物" }
 ];
 
+const avatarPresetGroups = {
+  human: [
+    { name: "青羽", src: "./assets/avatars/01.png", crop: { x: 50.0687, y: 14.5495, zoom: 2.04 } },
+    { name: "桃奈", src: "./assets/avatars/02.png", crop: { x: 57.2536, y: 8.1635, zoom: 1.56 } },
+    { name: "紫音", src: "./assets/avatars/03.png", crop: { x: 50, y: 14, zoom: 1.48 } },
+    { name: "小栗", src: "./assets/avatars/04.png", crop: { x: 49.0079, y: 23.5736, zoom: 1.72 } },
+    { name: "墨川", src: "./assets/avatars/05.png", crop: { x: 47.6785, y: 11.3611, zoom: 1.88 } },
+    { name: "珊瑚", src: "./assets/avatars/06.png", crop: { x: 46.8749, y: 10.4285, zoom: 1.64 } },
+    { name: "雪璃", src: "./assets/avatars/07.png", crop: { x: 51.6741, y: 8.0209, zoom: 1.72 } },
+    { name: "赤焰", src: "./assets/avatars/08.png", crop: { x: 50.974, y: 12.8636, zoom: 1.88 } },
+    { name: "蓝汐", src: "./assets/avatars/09.png", crop: { x: 47.4999, y: 12.2142, zoom: 1.8 } },
+    { name: "棕野", src: "./assets/avatars/10.png", crop: { x: 50, y: 14, zoom: 1.8 } },
+    { name: "夜莓", src: "./assets/avatars/11.png", crop: { x: 55.8037, y: 7.9731, zoom: 1.64 } },
+    { name: "空铃", src: "./assets/avatars/12.png", crop: { x: 47.3214, y: 16.9763, zoom: 1.8 } },
+    { name: "茉茶", src: "./assets/avatars/13.png", crop: { x: 50, y: 14, zoom: 1.8 } },
+    { name: "星柚", src: "./assets/avatars/14.png", crop: { x: 50, y: 14, zoom: 1.72 } },
+    { name: "爱丽丝", src: "./assets/avatars/15.png", crop: { x: 45.1848, y: 5.1022, zoom: 1.56 } },
+    { name: "岚", src: "./assets/avatars/16.png", crop: { x: 51.0913, y: 15.7858, zoom: 1.72 } }
+  ],
+  pet: Array.from({ length: 16 }, (_item, index) => {
+    const id = String(index + 1).padStart(2, "0");
+    return {
+      name: `宠物 ${id}`,
+      src: `./assets/avatars-pet/${id}.png`,
+      thumb: `./assets/avatar-thumbs-pet/${id}.png`,
+      crop: { x: 50, y: 50, zoom: 1 }
+    };
+  })
+};
+
+const avatarPresets = Object.values(avatarPresetGroups).flat();
+
 function defaultAvatarAssets() {
-  return avatarPresets.map((preset) => preset.src);
+  return avatarPresetGroups.human.map((preset) => preset.src);
 }
 
 function canonicalAvatarSrc(src) {
@@ -1277,9 +1406,17 @@ function avatarPresetBySrc(src) {
   return avatarPresets.find((preset) => preset.src === canonical) || null;
 }
 
+function avatarPresetGroupForSrc(src) {
+  const canonical = canonicalAvatarSrc(src);
+  return avatarPresetGroupTabs.find(({ key }) =>
+    avatarPresetGroups[key]?.some((preset) => preset.src === canonical)
+  )?.key || "";
+}
+
 function avatarThumbForSrc(src) {
   const preset = avatarPresetBySrc(src);
   if (!preset) return "";
+  if (preset.thumb) return preset.thumb;
   return canonicalAvatarSrc(preset.src).replace("./assets/avatars/", "./assets/avatar-thumbs/");
 }
 
@@ -1702,15 +1839,87 @@ function renderAttachmentChips(attachments = []) {
   if (!Array.isArray(attachments) || !attachments.length) return "";
   return `
     <div class="message-attachments">
-      ${attachments.map((attachment) => `
-        <span class="message-attachment" title="${escapeHtml(attachment.path || attachment.name || "")}">
-          <span>${escapeHtml(attachmentGlyph(attachment))}</span>
-          <strong>${escapeHtml(attachment.name || "附件")}</strong>
-          <em>${escapeHtml(formatBytes(attachment.size))}</em>
-        </span>
-      `).join("")}
+      ${attachments.map(renderAttachmentChip).join("")}
     </div>
   `;
+}
+
+function renderAttachmentThumb(attachment = {}, className = "attachment-thumb") {
+  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "").trim();
+  if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(attachmentGlyph(attachment))}</span>`;
+  return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
+}
+
+function renderAttachmentChip(attachment = {}) {
+  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl);
+  const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
+  const tag = href ? "a" : "span";
+  const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
+  return `
+    <${tag} class="message-attachment${image ? " image" : ""}"${download} title="${escapeHtml(attachment.path || attachment.name || "")}">
+      ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
+      <strong>${escapeHtml(attachment.name || "附件")}</strong>
+      <em>${escapeHtml(formatBytes(attachment.size))}</em>
+    </${tag}>
+  `;
+}
+
+function extractLocalFilePaths(text = "") {
+  const source = String(text || "");
+  const paths = new Set();
+  const quoted = /[`"“”']((?:\/Users|\/tmp|\/var\/folders|\/opt|\/home)\/[^`"“”'\n\r]+?\.[A-Za-z0-9]{1,10})[`"“”']/g;
+  const plain = /(?:^|[\s:：])((?:\/Users|\/tmp|\/var\/folders|\/opt|\/home)\/[^\s`"'“”‘’，。；;]+?\.[A-Za-z0-9]{1,10})(?=$|[\s`"'“”‘’，。；;])/gm;
+  for (const regex of [quoted, plain]) {
+    let match = regex.exec(source);
+    while (match) {
+      paths.add(match[1].trim().replace(/[),.。]+$/g, ""));
+      match = regex.exec(source);
+    }
+  }
+  return [...paths].slice(0, 8);
+}
+
+function generatedAttachmentsForMessage(message = {}) {
+  if (message.role !== "assistant") return [];
+  return extractLocalFilePaths(message.content).map((filePath) => {
+    const entry = state.generatedFiles.get(filePath);
+    if (entry?.status === "ready") return entry.attachment;
+    if (entry?.status === "error") {
+      return {
+        id: `generated:${filePath}`,
+        name: filePath.split(/[\\/]/).pop() || "文件",
+        path: filePath,
+        kind: "file",
+        size: 0
+      };
+    }
+    return {
+      id: `generated:${filePath}`,
+      name: filePath.split(/[\\/]/).pop() || "文件",
+      path: filePath,
+      kind: "file",
+      size: 0
+    };
+  });
+}
+
+function queueGeneratedFileFetches(messages = []) {
+  const paths = [...new Set(messages
+    .filter((message) => message.role === "assistant")
+    .flatMap((message) => extractLocalFilePaths(message.content)))];
+  for (const filePath of paths) {
+    if (state.generatedFiles.has(filePath)) continue;
+    state.generatedFiles.set(filePath, { status: "loading" });
+    window.aimashi.fetchFileAttachment?.({ path: filePath })
+      .then((attachment) => {
+        state.generatedFiles.set(filePath, { status: "ready", attachment });
+        renderChat();
+      })
+      .catch(() => {
+        state.generatedFiles.set(filePath, { status: "error" });
+        renderChat();
+      });
+  }
 }
 
 function ensureReadState() {
@@ -2177,10 +2386,156 @@ function currentRelayPairingLink() {
   return String(els.mobileRelayLink?.dataset?.link || els.mobileRelayLink?.textContent || "").trim();
 }
 
+const workbenchSections = [
+  {
+    id: "recent",
+    title: "最近",
+    subtitle: "从近期对话继续整理",
+    detail: "适合把刚聊完的修复、调研、创作想法临时收住。"
+  },
+  {
+    id: "projects",
+    title: "项目",
+    subtitle: "会话变成可推进的事项",
+    detail: "例如 Aimashi 输入体验修复、Hermes runtime 调查、消息 UI 重设计。"
+  },
+  {
+    id: "drafts",
+    title: "草稿",
+    subtitle: "文案、prompt、方案草稿",
+    detail: "适合收集产品命名、角色设定、回复模板和待润色文本。"
+  },
+  {
+    id: "materials",
+    title: "素材",
+    subtitle: "文件、截图、生成物",
+    detail: "适合放代码补丁、截图、图片、桌宠资源和工具结果摘要。"
+  }
+];
+
+function workbenchSectionRows() {
+  const sessionCount = sessionsForPersona(state.activeKey).filter(hasPersistableMessages).length;
+  return workbenchSections.map((section) => ({
+    ...section,
+    count: section.id === "recent" ? sessionCount : 0
+  }));
+}
+
+function renderWorkbenchNav() {
+  if (!els.workbenchNav) return;
+  const filter = state.workbenchFilter.trim().toLowerCase();
+  const rows = workbenchSectionRows().filter((row) => (
+    !filter || `${row.title} ${row.subtitle} ${row.detail}`.toLowerCase().includes(filter)
+  ));
+  els.workbenchNav.innerHTML = rows.length ? rows.map((row) => `
+    <button class="workbench-nav-row${row.id === state.workbenchSection ? " active" : ""}" type="button" data-workbench-section="${escapeHtml(row.id)}">
+      <span>
+        <strong>${escapeHtml(row.title)}</strong>
+        <small>${escapeHtml(row.subtitle)}</small>
+      </span>
+      <em>${escapeHtml(String(row.count))}</em>
+    </button>
+  `).join("") : `<div class="workbench-empty-nav">没有匹配的工作台分组</div>`;
+}
+
+function renderWorkbenchAction({ title, desc, meta }) {
+  return `
+    <button class="workbench-action" type="button" disabled>
+      <span>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(desc)}</small>
+      </span>
+      <em>${escapeHtml(meta || "即将支持")}</em>
+    </button>
+  `;
+}
+
+function renderWorkbenchExample({ title, desc, tags }) {
+  return `
+    <article class="workbench-example">
+      <header>
+        <strong>${escapeHtml(title)}</strong>
+        <span>示例</span>
+      </header>
+      <p>${escapeHtml(desc)}</p>
+      <div>
+        ${tags.map((tag) => `<em>${escapeHtml(tag)}</em>`).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderWorkbench() {
+  renderWorkbenchNav();
+  if (!els.workbenchContent) return;
+  const active = workbenchSections.find((section) => section.id === state.workbenchSection) || workbenchSections[0];
+  const currentSession = activeSession();
+  const currentFellow = activePersona();
+  const exchangeCount = (currentSession.messages || []).filter((message) => !message.transient && String(message.content || "").trim()).length;
+  setText(els.workbenchPageTitle, "工作台");
+  setText(els.workbenchPageMeta, `${active.title} · ${active.detail}`);
+  els.workbenchContent.innerHTML = `
+    <section class="workbench-hero">
+      <div>
+        <span class="workbench-kicker">Workbench</span>
+        <h2>把聊天里的过程，整理成下一步能继续用的东西。</h2>
+        <p>这里先作为 Aimashi 的第四个入口：项目、草稿、素材和当前任务都可以从对话里沉淀出来。第一版只搭骨架，等方向明确后再接真实存储。</p>
+      </div>
+      <aside>
+        <span>当前上下文</span>
+        <strong>${escapeHtml(currentSession.title || "新对话")}</strong>
+        <p>${escapeHtml(currentFellow?.name || "当前伙伴")} · ${exchangeCount} 条消息</p>
+      </aside>
+    </section>
+
+    <section class="workbench-action-grid" aria-label="工作台操作">
+      ${renderWorkbenchAction({
+        title: "从当前对话创建",
+        desc: "把这一轮聊天整理成项目摘要、待办和相关消息。",
+        meta: "对话 -> 项目"
+      })}
+      ${renderWorkbenchAction({
+        title: "保存选中消息",
+        desc: "以后可从消息右键把关键片段收进项目或草稿。",
+        meta: "选区 -> 卡片"
+      })}
+      ${renderWorkbenchAction({
+        title: "新建草稿",
+        desc: "放 prompt、文案、角色设定、方案草稿。",
+        meta: "空白草稿"
+      })}
+      ${renderWorkbenchAction({
+        title: "导入文件",
+        desc: "收纳截图、补丁、文档、图片和生成物。",
+        meta: "文件素材"
+      })}
+    </section>
+
+    <section class="workbench-examples" aria-label="工作台示例">
+      ${renderWorkbenchExample({
+        title: "Aimashi 输入体验修复",
+        desc: "从连续对话里提炼已修复、待验证和相关文件，适合后续生成 PR 描述。",
+        tags: ["项目", "代码", "待办"]
+      })}
+      ${renderWorkbenchExample({
+        title: "消息正文样式重设计",
+        desc: "收集你挑过的截图、代码块样式要求和最终设计判断。",
+        tags: ["创意", "UI", "截图"]
+      })}
+      ${renderWorkbenchExample({
+        title: "Hermes runtime 冲突调查",
+        desc: "保留关键结论、后台路径、日志和下一步排查入口。",
+        tags: ["调查", "日志", "运行时"]
+      })}
+    </section>
+  `;
+}
+
 function render() {
   const runtime = state.runtime;
   if (!runtime) return;
   renderSendButton();
+  renderComposerReply();
   const editingModel = els.modelForm.contains(document.activeElement);
   const editingProfile = Boolean(els.profileForm?.contains(document.activeElement));
   const editingAppearance = Boolean(els.appearanceForm?.contains(document.activeElement));
@@ -2356,6 +2711,7 @@ function render() {
       state.activeKey = persona.key;
       const latest = sessionsForPersona(persona.key)[0];
       state.activeSessionIdByPersona[persona.key] = latest?.id;
+      state.replyDraft = null;
       markPersonaRead(persona.key);
       state.sessionMenuOpen = false;
       showNarrowContent();
@@ -2376,7 +2732,7 @@ function render() {
   }
   renderView();
   renderSessionMenu();
-  renderChat();
+  if (!hasActiveMessageTextSelection()) renderChat();
 }
 
 function renderView() {
@@ -2389,9 +2745,11 @@ function renderView() {
   els.conversationSidebar?.classList.toggle("hidden", state.activeView !== "chat");
   els.contactsSidebar?.classList.toggle("hidden", state.activeView !== "contacts");
   els.skillsSidebar?.classList.toggle("hidden", state.activeView !== "skills");
+  els.workbenchSidebar?.classList.toggle("hidden", state.activeView !== "workbench");
   els.chatView.classList.toggle("hidden", state.activeView !== "chat");
   els.contactsView?.classList.toggle("hidden", state.activeView !== "contacts");
   els.skillsView?.classList.toggle("hidden", state.activeView !== "skills");
+  els.workbenchView?.classList.toggle("hidden", state.activeView !== "workbench");
   els.settingsView.classList.toggle("hidden", !state.settingsOpen);
   els.profileDialog?.classList.toggle("hidden", !state.profileDialogOpen);
   els.fellowCreateMenu?.classList.toggle("hidden", !state.fellowMenuOpen);
@@ -2413,6 +2771,7 @@ function renderView() {
   });
   renderSkillLibrary();
   renderContacts();
+  renderWorkbench();
 }
 
 function skillTone(skill = {}) {
@@ -3304,6 +3663,7 @@ function renderContacts() {
 function renderContactDetail(fellow) {
   if (!els.contactDetail || !fellow) return;
   const summary = contactSessionSummary(fellow);
+  const engine = fellow.agentEngine || fellow.agent_engine || fellow.engine || "hermes";
   setText(els.contactPageTitle, fellow.name || "联系人");
   setText(els.contactPageMeta, `${summary.count} 个会话`);
   els.contactDetail.innerHTML = `
@@ -3312,6 +3672,10 @@ function renderContactDetail(fellow) {
         <button class="contact-profile-avatar" type="button" data-contact-action="edit" title="编辑联系人头像" style="${avatarBackgroundStyle(fellow.avatarImage || avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
         <div class="contact-profile-title">
           <h2>${escapeHtml(fellow.name || "联系人")}</h2>
+          <div class="contact-engine-badge" title="Agent 引擎">
+            <span>Agent</span>
+            <strong>${escapeHtml(engineLabel(engine))}</strong>
+          </div>
           <p>${escapeHtml(fellow.bio || "本地伙伴")}</p>
         </div>
         <div class="contact-actions">
@@ -3475,23 +3839,100 @@ function messagePlainText(message) {
   return String(message?.content || "").trim();
 }
 
-function messageContextSnippet(message) {
-  const text = messagePlainText(message).replace(/\s+/g, " ");
+function messageContextText(message, selectionText = "") {
+  return String(selectionText || "").trim() || messagePlainText(message);
+}
+
+function messageContextSnippet(message, selectionText = "") {
+  const text = messageContextText(message, selectionText).replace(/\s+/g, " ");
   return text.length > 160 ? `${text.slice(0, 160)}...` : text;
 }
 
-function openMessageContextMenu(messageIndex, x, y) {
+function messageAuthorLabel(message) {
+  if (message?.role === "user") return "你";
+  const persona = activePersona();
+  return persona?.name || "AI";
+}
+
+function messageReferenceForIndex(index, selectionText = "") {
+  const message = messageAtIndex(index);
+  const snippet = messageContextSnippet(message, selectionText);
+  if (!message || !snippet) return null;
+  return {
+    role: message.role,
+    author: messageAuthorLabel(message),
+    content: snippet,
+    createdAt: message.createdAt || "",
+    messageIndex: index,
+    selected: Boolean(String(selectionText || "").trim())
+  };
+}
+
+function replyQuoteHtml(replyTo) {
+  if (!replyTo?.content) return "";
+  return `
+    <div class="message-reply-quote">
+      <span>${escapeHtml(replyTo.author || (replyTo.role === "user" ? "你" : "AI"))}</span>
+      <p>${escapeHtml(replyTo.content)}</p>
+    </div>
+  `;
+}
+
+function clearMessageSelectionHighlight() {
+  try {
+    window.CSS?.highlights?.delete?.("aimashi-message-selection");
+  } catch {
+    // Highlight API is optional.
+  }
+}
+
+function highlightMessageSelection(range) {
+  clearMessageSelectionHighlight();
+  try {
+    if (!range || !window.Highlight || !window.CSS?.highlights) return;
+    window.CSS.highlights.set("aimashi-message-selection", new window.Highlight(range));
+  } catch {
+    // Keep native selection behavior when custom highlights are unavailable.
+  }
+}
+
+function selectionInsideBubble(bubble) {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const text = selection.toString().trim();
+  if (!text) return null;
+  const anchorInside = selection.anchorNode && bubble.contains(selection.anchorNode);
+  const focusInside = selection.focusNode && bubble.contains(selection.focusNode);
+  if (!anchorInside || !focusInside) return null;
+  const range = selection.getRangeAt(0).cloneRange();
+  return { text, range };
+}
+
+function hasActiveMessageTextSelection() {
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+  if (!String(selection.toString() || "").trim()) return false;
+  const anchorBubble = selection.anchorNode?.parentElement?.closest?.(".bubble[data-message-index]");
+  const focusBubble = selection.focusNode?.parentElement?.closest?.(".bubble[data-message-index]");
+  return Boolean(anchorBubble && focusBubble && anchorBubble === focusBubble && els.chat?.contains(anchorBubble));
+}
+
+function openMessageContextMenu(messageIndex, x, y, selection = null) {
   const index = Number(messageIndex);
   if (!messageAtIndex(index)) return;
   closeSkillContextMenu();
   closeFellowContextMenu();
-  state.messageContextMenu = { open: true, x, y, messageIndex: index };
+  const selectionText = String(selection?.text || "").trim();
+  state.messageContextMenu = { open: true, x, y, messageIndex: index, selectionText };
+  if (selectionText) highlightMessageSelection(selection.range);
+  else clearMessageSelectionHighlight();
   renderMessageContextMenu();
 }
 
 function closeMessageContextMenu() {
   if (!state.messageContextMenu.open) return;
-  state.messageContextMenu = { open: false, x: 0, y: 0, messageIndex: -1 };
+  state.messageContextMenu = { open: false, x: 0, y: 0, messageIndex: -1, selectionText: "" };
+  clearMessageSelectionHighlight();
   renderMessageContextMenu();
 }
 
@@ -3539,16 +3980,122 @@ function insertComposerText(text) {
   updateSlashCommandState();
 }
 
-function replyToMessage(message) {
-  const snippet = messageContextSnippet(message);
-  if (!snippet) return;
-  insertComposerText(`回复这条消息：\n> ${snippet}\n\n`);
+function renderComposerReply() {
+  if (!els.composerReply) return;
+  const reply = state.replyDraft;
+  els.composerReply.classList.toggle("hidden", !reply);
+  if (!reply) {
+    els.composerReply.innerHTML = "";
+    return;
+  }
+  els.composerReply.innerHTML = `
+    <div>
+      <span>回复 ${escapeHtml(reply.author || "消息")}</span>
+      <p>${escapeHtml(reply.content || "")}</p>
+    </div>
+    <button type="button" data-clear-reply title="取消回复" aria-label="取消回复">×</button>
+  `;
 }
 
-function translateMessage(message) {
-  const snippet = messagePlainText(message);
-  if (!snippet) return;
-  insertComposerText(`请把下面这段内容翻译成中文，保持原意和语气：\n\n${snippet}`);
+function replyToMessage(message, index = state.messageContextMenu.messageIndex, selectionText = "") {
+  const reference = messageReferenceForIndex(Number(index), selectionText);
+  if (!reference) return;
+  state.replyDraft = reference;
+  renderComposerReply();
+  els.chatInput?.focus();
+}
+
+function replyContextPrompt(text, replyTo) {
+  if (!replyTo?.content) return text;
+  return [
+    "用户正在回复会话中的某一条消息。请把“被回复消息”作为这次回复的直接上下文，但不要在回答里机械复述它。",
+    "",
+    `被回复消息作者：${replyTo.author || (replyTo.role === "user" ? "用户" : "助手")}`,
+    "被回复消息：",
+    replyTo.content,
+    "",
+    "用户实际输入：",
+    text
+  ].join("\n");
+}
+
+function translationHtml(message, index) {
+  const translation = message?.translation;
+  if (!translation) return "";
+  const status = translation.status || (translation.text ? "done" : "");
+  const label = translation.sourceText ? "选中文本译文" : "译文";
+  const body = status === "loading"
+    ? '<p class="message-translation-muted">正在翻译...</p>'
+    : status === "error"
+      ? `<p class="message-translation-error">${escapeHtml(translation.error || "翻译失败")}</p>`
+      : `<div class="message-translation-body">${renderMarkdown(translation.text || "")}</div>`;
+  const copyButton = status === "done" && translation.text
+    ? `<button type="button" data-copy-translation="${index}" title="复制译文" aria-label="复制译文">⧉</button>`
+    : "";
+  return `
+    <div class="message-translation">
+      <div class="message-translation-head">
+        <span>${label}</span>
+        ${copyButton}
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+async function translateMessage(message, index = state.messageContextMenu.messageIndex, selectionText = "") {
+  const text = messageContextText(message, selectionText);
+  const messageIndex = Number(index);
+  const session = activeSession();
+  const target = messageAtIndex(messageIndex);
+  if (!text || !target) return;
+  if (state.isGenerating) {
+    target.translation = {
+      status: "error",
+      error: "请等当前回复生成结束后再翻译。",
+      sourceText: String(selectionText || "").trim(),
+      translatedAt: nowIso()
+    };
+    renderChat();
+    return;
+  }
+  target.translation = {
+    status: "loading",
+    text: "",
+    error: "",
+    sourceText: String(selectionText || "").trim(),
+    translatedAt: nowIso()
+  };
+  renderChat();
+  try {
+    const prompt = [
+      "请把下面这条聊天消息翻译成简体中文。",
+      "要求：只输出译文；保持原意、语气和代码/命令/链接；不要添加解释。",
+      "",
+      text
+    ].join("\n");
+    const response = await window.aimashi.sendChat({
+      fellowKey: state.activeKey,
+      personaKey: state.activeKey,
+      sessionId: `utility:translate:${cryptoRandomId()}`,
+      utility: true,
+      messages: [{ role: "user", content: prompt }]
+    });
+    const translated = String(response.choices?.[0]?.message?.content || "").trim();
+    target.translation = translated
+      ? { status: "done", text: translated, error: "", sourceText: String(selectionText || "").trim(), translatedAt: nowIso() }
+      : { status: "error", text: "", error: "模型没有返回译文。", sourceText: String(selectionText || "").trim(), translatedAt: nowIso() };
+  } catch (error) {
+    target.translation = {
+      status: "error",
+      text: "",
+      error: `翻译失败: ${error.message || error}`,
+      sourceText: String(selectionText || "").trim(),
+      translatedAt: nowIso()
+    };
+  }
+  renderChat();
+  await persistSessionQuietly(session);
 }
 
 async function toggleMessagePinned(index) {
@@ -3579,11 +4126,14 @@ function renderMessageContextMenu() {
   const open = state.messageContextMenu.open && message;
   menu.classList.toggle("hidden", !open);
   if (!open) return;
-  const hasText = Boolean(messagePlainText(message));
+  const selectionText = String(state.messageContextMenu.selectionText || "").trim();
+  const hasSelection = Boolean(selectionText);
+  const contextText = messageContextText(message, selectionText);
+  const hasText = Boolean(contextText);
   menu.innerHTML = `
-    ${menuItemHtml({ icon: "quote", label: "回复", attrs: `data-message-action="reply" ${hasText ? "" : "disabled"}` })}
-    ${menuItemHtml({ icon: "copy", label: "拷贝", attrs: `data-message-action="copy" ${hasText ? "" : "disabled"}` })}
-    ${menuItemHtml({ icon: "translate", label: "翻译", attrs: `data-message-action="translate" ${hasText ? "" : "disabled"}` })}
+    ${menuItemHtml({ icon: "quote", label: hasSelection ? "回复选中" : "回复", attrs: `data-message-action="reply" ${hasText ? "" : "disabled"}` })}
+    ${menuItemHtml({ icon: "copy", label: hasSelection ? "拷贝选中" : "拷贝", attrs: `data-message-action="copy" ${hasText ? "" : "disabled"}` })}
+    ${menuItemHtml({ icon: "translate", label: hasSelection ? "翻译选中" : "翻译", attrs: `data-message-action="translate" ${hasText ? "" : "disabled"}` })}
     <div class="skill-context-menu-separator" role="separator"></div>
     ${menuItemHtml({ icon: "pin", label: message.pinned ? "取消置顶" : "置顶", attrs: 'data-message-action="pin"' })}
     ${menuItemHtml({ icon: "delete", label: "删除", attrs: 'data-message-action="delete"', className: "danger" })}
@@ -3597,12 +4147,13 @@ function renderMessageContextMenu() {
     button.addEventListener("click", async () => {
       const action = button.dataset.messageAction;
       const index = state.messageContextMenu.messageIndex;
+      const actionSelectionText = String(state.messageContextMenu.selectionText || "").trim();
       const targetMessage = messageAtIndex(index);
       closeMessageContextMenu();
       if (!targetMessage) return;
-      if (action === "reply") replyToMessage(targetMessage);
-      if (action === "copy") await copyTextToClipboard(messagePlainText(targetMessage));
-      if (action === "translate") translateMessage(targetMessage);
+      if (action === "reply") replyToMessage(targetMessage, index, actionSelectionText);
+      if (action === "copy") await copyTextToClipboard(messageContextText(targetMessage, actionSelectionText));
+      if (action === "translate") await translateMessage(targetMessage, index, actionSelectionText);
       if (action === "pin") await toggleMessagePinned(index);
       if (action === "delete") await deleteMessageAt(index);
     });
@@ -3900,6 +4451,7 @@ function renderSessionMenu() {
         state.activeSessionIdByPersona[state.activeKey] = session.id;
         state.sessionMenuOpen = false;
         state.forceScrollToBottom = true;
+        state.replyDraft = null;
       }
       render();
     });
@@ -4174,6 +4726,7 @@ function renderChat() {
   const wasNearBottom = !els.chat || (els.chat.scrollHeight - els.chat.scrollTop - els.chat.clientHeight < 80);
   const session = activeSession();
   const messages = session.messages;
+  queueGeneratedFileFetches(messages);
   const user = state.runtime?.user || { displayName: "Boss", avatarText: "B", avatarColor: "#111827" };
   const active = activePersona();
   const activeAgentEngine = active?.agentEngine || active?.agent_engine || "hermes";
@@ -4209,11 +4762,13 @@ function renderChat() {
       : "";
     const timeHtml = renderMessageTime(message.createdAt);
     const bodyHtml = String(message.content || "").trim() ? renderMarkdown(message.content) : "";
-    const attachmentHtml = renderAttachmentChips(message.attachments);
+    const replyHtml = replyQuoteHtml(message.replyTo);
+    const translation = translationHtml(message, messageIndex);
+    const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)]);
     const pinnedHtml = message.pinned ? `<span class="message-pin-badge">${ICON_PARK_PIN_SVG}置顶</span>` : "";
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? escapeHtml(label) : ""}</div>
-      <div class="message-stack">${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${bodyHtml}${attachmentHtml}</div>${timeHtml}</div>
+      <div class="message-stack">${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
     `;
     els.chat.appendChild(article);
   }
@@ -4263,6 +4818,23 @@ function activePersona() {
 function appendChat(role, content, options = {}) {
   const session = activeSession();
   const message = { role, content, createdAt: nowIso(), transient: Boolean(options.transient) };
+  if (options.replyTo?.content) {
+    message.replyTo = {
+      role: String(options.replyTo.role || ""),
+      author: String(options.replyTo.author || ""),
+      content: String(options.replyTo.content || ""),
+      createdAt: String(options.replyTo.createdAt || ""),
+      messageIndex: Number.isInteger(options.replyTo.messageIndex) ? options.replyTo.messageIndex : -1
+    };
+  }
+  if (options.translation?.status || options.translation?.text) {
+    message.translation = {
+      status: String(options.translation.status || ""),
+      text: String(options.translation.text || ""),
+      error: String(options.translation.error || ""),
+      translatedAt: String(options.translation.translatedAt || "")
+    };
+  }
   if (Array.isArray(options.attachments) && options.attachments.length) {
     message.attachments = options.attachments.map((attachment) => ({
       id: String(attachment.id || cryptoRandomId()),
@@ -4270,7 +4842,8 @@ function appendChat(role, content, options = {}) {
       path: String(attachment.path || ""),
       mime: String(attachment.mime || attachment.type || ""),
       size: Number(attachment.size) || 0,
-      kind: String(attachment.kind || attachmentKind(attachment))
+      kind: String(attachment.kind || attachmentKind(attachment)),
+      thumbnailDataUrl: String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "")
     }));
   }
   if (Array.isArray(options.tools) && options.tools.length) {
@@ -4403,8 +4976,8 @@ function renderComposerAttachments() {
   const attachments = state.pendingAttachments;
   els.composerAttachments.classList.toggle("hidden", attachments.length === 0);
   els.composerAttachments.innerHTML = attachments.map((attachment) => `
-    <div class="composer-attachment" title="${escapeHtml(attachment.path || attachment.name)}">
-      <span class="composer-attachment-kind">${escapeHtml(attachmentGlyph(attachment))}</span>
+    <div class="composer-attachment${attachment.thumbnailDataUrl ? " image" : ""}" title="${escapeHtml(attachment.path || attachment.name)}">
+      <span class="composer-attachment-kind">${renderAttachmentThumb(attachment, "composer-attachment-thumb")}</span>
       <span class="composer-attachment-name">${escapeHtml(attachment.name || "附件")}</span>
       <span class="composer-attachment-size">${escapeHtml(formatBytes(attachment.size))}</span>
       <button type="button" data-attachment-remove="${escapeHtml(attachment.id)}" title="移除附件" aria-label="移除附件">×</button>
@@ -4550,10 +5123,12 @@ async function addComposerFiles(fileList) {
   for (const file of files.slice(0, 20)) {
     let filePath = "";
     let saved = null;
+    let thumbnailDataUrl = "";
     try {
+      thumbnailDataUrl = await thumbnailDataUrlForFile(file);
       filePath = await window.aimashi.filePathForFile?.(file);
       if (!filePath) {
-        saved = await saveBrowserFileAttachment(file);
+        saved = await saveBrowserFileAttachment(file, thumbnailDataUrl);
         filePath = saved?.path || "";
       }
       if (!filePath && !saved) continue;
@@ -4570,7 +5145,8 @@ async function addComposerFiles(fileList) {
       path: filePath || "",
       mime: saved?.mime || file.type || "",
       size: saved?.size || file.size || 0,
-      kind: saved?.kind || attachmentKind(file)
+      kind: saved?.kind || attachmentKind(file),
+      thumbnailDataUrl: saved?.thumbnailDataUrl || thumbnailDataUrl || ""
     });
   }
   if (!next.length) return;
@@ -4578,6 +5154,36 @@ async function addComposerFiles(fileList) {
   renderComposerAttachments();
   renderSendButton();
   els.chatInput?.focus();
+}
+
+function thumbnailDataUrlForFile(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const max = 180;
+        const scale = Math.min(1, max / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+        const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+        const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      } catch {
+        resolve("");
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve("");
+    };
+    image.src = url;
+  });
 }
 
 function readFileAsDataUrl(file) {
@@ -4589,7 +5195,7 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function saveBrowserFileAttachment(file) {
+async function saveBrowserFileAttachment(file, thumbnailDataUrl = "") {
   if (!file) return null;
   if (file.size > 25 * 1024 * 1024) {
     appendTransientChat("assistant", `附件「${file.name || "未命名"}」超过 25MB，暂时不能发送。`);
@@ -4600,7 +5206,8 @@ async function saveBrowserFileAttachment(file) {
     name: file.name || "attachment",
     mime: file.type || "",
     size: file.size || 0,
-    dataUrl
+    dataUrl,
+    thumbnailDataUrl
   });
 }
 
@@ -4640,6 +5247,7 @@ async function createNewSessionForActive() {
   const latest = sessionsForPersona(state.activeKey)[0];
   state.activeSessionIdByPersona[state.activeKey] = latest?.id;
   state.sessionMenuOpen = false;
+  state.replyDraft = null;
   state.forceScrollToBottom = true;
   render();
 }
@@ -4731,9 +5339,10 @@ document.addEventListener("click", (event) => {
 els.chat?.addEventListener("contextmenu", (event) => {
   const bubble = event.target.closest(".bubble[data-message-index]");
   if (!bubble || !els.chat.contains(bubble)) return;
+  const selection = selectionInsideBubble(bubble);
   event.preventDefault();
   event.stopPropagation();
-  openMessageContextMenu(bubble.dataset.messageIndex, event.clientX, event.clientY);
+  openMessageContextMenu(bubble.dataset.messageIndex, event.clientX, event.clientY, selection);
 });
 document.addEventListener("click", (event) => {
   if (!state.sessionMenuOpen) return;
@@ -4774,6 +5383,16 @@ els.contactSearch?.addEventListener("input", () => {
 els.skillSearch?.addEventListener("input", () => {
   state.skillFilter = els.skillSearch.value;
   renderSkillLibrary();
+});
+els.workbenchSearch?.addEventListener("input", () => {
+  state.workbenchFilter = els.workbenchSearch.value;
+  renderWorkbench();
+});
+els.workbenchNav?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-workbench-section]");
+  if (!button) return;
+  state.workbenchSection = button.dataset.workbenchSection || "recent";
+  renderWorkbench();
 });
 document.querySelectorAll("[data-skill-filter]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -4832,6 +5451,12 @@ document.addEventListener("pointercancel", stopSidebarResize);
 document.addEventListener("scroll", (event) => {
   showScrollingScrollbar(event.target);
 }, { capture: true, passive: true });
+document.addEventListener("pointermove", (event) => {
+  updateScrollbarOverlayDrag(event);
+  maybeShowScrollbarForPointer(event);
+}, { capture: true });
+document.addEventListener("pointerup", stopScrollbarOverlayDrag, { capture: true });
+document.addEventListener("pointercancel", stopScrollbarOverlayDrag, { capture: true });
 document.addEventListener("mouseover", (event) => {
   const target = event.target?.closest?.(".scrollbar-active");
   if (!target) return;
@@ -4846,15 +5471,7 @@ document.addEventListener("mouseover", (event) => {
 document.addEventListener("mouseout", (event) => {
   const target = event.target?.closest?.(".scrollbar-active");
   if (!target || target.contains(event.relatedTarget)) return;
-  const previous = scrollbarTimers.get(target);
-  if (previous) window.clearTimeout(previous);
-  scrollbarTimers.set(target, window.setTimeout(() => {
-    if (target.matches(":hover")) return;
-    target.classList.remove("scrollbar-visible");
-    target.classList.remove("scrollbar-active");
-    scrollbarTimers.delete(target);
-    hideScrollbarOverlay(target);
-  }, 500));
+  scheduleScrollbarHide(target, 500);
 }, { capture: true, passive: true });
 window.addEventListener("resize", () => {
   if (scrollbarOverlayTarget) updateScrollbarOverlay(scrollbarOverlayTarget);
@@ -5304,8 +5921,26 @@ function closeProfileDialog() {
 
 function renderFellowAvatarDefaults() {
   if (!els.fellowAvatarDefaults) return;
+  const activeGroup = avatarPresetGroups[state.fellowAvatarPresetGroup]
+    ? state.fellowAvatarPresetGroup
+    : "human";
+  state.fellowAvatarPresetGroup = activeGroup;
+  if (els.fellowAvatarDefaultTabs) {
+    els.fellowAvatarDefaultTabs.innerHTML = avatarPresetGroupTabs.map((group) => `
+      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${escapeHtml(group.label)}</button>
+    `).join("");
+    els.fellowAvatarDefaultTabs.querySelectorAll("[data-avatar-group]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const group = button.dataset.avatarGroup || "human";
+        if (!avatarPresetGroups[group] || state.fellowAvatarPresetGroup === group) return;
+        state.fellowAvatarPresetGroup = group;
+        renderFellowAvatarDefaults();
+      });
+    });
+  }
   const selected = state.fellowAvatarDraft.image;
-  els.fellowAvatarDefaults.innerHTML = avatarPresets.map((preset) => `
+  const presets = avatarPresetGroups[activeGroup] || avatarPresetGroups.human;
+  els.fellowAvatarDefaults.innerHTML = presets.map((preset) => `
     <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${escapeHtml(preset.src)}" data-avatar-name="${escapeHtml(preset.name)}" title="${escapeHtml(preset.name)}" aria-label="${escapeHtml(preset.name)}" style="${avatarThumbBackgroundStyle(preset.src, avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
   `).join("");
   els.fellowAvatarDefaults.querySelectorAll("[data-avatar]").forEach((button) => {
@@ -5423,6 +6058,7 @@ function openFellowDialog(fellow = null, personaText = "") {
   els.fellowName.value = actualFellow?.name || seed?.name || "";
   renderFellowAgentEngineSelect(actualFellow?.agentEngine || actualFellow?.agent_engine || seed?.agentEngine || "hermes");
   const avatarImage = actualFellow?.avatarImage || defaultAvatarAssets()[0];
+  state.fellowAvatarPresetGroup = avatarPresetGroupForSrc(avatarImage) || "human";
   setFellowAvatarDraft(avatarImage, avatarCropForImage(avatarImage, actualFellow?.avatarCrop));
   els.fellowSeed.value = actualFellow ? personaText : (seed?.bio || "");
   if (els.fellowPersonaDetails) els.fellowPersonaDetails.open = Boolean(seed);
@@ -5885,6 +6521,12 @@ els.composerAttachments?.addEventListener("click", (event) => {
   if (event.target.closest("[data-attachment-remove]")) return;
   els.chatInput?.focus();
 });
+els.composerReply?.addEventListener("click", (event) => {
+  if (!event.target.closest("[data-clear-reply]")) return;
+  state.replyDraft = null;
+  renderComposerReply();
+  els.chatInput?.focus();
+});
 els.chatForm?.addEventListener("dragover", (event) => {
   if (!event.dataTransfer?.files?.length) return;
   event.preventDefault();
@@ -5936,6 +6578,21 @@ els.chat.addEventListener("click", async (event) => {
     }, 900);
   }
 });
+els.chat.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-translation]");
+  if (!button || !els.chat.contains(button)) return;
+  const message = messageAtIndex(Number(button.dataset.copyTranslation));
+  const text = message?.translation?.text || "";
+  if (!text) return;
+  if (await copyTextToClipboard(text)) {
+    button.classList.add("copied");
+    button.disabled = true;
+    setTimeout(() => {
+      button.classList.remove("copied");
+      button.disabled = false;
+    }, 900);
+  }
+});
 els.chat.addEventListener("keydown", async (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   const code = event.target.closest(".bubble code.inline-code");
@@ -5972,20 +6629,23 @@ els.chatForm.addEventListener("submit", async (event) => {
   const attachments = state.pendingAttachments.map((attachment) => ({ ...attachment }));
   if (!text && !attachments.length) return;
   const session = activeSession();
+  const replyTo = state.replyDraft ? { ...state.replyDraft } : null;
   const shouldGenerateTitle = !session.titleGenerated && !hasSuccessfulExchange(session);
   els.chatInput.value = "";
   state.pendingAttachments = [];
+  state.replyDraft = null;
+  renderComposerReply();
   renderComposerAttachments();
   resizeChatInput();
   renderSendButton();
   const userText = text || "请查看附件。";
-  appendChat("user", userText, { attachments });
+  appendChat("user", userText, { attachments, replyTo });
   state.streaming = null;
   state.isGenerating = true;
   renderSendButton();
   renderHeaderStatus();
   try {
-    const outgoingText = await outgoingMessageForSubmit(text);
+    const outgoingText = replyContextPrompt(await outgoingMessageForSubmit(text), replyTo);
     const history = messagesForActive()
       .filter((message) => message.content || (Array.isArray(message.attachments) && message.attachments.length))
       .map((message) => ({ role: message.role, content: message.content, attachments: message.attachments || [] }));

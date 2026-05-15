@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff">
     <title>Aimashi Mobile</title>
     <link rel="manifest" href="/mobile/manifest.json">
-    <link rel="stylesheet" href="/mobile/styles.css?v=white-avatar-2">
+    <link rel="stylesheet" href="/mobile/styles.css?v=mobile-trace-markdown-1">
   </head>
   <body>
     <main class="app">
@@ -80,8 +80,29 @@
             </div>
             <button id="newSessionButton" class="icon-button" type="button" title="新对话">＋</button>
           </header>
+          <div class="chat-controls" aria-label="聊天设置">
+            <label class="control-pill control-pill-wide">
+              <span>历史</span>
+              <select id="sessionSelect"></select>
+            </label>
+            <label class="control-pill">
+              <span>模型</span>
+              <select id="modelSelect"></select>
+            </label>
+            <label class="control-pill">
+              <span>强度</span>
+              <select id="effortSelect"></select>
+            </label>
+            <label class="control-pill">
+              <span>权限</span>
+              <select id="permissionSelect"></select>
+            </label>
+          </div>
           <div id="messageList" class="messages"></div>
+          <input id="attachmentInput" class="hidden-file-input" type="file" multiple>
+          <div id="attachmentTray" class="attachment-tray hidden" aria-label="待发送附件"></div>
           <form id="composer" class="composer">
+            <button id="attachButton" class="attach-button" type="button" title="添加附件" aria-label="添加附件">＋</button>
             <textarea id="chatInput" rows="1" placeholder="输入消息"></textarea>
             <button id="sendButton" class="send-button" type="submit" disabled>↗</button>
           </form>
@@ -94,6 +115,6 @@
         </nav>
       </section>
     </main>
-    <script src="/mobile/app.js?v=white-avatar-2"></script>
+    <script src="/mobile/app.js?v=mobile-trace-markdown-1"></script>
   </body>
 </html>

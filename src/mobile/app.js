@@ -35,7 +35,14 @@ const els = {
   chatTitle: document.getElementById("chatTitle"),
   chatMeta: document.getElementById("chatMeta"),
   newSessionButton: document.getElementById("newSessionButton"),
+  sessionSelect: document.getElementById("sessionSelect"),
+  modelSelect: document.getElementById("modelSelect"),
+  effortSelect: document.getElementById("effortSelect"),
+  permissionSelect: document.getElementById("permissionSelect"),
   messageList: document.getElementById("messageList"),
+  attachmentInput: document.getElementById("attachmentInput"),
+  attachmentTray: document.getElementById("attachmentTray"),
+  attachButton: document.getElementById("attachButton"),
   composer: document.getElementById("composer"),
   chatInput: document.getElementById("chatInput"),
   sendButton: document.getElementById("sendButton"),
@@ -53,6 +60,9 @@ const state = {
   relayReady: false,
   relayRequests: new Map(),
   health: null,
+  runtime: null,
+  modelCatalog: [],
+  engineCapabilities: { approvalModes: ["ask", "yolo", "deny"], effortLevels: ["low", "medium", "high"] },
   fellows: [],
   defaultFellow: "",
   sessions: { schema_version: 1, readAt: {}, sessions: {} },
@@ -60,7 +70,10 @@ const state = {
   activeFellowKey: "",
   activeSessionId: "",
   pendingBySession: new Map(),
+  pendingAttachments: [],
+  generatedFiles: new Map(),
   sending: false,
+  uploadingAttachments: 0,
   status: ""
 };
 
@@ -80,6 +93,313 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function renderInlineMarkdown(value) {
+  const codes = [];
+  const protectedText = String(value || "").replace(/`([^`\n]+)`/g, (_match, code) => {
+    const index = codes.push(code) - 1;
+    return `@@AIMASHI_INLINE_CODE_${index}@@`;
+  });
+  let html = escapeHtml(protectedText);
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\n/g, "<br>");
+  for (let index = 0; index < codes.length; index++) {
+    html = html.replace(
+      `@@AIMASHI_INLINE_CODE_${index}@@`,
+      `<code class="inline-code" tabindex="0" title="点击复制">${escapeHtml(codes[index])}</code>`
+    );
+  }
+  return html;
+}
+
+function codeLanguageId(language = "") {
+  const raw = String(language || "").trim().toLowerCase();
+  const aliases = {
+    javascript: "js",
+    typescript: "ts",
+    shell: "bash",
+    sh: "bash",
+    zsh: "bash",
+    yml: "yaml"
+  };
+  return aliases[raw] || raw || "text";
+}
+
+function codeLanguageLabel(language = "") {
+  const id = codeLanguageId(language);
+  const labels = {
+    js: "JavaScript",
+    jsx: "JSX",
+    ts: "TypeScript",
+    tsx: "TSX",
+    json: "JSON",
+    bash: "Shell",
+    yaml: "YAML",
+    html: "HTML",
+    css: "CSS",
+    py: "Python",
+    text: "Text"
+  };
+  return labels[id] || id.toUpperCase();
+}
+
+function highlightPlainSegment(segment, language) {
+  const id = codeLanguageId(language);
+  const keywords = id === "bash"
+    ? new Set(["if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in", "function", "return", "export", "local", "set"])
+    : new Set(["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "class", "extends", "new", "try", "catch", "finally", "throw", "async", "await", "import", "from", "export", "default", "typeof", "instanceof", "in", "of", "this", "super"]);
+  const source = String(segment || "");
+  const tokenPattern = /--?[A-Za-z0-9][\w-]*|\b[A-Za-z_$][\w$-]*\b|\b\d+(?:\.\d+)?\b|[=!<>|&+\-*/%?:.,;()[\]{}]+/g;
+  let cursor = 0;
+  let html = "";
+  for (const match of source.matchAll(tokenPattern)) {
+    const token = match[0];
+    const offset = match.index ?? 0;
+    if (offset > cursor) html += escapeHtml(source.slice(cursor, offset));
+    const escaped = escapeHtml(token);
+    if (/^\d/.test(token)) html += `<span class="syntax-number">${escaped}</span>`;
+    else if (id === "bash" && token.startsWith("-")) html += `<span class="syntax-parameter">${escaped}</span>`;
+    else if (/^[=!<>|&+\-*/%?:]+$/.test(token)) html += `<span class="syntax-operator">${escaped}</span>`;
+    else if (/^[.,;()[\]{}]+$/.test(token)) html += `<span class="syntax-punctuation">${escaped}</span>`;
+    else if (keywords.has(token)) html += `<span class="syntax-keyword">${escaped}</span>`;
+    else if (["true", "false", "null", "undefined"].includes(token)) html += `<span class="syntax-literal">${escaped}</span>`;
+    else {
+      const before = source.slice(0, offset).replace(/\s+$/g, "");
+      const after = source.slice(offset + token.length).replace(/^\s+/g, "");
+      if (before.endsWith(".")) html += `<span class="syntax-property">${escaped}</span>`;
+      else if (after.startsWith("(")) html += `<span class="syntax-function">${escaped}</span>`;
+      else if (/^[A-Z][A-Za-z0-9_$]*$/.test(token)) html += `<span class="syntax-class">${escaped}</span>`;
+      else html += `<span class="syntax-variable">${escaped}</span>`;
+    }
+    cursor = offset + token.length;
+  }
+  if (cursor < source.length) html += escapeHtml(source.slice(cursor));
+  return html;
+}
+
+function highlightCode(code, language = "") {
+  const id = codeLanguageId(language);
+  if (!["js", "jsx", "ts", "tsx", "json", "bash"].includes(id)) return escapeHtml(code);
+  const source = String(code || "");
+  const parts = [];
+  const pattern = id === "json"
+    ? /("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b)|\b(true|false|null)\b|([{}[\]:,])/gi
+    : /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|(\$[A-Za-z_][\w]*|\$\{[^}]+\})/g;
+  let cursor = 0;
+  for (const match of source.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) parts.push(highlightPlainSegment(source.slice(cursor, index), id));
+    const token = match[0];
+    if (id === "json") {
+      const after = source.slice(index + token.length).replace(/^\s+/g, "");
+      if (match[1] && after.startsWith(":")) parts.push(`<span class="syntax-property">${escapeHtml(token)}</span>`);
+      else if (match[1]) parts.push(`<span class="syntax-string">${escapeHtml(token)}</span>`);
+      else if (match[2]) parts.push(`<span class="syntax-number">${escapeHtml(token)}</span>`);
+      else if (match[3]) parts.push(`<span class="syntax-literal">${escapeHtml(token)}</span>`);
+      else parts.push(`<span class="syntax-punctuation">${escapeHtml(token)}</span>`);
+    } else if (match[1]) {
+      parts.push(`<span class="syntax-string">${escapeHtml(token)}</span>`);
+    } else if (match[2]) {
+      parts.push(`<span class="syntax-comment">${escapeHtml(token)}</span>`);
+    } else if (match[3]) {
+      parts.push(`<span class="syntax-variable">${escapeHtml(token)}</span>`);
+    }
+    cursor = index + token.length;
+  }
+  if (cursor < source.length) parts.push(highlightPlainSegment(source.slice(cursor), id));
+  return parts.join("");
+}
+
+function renderCodeBlock(code, language = "") {
+  const lang = codeLanguageId(language).replace(/[^A-Za-z0-9_+.-]/g, "").slice(0, 24);
+  return `
+    <figure class="message-code-block" data-language="${escapeHtml(lang)}">
+      <figcaption>
+        <span>${escapeHtml(codeLanguageLabel(lang))}</span>
+        <button type="button" data-copy-code aria-label="复制代码" title="复制代码">⧉</button>
+      </figcaption>
+      <pre><code class="syntax-code language-${escapeHtml(lang)}">${highlightCode(String(code || "").replace(/\n$/, ""), lang)}</code></pre>
+    </figure>
+  `;
+}
+
+function renderMarkdown(value) {
+  const lines = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const html = [];
+  let paragraph = [];
+  let list = null;
+  let fence = null;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${renderInlineMarkdown(paragraph.join("\n"))}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    html.push(`<${list.type}>${list.items.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</${list.type}>`);
+    list = null;
+  };
+  const flushTextBlocks = () => {
+    flushParagraph();
+    flushList();
+  };
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^```([A-Za-z0-9_+.-]*)\s*$/);
+    if (fence) {
+      if (fenceMatch) {
+        html.push(renderCodeBlock(fence.lines.join("\n"), fence.language));
+        fence = null;
+      } else {
+        fence.lines.push(line);
+      }
+      continue;
+    }
+    if (fenceMatch) {
+      flushTextBlocks();
+      fence = { language: fenceMatch[1] || "", lines: [] };
+      continue;
+    }
+    if (!line.trim()) {
+      flushTextBlocks();
+      continue;
+    }
+    if (/^\s*---+\s*$/.test(line)) {
+      flushTextBlocks();
+      html.push('<hr class="message-divider">');
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushTextBlocks();
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+    if (unordered) {
+      flushParagraph();
+      if (!list || list.type !== "ul") {
+        flushList();
+        list = { type: "ul", items: [] };
+      }
+      list.items.push(unordered[1]);
+      continue;
+    }
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (ordered) {
+      flushParagraph();
+      if (!list || list.type !== "ol") {
+        flushList();
+        list = { type: "ol", items: [] };
+      }
+      list.items.push(ordered[1]);
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flushTextBlocks();
+  if (fence) html.push(renderCodeBlock(fence.lines.join("\n"), fence.language));
+  return html.join("");
+}
+
+function normalizeTraceText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/[\s\u3000`*_~#>()[\]{}.,，。!?！？:：;；"'“”‘’、|/\\-]+/g, "");
+}
+
+function isDuplicateTraceReasoning(reasoning, content) {
+  const reasoningText = normalizeTraceText(reasoning);
+  const contentText = normalizeTraceText(content);
+  if (!reasoningText || !contentText) return false;
+  if (reasoningText === contentText) return true;
+  const shorter = reasoningText.length <= contentText.length ? reasoningText : contentText;
+  const longer = reasoningText.length > contentText.length ? reasoningText : contentText;
+  return shorter.length >= 16 && longer.includes(shorter);
+}
+
+function traceReasoningForDisplay(reasoning, tools, content = "") {
+  const text = String(reasoning || "").trim();
+  if (!text) return "";
+  const toolList = Array.isArray(tools) ? tools : [];
+  if (isDuplicateTraceReasoning(text, content)) return "";
+  if (!toolList.length) return "";
+  return text;
+}
+
+function renderTraceBlocks({ reasoning, tools, content, expanded }) {
+  const toolList = Array.isArray(tools) ? tools : [];
+  const displayReasoning = traceReasoningForDisplay(reasoning, toolList, content);
+  if (!displayReasoning && !toolList.length) return "";
+  const rows = [];
+  if (displayReasoning) {
+    const preview = displayReasoning.slice(0, 80).replace(/\s+/g, " ");
+    rows.push(`
+      <details class="trace-row reasoning"${expanded ? " open" : ""}>
+        <summary><span class="trace-chevron">▸</span><span class="trace-cmd">thinking</span><span class="trace-arg">${escapeHtml(preview)}</span></summary>
+        <pre class="trace-body">${escapeHtml(displayReasoning)}</pre>
+      </details>
+    `);
+  }
+  for (const [idx, tool] of toolList.entries()) {
+    const status = tool.status === "completed" ? "ok" : tool.status === "error" ? "err" : "run";
+    const glyph = status === "ok" ? "✓" : status === "err" ? "✗" : "●";
+    const meta = status === "run" ? "…" : (tool.duration != null ? `${Number(tool.duration).toFixed(2)}s` : "");
+    const name = String(tool.name || "tool");
+    const preview = String(tool.preview || "");
+    const previewInline = preview.replace(/\s+/g, " ").slice(0, 100);
+    rows.push(`
+      <details class="trace-row tool" data-status="${status}"${expanded && idx === toolList.length - 1 ? " open" : ""}>
+        <summary>
+          <span class="trace-chevron">▸</span>
+          <span class="trace-glyph">${glyph}</span>
+          <span class="trace-cmd">${escapeHtml(name)}</span>
+          ${previewInline ? `<span class="trace-arg">${escapeHtml(previewInline)}</span>` : ""}
+          ${meta ? `<span class="trace-meta">${escapeHtml(meta)}</span>` : ""}
+        </summary>
+        ${preview ? `<pre class="trace-body">${escapeHtml(preview)}</pre>` : ""}
+      </details>
+    `);
+  }
+  return `<div class="trace">${rows.join("")}</div>`;
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Use the textarea fallback below.
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+function flashCopiedCode(button) {
+  button.classList.add("copied");
+  clearTimeout(button._copiedTimer);
+  button._copiedTimer = setTimeout(() => {
+    button.classList.remove("copied");
+  }, 900);
 }
 
 function normalizeBaseUrl(value) {
@@ -334,10 +654,17 @@ async function loadData() {
   }
   await loadHealth();
   try {
-    const [fellows, sessions] = await Promise.all([
+    const [fellowsResult, sessionsResult, runtimeResult, catalogResult, capsResult] = await Promise.allSettled([
       request("/api/fellows"),
-      request("/api/chat/sessions")
+      request("/api/chat/sessions"),
+      request("/api/runtime/status"),
+      request("/api/model/catalog"),
+      request("/api/engine/capabilities")
     ]);
+    if (fellowsResult.status === "rejected") throw fellowsResult.reason;
+    if (sessionsResult.status === "rejected") throw sessionsResult.reason;
+    const fellows = fellowsResult.value || {};
+    const sessions = sessionsResult.value || {};
     state.fellows = Array.isArray(fellows.fellows) ? fellows.fellows : [];
     state.defaultFellow = fellows.defaultFellow || state.fellows[0]?.key || "";
     state.sessions = {
@@ -345,6 +672,21 @@ async function loadData() {
       readAt: sessions.readAt || {},
       sessions: sessions.sessions || {}
     };
+    if (runtimeResult.status === "fulfilled") applyRuntimeStatus(runtimeResult.value);
+    if (catalogResult.status === "fulfilled") {
+      const rows = Array.isArray(catalogResult.value?.models) ? catalogResult.value.models : catalogResult.value;
+      state.modelCatalog = Array.isArray(rows) ? rows : [];
+    }
+    if (capsResult.status === "fulfilled" && capsResult.value) {
+      state.engineCapabilities = {
+        approvalModes: Array.isArray(capsResult.value.approvalModes) && capsResult.value.approvalModes.length
+          ? capsResult.value.approvalModes
+          : state.engineCapabilities.approvalModes,
+        effortLevels: Array.isArray(capsResult.value.effortLevels) && capsResult.value.effortLevels.length
+          ? capsResult.value.effortLevels
+          : state.engineCapabilities.effortLevels
+      };
+    }
     render();
   } catch (error) {
     if (state.mode === "direct" && error.status === 401) {
@@ -405,6 +747,177 @@ function messagesForActiveSession() {
   return [...messages, ...(state.pendingBySession.get(key) || [])];
 }
 
+function applyRuntimeStatus(runtime = {}) {
+  state.runtime = runtime && typeof runtime === "object" ? runtime : state.runtime;
+  if (Array.isArray(runtime?.fellows)) {
+    state.fellows = runtime.fellows;
+  }
+}
+
+function modelKey(model = {}) {
+  return `${String(model.provider || "").trim()}::${String(model.model || "").trim()}`;
+}
+
+function providerLabel(provider = "") {
+  const labels = {
+    nous: "Nous Portal",
+    xai: "xAI",
+    anthropic: "Anthropic",
+    openrouter: "OpenRouter",
+    "openai-codex": "OpenAI Codex",
+    deepseek: "DeepSeek",
+    gemini: "Google",
+    lmstudio: "LM Studio"
+  };
+  return labels[provider] || provider || "Provider";
+}
+
+function catalogEntries() {
+  const current = state.runtime?.model || {};
+  const currentId = modelKey(current);
+  const base = Array.isArray(state.modelCatalog) ? state.modelCatalog : [];
+  if (!current.provider || base.some((entry) => entry.id === currentId)) return base;
+  return [
+    {
+      id: currentId,
+      provider: current.provider,
+      providerLabel: providerLabel(current.provider),
+      model: current.model || "",
+      label: current.model || "Custom Model",
+      authType: current.provider === "openai-codex" ? "oauth_external" : "api_key",
+      apiKeyEnv: current.apiKeyEnv || "",
+      baseUrl: current.baseUrl || "",
+      apiMode: current.apiMode || "chat_completions"
+    },
+    ...base
+  ];
+}
+
+function catalogEntryForModel(model = {}) {
+  const key = modelKey(model);
+  return catalogEntries().find((entry) => entry.id === key)
+    || catalogEntries().find((entry) => entry.provider === model.provider && entry.model === model.model)
+    || null;
+}
+
+function modelsForProvider(provider) {
+  return catalogEntries().filter((entry) => entry.provider === provider);
+}
+
+function providerIsConnected(provider) {
+  return Boolean((state.runtime?.connectedProviders || []).some((entry) => entry.provider === provider && entry.hasApiKey));
+}
+
+function connectedModelEntries() {
+  const providers = (state.runtime?.connectedProviders || [])
+    .filter((entry) => entry.hasApiKey)
+    .map((entry) => entry.provider);
+  const entries = providers.flatMap((provider) => modelsForProvider(provider));
+  const current = catalogEntryForModel(state.runtime?.model || {});
+  if (current && providerIsConnected(current.provider) && !entries.some((entry) => entry.id === current.id)) {
+    return [current, ...entries];
+  }
+  return entries;
+}
+
+function activeAgentEngine(fellow = activeFellow()) {
+  const engine = String(fellow?.agentEngine || fellow?.agent_engine || "hermes").trim().toLowerCase();
+  if (engine === "claude" || engine === "claude-code") return "claude-code";
+  if (engine === "codex" || engine === "openai-codex") return "codex";
+  return "hermes";
+}
+
+function engineConfigForFellow(fellow = activeFellow()) {
+  return fellow?.engineConfig || fellow?.engine_config || {};
+}
+
+function engineLabel(engine = activeAgentEngine()) {
+  if (engine === "claude-code") return "Claude Code";
+  if (engine === "codex") return "Codex";
+  return "Hermes";
+}
+
+function externalModelEntries(engine) {
+  if (engine === "claude-code") {
+    return [
+      { id: "default", provider: "claude-code", model: "", label: "Claude Code 默认" },
+      { id: "claude-opus-4-7", provider: "claude-code", model: "claude-opus-4-7", label: "Claude Opus 4.7" },
+      { id: "claude-sonnet-4-6", provider: "claude-code", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { id: "opus", provider: "claude-code", model: "opus", label: "Opus alias" },
+      { id: "sonnet", provider: "claude-code", model: "sonnet", label: "Sonnet alias" }
+    ];
+  }
+  if (engine === "codex") {
+    return [
+      { id: "default", provider: "codex", model: "", label: "Codex 默认" },
+      { id: "gpt-5.3-codex-spark", provider: "codex", model: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
+      { id: "gpt-5.3-codex", provider: "codex", model: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+      { id: "gpt-5.2-codex", provider: "codex", model: "gpt-5.2-codex", label: "GPT-5.2 Codex" }
+    ];
+  }
+  return [];
+}
+
+const EFFORT_LABELS = { none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+const APPROVAL_LABELS = { ask: "Ask", yolo: "YOLO", deny: "Deny", manual: "Ask", smart: "Smart", off: "YOLO" };
+
+function effortOptions(engine) {
+  if (engine === "claude-code") {
+    return ["low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: EFFORT_LABELS[value] }));
+  }
+  if (engine === "codex") {
+    return ["minimal", "low", "medium", "high", "xhigh"].map((value) => ({ value, label: EFFORT_LABELS[value] }));
+  }
+  return (state.engineCapabilities.effortLevels || ["low", "medium", "high"]).map((value) => ({
+    value,
+    label: EFFORT_LABELS[value] || value
+  }));
+}
+
+function permissionOptions(engine) {
+  if (engine === "claude-code") {
+    return [
+      { value: "default", label: "Ask Permissions" },
+      { value: "acceptEdits", label: "Accept Edits" },
+      { value: "plan", label: "Plan Mode" },
+      { value: "auto", label: "Auto Mode" },
+      { value: "bypassPermissions", label: "Bypass Permissions" }
+    ];
+  }
+  if (engine === "codex") {
+    return [
+      { value: "default", label: "Ask" },
+      { value: "acceptEdits", label: "Edits" },
+      { value: "readOnly", label: "Read" },
+      { value: "bypassPermissions", label: "YOLO" }
+    ];
+  }
+  return (state.engineCapabilities.approvalModes || ["ask", "yolo", "deny"]).map((value) => ({
+    value,
+    label: APPROVAL_LABELS[value] || value
+  }));
+}
+
+function optionHtml(item, selectedValue) {
+  const selected = item.value === selectedValue ? " selected" : "";
+  return `<option value="${escapeHtml(item.value)}"${selected}>${escapeHtml(item.label || item.value)}</option>`;
+}
+
+function setSelectOptions(select, entries, selectedValue, emptyLabel) {
+  if (!select) return;
+  const ids = new Set(entries.map((entry) => entry.value));
+  const value = ids.has(selectedValue) ? selectedValue : entries[0]?.value || "";
+  if (!entries.length) {
+    select.innerHTML = `<option value="">${escapeHtml(emptyLabel || "暂无可选项")}</option>`;
+    select.value = "";
+    select.disabled = true;
+    return;
+  }
+  select.innerHTML = entries.map((entry) => optionHtml(entry, value)).join("");
+  select.value = value;
+  select.disabled = false;
+}
+
 function formatTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -419,7 +932,118 @@ function formatTime(value) {
 function messagePreview(session) {
   const messages = Array.isArray(session?.messages) ? session.messages : [];
   const last = [...messages].reverse().find((message) => String(message.content || "").trim());
-  return last ? String(last.content || "").replace(/\s+/g, " ").trim() : "还没有消息";
+  if (last) return String(last.content || "").replace(/\s+/g, " ").trim();
+  const attachmentMessage = [...messages].reverse().find((message) => Array.isArray(message.attachments) && message.attachments.length);
+  return attachmentMessage ? `[${attachmentMessage.attachments.length} 个附件]` : "还没有消息";
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function attachmentKind(file = {}) {
+  const type = String(file.mime || file.type || "").toLowerCase();
+  const name = String(file.name || "");
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+  if (type.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif"].includes(ext)) return "image";
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  if (type.includes("pdf") || ext === "pdf") return "pdf";
+  if (type.startsWith("text/") || ["txt", "md", "json", "csv", "log", "js", "ts", "tsx", "jsx", "py", "html", "css"].includes(ext)) return "text";
+  return "file";
+}
+
+function attachmentGlyph(attachment = {}) {
+  const kind = attachment.kind || attachmentKind(attachment);
+  if (kind === "image") return "IMG";
+  if (kind === "video") return "VID";
+  if (kind === "audio") return "AUD";
+  if (kind === "pdf") return "PDF";
+  if (kind === "text") return "TXT";
+  return "FILE";
+}
+
+function renderAttachmentChips(attachments = []) {
+  if (!Array.isArray(attachments) || !attachments.length) return "";
+  return `
+    <div class="message-attachments">
+      ${attachments.map(renderAttachmentChip).join("")}
+    </div>
+  `;
+}
+
+function attachmentThumb(attachment = {}, className = "attachment-thumb") {
+  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "").trim();
+  if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(attachmentGlyph(attachment))}</span>`;
+  return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
+}
+
+function renderAttachmentChip(attachment = {}) {
+  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl);
+  const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
+  const tag = href ? "a" : "span";
+  const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
+  return `
+    <${tag} class="message-attachment${image ? " image" : ""}"${download} title="${escapeHtml(attachment.name || "")}">
+      ${attachmentThumb(attachment, "message-attachment-thumb")}
+      <strong>${escapeHtml(attachment.name || "附件")}</strong>
+      <em>${escapeHtml(formatBytes(attachment.size))}</em>
+    </${tag}>
+  `;
+}
+
+function extractLocalFilePaths(text = "") {
+  const source = String(text || "");
+  const paths = new Set();
+  const quoted = /[`"“”']((?:\/Users|\/tmp|\/var\/folders|\/opt|\/home)\/[^`"“”'\n\r]+?\.[A-Za-z0-9]{1,10})[`"“”']/g;
+  const plain = /(?:^|[\s:：])((?:\/Users|\/tmp|\/var\/folders|\/opt|\/home)\/[^\s`"'“”‘’，。；;]+?\.[A-Za-z0-9]{1,10})(?=$|[\s`"'“”‘’，。；;])/gm;
+  for (const regex of [quoted, plain]) {
+    let match = regex.exec(source);
+    while (match) {
+      paths.add(match[1].trim().replace(/[),.。]+$/g, ""));
+      match = regex.exec(source);
+    }
+  }
+  return [...paths].slice(0, 8);
+}
+
+function generatedAttachmentsForMessage(message = {}) {
+  if (message.role !== "assistant") return [];
+  return extractLocalFilePaths(message.content).map((filePath) => {
+    const entry = state.generatedFiles.get(filePath);
+    if (entry?.status === "ready") return entry.attachment;
+    return {
+      id: `generated:${filePath}`,
+      name: filePath.split(/[\\/]/).pop() || "文件",
+      path: filePath,
+      kind: "file",
+      size: 0
+    };
+  });
+}
+
+function queueGeneratedFileFetches(messages = []) {
+  const paths = [...new Set(messages
+    .filter((message) => message.role === "assistant")
+    .flatMap((message) => extractLocalFilePaths(message.content)))];
+  for (const filePath of paths) {
+    if (state.generatedFiles.has(filePath)) continue;
+    state.generatedFiles.set(filePath, { status: "loading" });
+    request("/api/file/fetch", {
+      method: "POST",
+      body: JSON.stringify({ path: filePath })
+    }).then((attachment) => {
+      state.generatedFiles.set(filePath, { status: "ready", attachment });
+      renderChat();
+    }).catch(() => {
+      state.generatedFiles.set(filePath, { status: "error" });
+      renderChat();
+    });
+  }
 }
 
 function initials(name) {
@@ -533,6 +1157,46 @@ function renderFellowList() {
   });
 }
 
+function renderChatControls(fellow, session) {
+  const sessions = sessionsFor(fellow.key);
+  setSelectOptions(
+    els.sessionSelect,
+    sessions.map((item, index) => ({
+      value: item.id,
+      label: item.title || messagePreview(item) || `对话 ${index + 1}`
+    })),
+    session?.id || "",
+    "还没有历史"
+  );
+
+  const engine = activeAgentEngine(fellow);
+  const external = engine === "claude-code" || engine === "codex";
+  const config = engineConfigForFellow(fellow);
+  if (external) {
+    const entries = externalModelEntries(engine).map((entry) => ({
+      ...entry,
+      value: entry.id,
+      label: entry.label
+    }));
+    const selected = config.model || "default";
+    setSelectOptions(els.modelSelect, entries, selected, "默认模型");
+  } else {
+    const entries = connectedModelEntries().map((entry) => ({
+      ...entry,
+      value: entry.id,
+      label: entry.label || entry.model || providerLabel(entry.provider)
+    }));
+    const selected = catalogEntryForModel(state.runtime?.model || {})?.id || modelKey(state.runtime?.model || {});
+    setSelectOptions(els.modelSelect, entries, selected, "先在桌面端连接模型");
+  }
+
+  const effort = external ? (config.effortLevel || "medium") : (state.runtime?.effort?.level || "medium");
+  setSelectOptions(els.effortSelect, effortOptions(engine), effort, "Medium");
+
+  const permission = external ? (config.permissionMode || "default") : (state.runtime?.permissions?.mode || "ask");
+  setSelectOptions(els.permissionSelect, permissionOptions(engine), permission, "Ask");
+}
+
 function renderChat() {
   const fellow = activeFellow();
   const session = activeSession();
@@ -542,18 +1206,64 @@ function renderChat() {
   els.chatAvatar.removeAttribute("style");
   els.chatAvatar.innerHTML = avatarImg(fellow);
   setText(els.chatTitle, fellow.name || fellow.key);
-  setText(els.chatMeta, state.sending ? "正在回复" : (session?.title || "在线"));
+  setText(els.chatMeta, state.sending ? "正在回复" : `${engineLabel(activeAgentEngine(fellow))} · ${session?.title || "在线"}`);
+  renderChatControls(fellow, session);
   const messages = messagesForActiveSession();
-  els.messageList.innerHTML = messages.length ? messages.map((message) => `
-    <article class="message ${message.role === "user" ? "user" : "assistant"}">
-      <div class="bubble">${escapeHtml(message.content || (message.streaming ? "..." : ""))}</div>
-      <time>${escapeHtml(formatTime(message.createdAt))}</time>
-    </article>
-  `).join("") : `<div class="empty">开始和 ${escapeHtml(fellow.name || fellow.key)} 聊天</div>`;
-  els.sendButton.disabled = state.sending || !els.chatInput.value.trim();
+  queueGeneratedFileFetches(messages);
+  els.messageList.innerHTML = messages.length ? messages.map((message) => {
+    const attachments = [...(message.attachments || []), ...generatedAttachmentsForMessage(message)];
+    const attachmentHtml = renderAttachmentChips(attachments);
+    const content = String(message.content || "").trim();
+    const traceHtml = message.role === "assistant"
+      ? renderTraceBlocks({
+        reasoning: message.reasoning,
+        tools: message.tools,
+        content: message.content,
+        expanded: Boolean(message.streaming)
+      })
+      : "";
+    const bodyHtml = content ? renderMarkdown(message.content) : (message.streaming && !traceHtml ? "..." : "");
+    const bubbleHtml = bodyHtml || attachmentHtml
+      ? `<div class="bubble">${bodyHtml}${attachmentHtml}</div>`
+      : "";
+    return `
+      <article class="message ${message.role === "user" ? "user" : "assistant"}">
+        ${traceHtml}
+        ${bubbleHtml}
+        <time>${escapeHtml(formatTime(message.createdAt))}</time>
+      </article>
+    `;
+  }).join("") : `<div class="empty">开始和 ${escapeHtml(fellow.name || fellow.key)} 聊天</div>`;
+  renderAttachmentTray();
+  renderSendButton();
   setTimeout(() => {
     els.messageList.scrollTop = els.messageList.scrollHeight;
   }, 0);
+}
+
+function renderSendButton() {
+  const hasContent = Boolean(els.chatInput.value.trim()) || state.pendingAttachments.length > 0;
+  els.sendButton.disabled = state.sending || state.uploadingAttachments > 0 || !hasContent;
+  els.attachButton.disabled = state.sending || state.uploadingAttachments > 0 || state.pendingAttachments.length >= 20;
+}
+
+function renderAttachmentTray() {
+  if (!els.attachmentTray) return;
+  els.attachmentTray.classList.toggle("hidden", state.pendingAttachments.length === 0 && state.uploadingAttachments === 0);
+  const uploading = state.uploadingAttachments
+    ? `<div class="attachment-chip uploading"><span>...</span><strong>正在上传 ${state.uploadingAttachments}</strong></div>`
+    : "";
+  els.attachmentTray.innerHTML = [
+    ...state.pendingAttachments.map((attachment) => `
+      <div class="attachment-chip${attachment.thumbnailDataUrl ? " image" : ""}" title="${escapeHtml(attachment.name || "")}">
+        ${attachmentThumb(attachment, "attachment-chip-thumb")}
+        <strong>${escapeHtml(attachment.name || "附件")}</strong>
+        <em>${escapeHtml(formatBytes(attachment.size))}</em>
+        <button type="button" data-remove-attachment="${escapeHtml(attachment.id)}" aria-label="移除附件">×</button>
+      </div>
+    `),
+    uploading
+  ].join("");
 }
 
 function render() {
@@ -599,6 +1309,193 @@ async function createNewSession() {
   render();
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(reader.error || new Error("读取附件失败")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function thumbnailDataUrlForFile(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const max = 180;
+        const scale = Math.min(1, max / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+        const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+        const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      } catch {
+        resolve("");
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve("");
+    };
+    image.src = url;
+  });
+}
+
+async function saveAttachmentFile(file, thumbnailDataUrl = "") {
+  const dataUrl = await readFileAsDataUrl(file);
+  return request("/api/chat/attachment", {
+    method: "POST",
+    body: JSON.stringify({
+      name: file.name || "attachment",
+      mime: file.type || "",
+      dataUrl,
+      thumbnailDataUrl
+    })
+  });
+}
+
+async function addAttachmentFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length) return;
+  const remaining = Math.max(0, 20 - state.pendingAttachments.length);
+  const selected = files.slice(0, remaining);
+  if (!selected.length) return;
+  state.uploadingAttachments += selected.length;
+  renderAttachmentTray();
+  renderSendButton();
+  const existing = new Set(state.pendingAttachments.map((item) => `${item.name}:${item.size}`));
+  const added = [];
+  for (const file of selected) {
+    try {
+      if (file.size > 25 * 1024 * 1024) {
+        throw new Error("超过 25MB");
+      }
+      const thumbnailDataUrl = await thumbnailDataUrlForFile(file);
+      const saved = await saveAttachmentFile(file, thumbnailDataUrl);
+      const key = `${saved.name || file.name}:${saved.size || file.size}`;
+      if (existing.has(key)) continue;
+      existing.add(key);
+      added.push({
+        id: String(saved.id || randomId()),
+        name: String(saved.name || file.name || "附件"),
+        path: String(saved.path || ""),
+        mime: String(saved.mime || file.type || ""),
+        size: Number(saved.size || file.size) || 0,
+        kind: String(saved.kind || attachmentKind(file)),
+        thumbnailDataUrl: String(saved.thumbnailDataUrl || thumbnailDataUrl || "")
+      });
+    } catch (error) {
+      setText(els.chatMeta, `附件上传失败：${file.name || "未命名"} · ${error.message}`);
+    } finally {
+      state.uploadingAttachments = Math.max(0, state.uploadingAttachments - 1);
+      renderAttachmentTray();
+      renderSendButton();
+    }
+  }
+  if (added.length) {
+    state.pendingAttachments = [...state.pendingAttachments, ...added].slice(0, 20);
+  }
+  renderAttachmentTray();
+  renderSendButton();
+  els.chatInput.focus();
+}
+
+async function saveExternalControl(kind, value) {
+  const fellow = activeFellow();
+  if (!fellow) return;
+  const engine = activeAgentEngine(fellow);
+  const current = engineConfigForFellow(fellow);
+  const patch = { ...current };
+  if (kind === "model") {
+    const entry = externalModelEntries(engine).find((item) => item.id === value);
+    patch.model = entry?.model || "";
+  } else if (kind === "effort") {
+    patch.effortLevel = value;
+  } else if (kind === "permission") {
+    patch.permissionMode = value;
+  }
+  const runtime = await request("/api/fellow/engine", {
+    method: "POST",
+    body: JSON.stringify({
+      key: fellow.key,
+      agentEngine: engine,
+      engineConfig: patch
+    })
+  });
+  applyRuntimeStatus(runtime);
+}
+
+async function saveModelSelection() {
+  const fellow = activeFellow();
+  if (!fellow) return;
+  const engine = activeAgentEngine(fellow);
+  const value = els.modelSelect.value;
+  if (engine === "claude-code" || engine === "codex") {
+    await saveExternalControl("model", value);
+    render();
+    return;
+  }
+  const entry = connectedModelEntries().find((item) => item.id === value);
+  if (!entry) return;
+  const runtime = await request("/api/model/save", {
+    method: "POST",
+    body: JSON.stringify({
+      provider: entry.provider,
+      model: entry.model,
+      apiKeyEnv: entry.apiKeyEnv,
+      baseUrl: entry.baseUrl,
+      apiMode: entry.apiMode,
+      providerLabel: entry.providerLabel,
+      authType: entry.authType
+    })
+  });
+  applyRuntimeStatus(runtime);
+  render();
+}
+
+async function saveEffortSelection() {
+  const fellow = activeFellow();
+  if (!fellow) return;
+  const engine = activeAgentEngine(fellow);
+  const value = els.effortSelect.value;
+  if (engine === "claude-code" || engine === "codex") {
+    await saveExternalControl("effort", value);
+    render();
+    return;
+  }
+  const runtime = await request("/api/effort/save", {
+    method: "POST",
+    body: JSON.stringify({ level: value })
+  });
+  applyRuntimeStatus(runtime);
+  render();
+}
+
+async function savePermissionSelection() {
+  const fellow = activeFellow();
+  if (!fellow) return;
+  const engine = activeAgentEngine(fellow);
+  const value = els.permissionSelect.value;
+  if (engine === "claude-code" || engine === "codex") {
+    await saveExternalControl("permission", value);
+    render();
+    return;
+  }
+  const runtime = await request("/api/permissions/save", {
+    method: "POST",
+    body: JSON.stringify({ mode: value })
+  });
+  applyRuntimeStatus(runtime);
+  render();
+}
+
 function parseSseFrame(frame) {
   const lines = String(frame || "").split(/\r?\n/);
   let event = "message";
@@ -610,27 +1507,89 @@ function parseSseFrame(frame) {
   return { event, data: data.join("\n") };
 }
 
-function updatePendingAssistant(key, text) {
+function pendingAssistantFor(key) {
   const pending = state.pendingBySession.get(key) || [];
-  const assistant = pending.find((message) => message.role === "assistant");
-  if (assistant) assistant.content += text;
+  return pending.find((message) => message.role === "assistant");
+}
+
+function toolFromPendingMessage(message, data = {}) {
+  if (!message) return null;
+  if (!message.toolsById) message.toolsById = new Map();
+  if (!message.toolsByName) message.toolsByName = new Map();
+  const id = String(data?.id || "");
+  const name = String(data?.name || "");
+  let tool = id ? message.toolsById.get(id) : null;
+  if (!tool && name) {
+    const queue = message.toolsByName.get(name);
+    tool = queue && queue.find((item) => item.status === "running");
+  }
+  return tool || null;
+}
+
+function handlePendingChatEnvelope(key, envelope = {}) {
+  const assistant = pendingAssistantFor(key);
+  if (!assistant || !envelope || typeof envelope !== "object") return;
+  const { kind, data } = envelope;
+  switch (kind) {
+    case "text_delta":
+      assistant.content += String(data?.text || "");
+      break;
+    case "reasoning_delta":
+      assistant.reasoning = `${assistant.reasoning || ""}${String(data?.text || "")}`;
+      if (assistant.reasoning && !assistant.reasoning.endsWith("\n")) assistant.reasoning += "\n";
+      break;
+    case "tool_call_started": {
+      if (!Array.isArray(assistant.tools)) assistant.tools = [];
+      if (!assistant.toolsById) assistant.toolsById = new Map();
+      if (!assistant.toolsByName) assistant.toolsByName = new Map();
+      const tool = {
+        id: String(data?.id || `tool_${assistant.tools.length}`),
+        name: String(data?.name || "工具"),
+        preview: String(data?.preview || ""),
+        status: "running",
+        duration: null,
+        error: false
+      };
+      assistant.tools.push(tool);
+      assistant.toolsById.set(tool.id, tool);
+      const queue = assistant.toolsByName.get(tool.name) || [];
+      queue.push(tool);
+      assistant.toolsByName.set(tool.name, queue);
+      break;
+    }
+    case "tool_call_delta": {
+      const tool = toolFromPendingMessage(assistant, data);
+      if (tool) tool.preview = String(data?.preview || tool.preview || "");
+      break;
+    }
+    case "tool_call_completed": {
+      const tool = toolFromPendingMessage(assistant, data);
+      if (tool) {
+        tool.status = data?.error ? "error" : "completed";
+        tool.duration = typeof data?.duration === "number" ? data.duration : null;
+        tool.error = Boolean(data?.error);
+        if (data?.preview) tool.preview = String(data.preview);
+      }
+      break;
+    }
+    case "status":
+      setText(els.chatMeta, String(data?.text || "正在回复"));
+      break;
+    default:
+      break;
+  }
   renderChat();
 }
 
-async function relayStreamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
+async function relayStreamMessage({ fellowKey, sessionId, text, attachments, pendingKeyValue }) {
   let finalResult = null;
   const result = await relayRequest("/api/chat/stream", {
     method: "POST",
-    body: JSON.stringify({ fellowKey, sessionId, text })
+    body: JSON.stringify({ fellowKey, sessionId, text, attachments })
   }, (message) => {
     if (message.event === "chat") {
       const envelope = message.data || {};
-      if (envelope.kind === "text_delta") {
-        updatePendingAssistant(pendingKeyValue, String(envelope.data?.text || ""));
-      }
-      if (envelope.kind === "status") {
-        setText(els.chatMeta, String(envelope.data?.text || "正在回复"));
-      }
+      handlePendingChatEnvelope(pendingKeyValue, envelope);
       return;
     }
     if (message.event === "result") {
@@ -644,9 +1603,9 @@ async function relayStreamMessage({ fellowKey, sessionId, text, pendingKeyValue 
   return finalResult || result;
 }
 
-async function streamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
+async function streamMessage({ fellowKey, sessionId, text, attachments, pendingKeyValue }) {
   if (state.mode === "relay") {
-    return relayStreamMessage({ fellowKey, sessionId, text, pendingKeyValue });
+    return relayStreamMessage({ fellowKey, sessionId, text, attachments, pendingKeyValue });
   }
   const response = await fetch(apiUrl("/api/chat/stream"), {
     method: "POST",
@@ -654,7 +1613,7 @@ async function streamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${state.token}`
     },
-    body: JSON.stringify({ fellowKey, sessionId, text })
+    body: JSON.stringify({ fellowKey, sessionId, text, attachments })
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -663,7 +1622,7 @@ async function streamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
   if (!response.body?.getReader) {
     const result = await request("/api/chat/send", {
       method: "POST",
-      body: JSON.stringify({ fellowKey, sessionId, text })
+      body: JSON.stringify({ fellowKey, sessionId, text, attachments })
     });
     return result;
   }
@@ -682,12 +1641,7 @@ async function streamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
       const parsed = parseSseFrame(frame);
       if (parsed.event === "chat") {
         const envelope = JSON.parse(parsed.data || "{}");
-        if (envelope.kind === "text_delta") {
-          updatePendingAssistant(pendingKeyValue, String(envelope.data?.text || ""));
-        }
-        if (envelope.kind === "status") {
-          setText(els.chatMeta, String(envelope.data?.text || "正在回复"));
-        }
+        handlePendingChatEnvelope(pendingKeyValue, envelope);
       } else if (parsed.event === "result") {
         finalResult = JSON.parse(parsed.data || "{}");
       } else if (parsed.event === "error") {
@@ -699,8 +1653,11 @@ async function streamMessage({ fellowKey, sessionId, text, pendingKeyValue }) {
   }
   if (buffer.trim()) {
     const parsed = parseSseFrame(buffer);
-    if (parsed.event === "result") finalResult = JSON.parse(parsed.data || "{}");
-    if (parsed.event === "error") {
+    if (parsed.event === "chat") {
+      handlePendingChatEnvelope(pendingKeyValue, JSON.parse(parsed.data || "{}"));
+    } else if (parsed.event === "result") {
+      finalResult = JSON.parse(parsed.data || "{}");
+    } else if (parsed.event === "error") {
       const payload = JSON.parse(parsed.data || "{}");
       throw new Error(payload.error || "生成失败");
     }
@@ -712,14 +1669,27 @@ async function sendMessage() {
   const fellow = activeFellow();
   if (!fellow || state.sending) return;
   const text = els.chatInput.value.trim();
-  if (!text) return;
+  const attachments = state.pendingAttachments.map((attachment) => ({ ...attachment }));
+  if (!text && !attachments.length) return;
   const session = activeSession();
   const key = pendingKey(fellow.key, session?.id || state.activeSessionId || "new");
+  const userText = text || "请查看附件。";
   state.pendingBySession.set(key, [
-    { role: "user", content: text, createdAt: new Date().toISOString() },
-    { role: "assistant", content: "", createdAt: new Date().toISOString(), streaming: true }
+    { role: "user", content: userText, attachments, createdAt: new Date().toISOString() },
+    {
+      role: "assistant",
+      content: "",
+      createdAt: new Date().toISOString(),
+      streaming: true,
+      reasoning: "",
+      tools: [],
+      toolsById: new Map(),
+      toolsByName: new Map()
+    }
   ]);
   els.chatInput.value = "";
+  state.pendingAttachments = [];
+  renderAttachmentTray();
   autosizeComposer();
   state.sending = true;
   renderChat();
@@ -727,7 +1697,8 @@ async function sendMessage() {
     const result = await streamMessage({
       fellowKey: fellow.key,
       sessionId: session?.id || "",
-      text,
+      text: userText,
+      attachments,
       pendingKeyValue: key
     });
     if (result?.session) {
@@ -750,7 +1721,7 @@ function autosizeComposer() {
   const input = els.chatInput;
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
-  els.sendButton.disabled = state.sending || !input.value.trim();
+  renderSendButton();
 }
 
 els.savePairing.addEventListener("click", async () => {
@@ -766,13 +1737,83 @@ els.newSessionButton.addEventListener("click", () => {
     setText(els.chatMeta, `新对话失败：${error.message}`);
   });
 });
+els.attachButton?.addEventListener("click", () => {
+  if (state.sending || state.uploadingAttachments > 0) return;
+  els.attachmentInput?.click();
+});
+els.attachmentInput?.addEventListener("change", () => {
+  addAttachmentFiles(els.attachmentInput.files);
+  els.attachmentInput.value = "";
+});
+els.attachmentTray?.addEventListener("click", (event) => {
+  const id = event.target.closest("[data-remove-attachment]")?.dataset.removeAttachment;
+  if (!id) return;
+  state.pendingAttachments = state.pendingAttachments.filter((attachment) => attachment.id !== id);
+  renderAttachmentTray();
+  renderSendButton();
+  els.chatInput.focus();
+});
+els.messageList?.addEventListener("click", async (event) => {
+  const copyButton = event.target.closest("[data-copy-code]");
+  if (copyButton) {
+    const code = copyButton.closest(".message-code-block")?.querySelector("code");
+    const ok = await copyTextToClipboard(code?.innerText || "");
+    if (ok) flashCopiedCode(copyButton);
+    return;
+  }
+  const inlineCode = event.target.closest("code.inline-code");
+  if (!inlineCode) return;
+  await copyTextToClipboard(inlineCode.innerText || "");
+});
+els.messageList?.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const inlineCode = event.target.closest("code.inline-code");
+  if (!inlineCode) return;
+  event.preventDefault();
+  await copyTextToClipboard(inlineCode.innerText || "");
+});
+els.sessionSelect?.addEventListener("change", () => {
+  state.activeSessionId = els.sessionSelect.value || "";
+  renderChat();
+});
+els.modelSelect?.addEventListener("change", () => {
+  els.modelSelect.disabled = true;
+  saveModelSelection().catch((error) => {
+    setText(els.chatMeta, `模型切换失败：${error.message}`);
+    renderChat();
+  }).finally(() => {
+    els.modelSelect.disabled = false;
+  });
+});
+els.effortSelect?.addEventListener("change", () => {
+  els.effortSelect.disabled = true;
+  saveEffortSelection().catch((error) => {
+    setText(els.chatMeta, `强度切换失败：${error.message}`);
+    renderChat();
+  }).finally(() => {
+    els.effortSelect.disabled = false;
+  });
+});
+els.permissionSelect?.addEventListener("change", () => {
+  els.permissionSelect.disabled = true;
+  savePermissionSelection().catch((error) => {
+    setText(els.chatMeta, `权限切换失败：${error.message}`);
+    renderChat();
+  }).finally(() => {
+    els.permissionSelect.disabled = false;
+  });
+});
 els.composer.addEventListener("submit", (event) => {
   event.preventDefault();
   sendMessage();
 });
 els.chatInput.addEventListener("input", autosizeComposer);
+els.chatInput.addEventListener("paste", (event) => {
+  if (!event.clipboardData?.files?.length) return;
+  addAttachmentFiles(event.clipboardData.files);
+});
 els.chatInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     sendMessage();
   }

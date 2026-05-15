@@ -28,6 +28,7 @@ const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
 const AIMASHI_GATEWAY_SERVICE_LABEL = "ai.aimashi.hermes.gateway";
 const AIMASHI_DAEMON_SERVICE_LABEL = "ai.aimashi.daemon";
 const AIMASHI_DAEMON_DEFAULT_PORT = Number(process.env.AIMASHI_DAEMON_PORT || 27861);
+const MOBILE_ASSET_VERSION = "mobile-trace-markdown-1";
 const IS_DAEMON_PROCESS = process.argv.includes("--daemon") || process.env.AIMASHI_DAEMON === "1";
 let shouldRunDesktopInstance = true;
 if (!IS_DAEMON_PROCESS) {
@@ -1010,6 +1011,50 @@ function fallbackSessionTitle(messages = []) {
   return cleanSessionTitle(firstUser?.content || "新对话") || "新对话";
 }
 
+function normalizeMessageReply(replyTo) {
+  if (!replyTo || typeof replyTo !== "object" || !String(replyTo.content || "").trim()) return null;
+  return {
+    role: ["user", "assistant", "system"].includes(replyTo.role) ? replyTo.role : "",
+    author: String(replyTo.author || "").slice(0, 80),
+    content: String(replyTo.content || "").trim().slice(0, 500),
+    createdAt: String(replyTo.createdAt || ""),
+    messageIndex: Number.isInteger(replyTo.messageIndex) ? replyTo.messageIndex : -1
+  };
+}
+
+function normalizeMessageTranslation(translation) {
+  if (!translation || typeof translation !== "object") return null;
+  const status = ["loading", "done", "error"].includes(translation.status) ? translation.status : "";
+  const text = String(translation.text || "").trim();
+  const error = String(translation.error || "").trim();
+  if (!status && !text && !error) return null;
+  return {
+    status: status || (text ? "done" : "error"),
+    text,
+    error,
+    sourceText: String(translation.sourceText || "").trim().slice(0, 1000),
+    translatedAt: String(translation.translatedAt || "")
+  };
+}
+
+function chatMessageMergeKey(message) {
+  return `${message.role}\n${message.createdAt}\n${message.content}`;
+}
+
+function mergeChatMessageRecord(existing, next) {
+  return {
+    ...existing,
+    ...next,
+    attachments: next.attachments || existing.attachments,
+    reasoning: next.reasoning || existing.reasoning,
+    tools: next.tools || existing.tools,
+    replyTo: next.replyTo || existing.replyTo,
+    translation: next.translation || existing.translation,
+    pinned: Boolean(existing.pinned || next.pinned),
+    pinnedAt: next.pinnedAt || existing.pinnedAt
+  };
+}
+
 function normalizeChatStore(input) {
   const store = input && typeof input === "object" ? input : defaultChatStore();
   const sessions = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
@@ -1044,6 +1089,10 @@ function normalizeChatStore(input) {
                 out.pinned = true;
                 out.pinnedAt = String(message.pinnedAt || message.pinned_at || session.updatedAt || "");
               }
+              const replyTo = normalizeMessageReply(message.replyTo);
+              if (replyTo) out.replyTo = replyTo;
+              const translation = normalizeMessageTranslation(message.translation);
+              if (translation && translation.status !== "loading") out.translation = translation;
               const attachments = normalizeAttachments(message.attachments);
               if (attachments.length) out.attachments = attachments;
               if (message.reasoning) out.reasoning = String(message.reasoning);
@@ -1104,7 +1153,7 @@ function fellowPersonaBody(name, description = "") {
   return [
     `# ${name}`,
     "",
-    `你是 ${name}，Aimashi App 中的一位本地伙伴。`,
+    `你是${name}，Aimashi App 里的本地伙伴。`,
     description ? String(description).trim() : "请保持清楚、可靠、可执行的沟通风格。",
     ""
   ].join("\n");
@@ -1315,7 +1364,8 @@ function normalizeAttachment(input = {}) {
   const mime = String(input.mime || input.type || "").trim();
   const size = Number(input.size) || (filePath && fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
   const kind = String(input.kind || "").trim() || attachmentKind({ mime, name });
-  return {
+  const thumbnailDataUrl = normalizeAttachmentThumbnail(input.thumbnailDataUrl || input.thumbnail || input.previewDataUrl);
+  const next = {
     id: String(input.id || crypto.randomUUID()),
     name,
     path: filePath,
@@ -1323,6 +1373,15 @@ function normalizeAttachment(input = {}) {
     size,
     kind
   };
+  if (thumbnailDataUrl && kind === "image") next.thumbnailDataUrl = thumbnailDataUrl;
+  return next;
+}
+
+function normalizeAttachmentThumbnail(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 700 * 1024) return "";
+  if (!/^data:image\/(?:png|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i.test(raw)) return "";
+  return raw.replace(/\s+/g, "");
 }
 
 function attachmentKind({ mime = "", name = "" } = {}) {
@@ -1396,8 +1455,66 @@ function saveChatAttachment(input = {}) {
     name,
     path: target,
     mime: input.mime || data.mime,
-    size: data.data.length
+    size: data.data.length,
+    thumbnailDataUrl: input.thumbnailDataUrl || input.thumbnail || input.previewDataUrl
   });
+}
+
+function mimeForFilePath(filePath) {
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  const map = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".log": "text/plain",
+    ".js": "text/javascript",
+    ".ts": "text/typescript",
+    ".tsx": "text/typescript",
+    ".jsx": "text/javascript",
+    ".py": "text/x-python",
+    ".html": "text/html",
+    ".css": "text/css",
+    ".zip": "application/zip"
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+function readLocalFileAttachment(input = {}) {
+  initializeRuntime();
+  const rawPath = String(input.path || input.filePath || "").trim();
+  if (!rawPath) throw new Error("File path is required.");
+  let filePath = rawPath;
+  if (/^file:/i.test(filePath)) filePath = fileURLToPath(filePath);
+  filePath = path.resolve(filePath);
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    throw new Error("File not found.");
+  }
+  const stat = fs.statSync(filePath);
+  if (stat.size > 25 * 1024 * 1024) {
+    throw new Error("文件超过 25MB，暂时不能通过手机传回。");
+  }
+  const mime = mimeForFilePath(filePath);
+  const data = fs.readFileSync(filePath);
+  const dataUrl = `data:${mime};base64,${data.toString("base64")}`;
+  const attachment = normalizeAttachment({
+    id: crypto.randomUUID(),
+    name: path.basename(filePath),
+    path: filePath,
+    mime,
+    size: stat.size,
+    thumbnailDataUrl: mime.startsWith("image/") ? dataUrl : ""
+  });
+  return {
+    ...attachment,
+    dataUrl
+  };
 }
 
 function styleSettingsForPet(stylePreset) {
@@ -2249,7 +2366,13 @@ function relayHttpOrigin(wsUrl) {
 function relayPairingLink(settings = relaySettings()) {
   const origin = relayHttpOrigin(settings.url);
   if (!origin) return "";
-  return `${origin}/mobile/?mode=relay&device=${encodeURIComponent(settings.deviceId)}#secret=${encodeURIComponent(settings.secret)}`;
+  const params = new URLSearchParams({
+    mode: "relay",
+    device: settings.deviceId,
+    relay: settings.url,
+    v: MOBILE_ASSET_VERSION
+  });
+  return `${origin}/mobile/?${params.toString()}#secret=${encodeURIComponent(settings.secret)}`;
 }
 
 function relayStatus(includeSecret = false) {
@@ -4924,7 +5047,7 @@ function writeControlText(res, statusCode, text, contentType) {
   res.writeHead(statusCode, {
     "Content-Type": contentType,
     "Content-Length": Buffer.byteLength(body),
-    "Cache-Control": "no-cache"
+    "Cache-Control": "no-store"
   });
   res.end(body);
 }
@@ -4993,7 +5116,7 @@ function serveMobileAsset(pathname, res) {
   return true;
 }
 
-function readControlBody(req, maxBytes = 32 * 1024 * 1024) {
+function readControlBody(req, maxBytes = 48 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = "";
     let size = 0;
@@ -5048,6 +5171,62 @@ function resolveRemoteChatSession({ fellowKey, sessionId }) {
   return { fellow, store, session };
 }
 
+function collectChatTraceEnvelope(trace, envelope = {}) {
+  if (!trace || !envelope || typeof envelope !== "object") return;
+  const { kind, data } = envelope;
+  switch (kind) {
+    case "reasoning_delta":
+      trace.reasoning += String(data?.text || "");
+      if (trace.reasoning && !trace.reasoning.endsWith("\n")) trace.reasoning += "\n";
+      break;
+    case "tool_call_started": {
+      const tool = {
+        id: String(data?.id || `tool_${trace.tools.length}`),
+        name: String(data?.name || "工具"),
+        preview: String(data?.preview || ""),
+        status: "running",
+        duration: null,
+        error: false
+      };
+      trace.tools.push(tool);
+      trace.toolsById.set(tool.id, tool);
+      const queue = trace.toolsByName.get(tool.name) || [];
+      queue.push(tool);
+      trace.toolsByName.set(tool.name, queue);
+      break;
+    }
+    case "tool_call_delta": {
+      const id = String(data?.id || "");
+      const name = String(data?.name || "");
+      let tool = id ? trace.toolsById.get(id) : null;
+      if (!tool && name) {
+        const queue = trace.toolsByName.get(name);
+        tool = queue && queue.find((item) => item.status === "running");
+      }
+      if (tool) tool.preview = String(data?.preview || tool.preview || "");
+      break;
+    }
+    case "tool_call_completed": {
+      const id = String(data?.id || "");
+      const name = String(data?.name || "");
+      let tool = id ? trace.toolsById.get(id) : null;
+      if (!tool && name) {
+        const queue = trace.toolsByName.get(name);
+        tool = queue && queue.find((item) => item.status === "running");
+      }
+      if (tool) {
+        tool.status = data?.error ? "error" : "completed";
+        tool.duration = typeof data?.duration === "number" ? data.duration : null;
+        tool.error = Boolean(data?.error);
+        if (data?.preview) tool.preview = String(data.preview);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 async function runRemoteChatRequest(body, eventSink = null) {
   const explicitMessages = Array.isArray(body?.messages) ? body.messages : [];
   const lastExplicitUser = [...explicitMessages].reverse().find((message) => message?.role === "user");
@@ -5069,12 +5248,25 @@ async function runRemoteChatRequest(body, eventSink = null) {
       content: message.content,
       attachments: normalizeAttachments(message.attachments)
     }));
+  const trace = {
+    reasoning: "",
+    tools: [],
+    toolsById: new Map(),
+    toolsByName: new Map()
+  };
+  const tracedEventSink = eventSink ? {
+    isDestroyed: () => Boolean(eventSink.isDestroyed?.()),
+    send: (channel, envelope) => {
+      collectChatTraceEnvelope(trace, envelope);
+      eventSink.send(channel, envelope);
+    }
+  } : null;
 
   const response = await sendChat({
     fellowKey: fellow.key,
     sessionId: session.id,
     messages: runMessages,
-    webContents: eventSink
+    webContents: tracedEventSink
   });
   const assistantText = responseMessageContent(response);
   const savedUser = {
@@ -5083,14 +5275,27 @@ async function runRemoteChatRequest(body, eventSink = null) {
     createdAt: userMessage.createdAt || now
   };
   if (userMessage.attachments.length) savedUser.attachments = userMessage.attachments;
+  const savedAssistant = {
+    role: "assistant",
+    content: assistantText,
+    createdAt: new Date().toISOString()
+  };
+  const reasoning = String(trace.reasoning || "").trim();
+  if (reasoning) savedAssistant.reasoning = reasoning;
+  if (trace.tools.length) {
+    savedAssistant.tools = trace.tools.map((tool) => ({
+      id: String(tool.id || ""),
+      name: String(tool.name || ""),
+      preview: String(tool.preview || ""),
+      status: tool.status || "completed",
+      duration: typeof tool.duration === "number" ? tool.duration : null,
+      error: Boolean(tool.error)
+    }));
+  }
   session.messages = [
     ...history,
     savedUser,
-    {
-      role: "assistant",
-      content: assistantText,
-      createdAt: new Date().toISOString()
-    }
+    savedAssistant
   ];
   session.updatedAt = new Date().toISOString();
   if (!session.titleGenerated) {
@@ -5142,6 +5347,14 @@ async function handleControlRequest(req, res) {
       writeControlJson(res, 200, loadChatSessions());
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/model/catalog") {
+      writeControlJson(res, 200, { models: await loadHermesModelCatalog() });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/engine/capabilities") {
+      writeControlJson(res, 200, await loadEngineCapabilities());
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/relay/status") {
       writeControlJson(res, 200, relayStatus(false));
       return;
@@ -5166,6 +5379,50 @@ async function handleControlRequest(req, res) {
     if (req.method === "POST" && url.pathname === "/api/chat/session/save") {
       const body = await readControlBody(req);
       writeControlJson(res, 200, saveChatSession(body));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/chat/attachment") {
+      const body = await readControlBody(req);
+      writeControlJson(res, 200, saveChatAttachment(body));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/file/fetch") {
+      const body = await readControlBody(req);
+      writeControlJson(res, 200, readLocalFileAttachment(body));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/fellow/engine") {
+      const body = await readControlBody(req);
+      writeControlJson(res, 200, saveFellowEngineConfig(body));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/model/save") {
+      const body = await readControlBody(req);
+      const current = modelSettings();
+      const nextProvider = String(body.provider || "").trim();
+      const existingConnection = providerConnection(nextProvider);
+      const next = {
+        provider: nextProvider,
+        model: String(body.model || "").trim(),
+        apiKeyEnv: String(body.apiKeyEnv || existingConnection?.apiKeyEnv || current.apiKeyEnv || "OPENAI_API_KEY").trim(),
+        apiKey: String(existingConnection?.apiKey || (nextProvider === current.provider ? current.apiKey : "") || "").trim(),
+        baseUrl: String(body.baseUrl || "").trim(),
+        apiMode: String(body.apiMode || "").trim()
+      };
+      writeModelSettings(next);
+      writeControlJson(res, 200, getRuntimeStatus());
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/effort/save") {
+      const body = await readControlBody(req);
+      writeEffortSettings(body);
+      writeControlJson(res, 200, getRuntimeStatus());
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/permissions/save") {
+      const body = await readControlBody(req);
+      writePermissionSettings(body);
+      writeControlJson(res, 200, getRuntimeStatus());
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/chat/stop") {
@@ -5430,12 +5687,58 @@ async function handleRelayRpc(message = {}) {
       relayRpcResult(clientId, id, true, loadChatSessions());
       return;
     }
+    if (method === "GET" && requestPath === "/api/model/catalog") {
+      relayRpcResult(clientId, id, true, { models: await loadHermesModelCatalog() });
+      return;
+    }
+    if (method === "GET" && requestPath === "/api/engine/capabilities") {
+      relayRpcResult(clientId, id, true, await loadEngineCapabilities());
+      return;
+    }
     if (method === "POST" && requestPath === "/api/chat/session") {
       relayRpcResult(clientId, id, true, newChatSession(body));
       return;
     }
     if (method === "POST" && requestPath === "/api/chat/session/save") {
       relayRpcResult(clientId, id, true, saveChatSession(body));
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/chat/attachment") {
+      relayRpcResult(clientId, id, true, saveChatAttachment(body));
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/file/fetch") {
+      relayRpcResult(clientId, id, true, readLocalFileAttachment(body));
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/fellow/engine") {
+      relayRpcResult(clientId, id, true, saveFellowEngineConfig(body));
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/model/save") {
+      const current = modelSettings();
+      const nextProvider = String(body.provider || "").trim();
+      const existingConnection = providerConnection(nextProvider);
+      const next = {
+        provider: nextProvider,
+        model: String(body.model || "").trim(),
+        apiKeyEnv: String(body.apiKeyEnv || existingConnection?.apiKeyEnv || current.apiKeyEnv || "OPENAI_API_KEY").trim(),
+        apiKey: String(existingConnection?.apiKey || (nextProvider === current.provider ? current.apiKey : "") || "").trim(),
+        baseUrl: String(body.baseUrl || "").trim(),
+        apiMode: String(body.apiMode || "").trim()
+      };
+      writeModelSettings(next);
+      relayRpcResult(clientId, id, true, getRuntimeStatus());
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/effort/save") {
+      writeEffortSettings(body);
+      relayRpcResult(clientId, id, true, getRuntimeStatus());
+      return;
+    }
+    if (method === "POST" && requestPath === "/api/permissions/save") {
+      writePermissionSettings(body);
+      relayRpcResult(clientId, id, true, getRuntimeStatus());
       return;
     }
     if (method === "POST" && requestPath === "/api/chat/stop") {
@@ -6319,7 +6622,7 @@ function normalizeClaudePermissionMode(value) {
   return "default";
 }
 
-async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit }) {
+async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, abortController, emit, utility = false }) {
   const engine = "claude-code";
   const commandPath = shellCommandPath("claude");
   if (!commandPath) throw new Error("本机没有检测到 Claude Code CLI。请先安装并确认 `claude --version` 可用。");
@@ -6336,12 +6639,12 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
   } catch (error) {
     appendEngineLog(`Claude bridge plugin refresh failed: ${error?.message || error}`);
   }
-  const savedEntry = getAgentSessionEntry(engine, fellow.key, sessionId);
+  const savedEntry = utility ? {} : getAgentSessionEntry(engine, fellow.key, sessionId);
   const externalSessionId = savedEntry.id && savedEntry.fingerprint === bridgeFingerprint
     ? savedEntry.id
     : "";
   const options = {
-    abortController: activeChatAbortController,
+    abortController,
     cwd: process.cwd(),
     pathToClaudeCodeExecutable: commandPath,
     env: processEnvStrings(),
@@ -6372,7 +6675,7 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
     if (signal?.aborted) break;
     if (message?.session_id && !capturedSessionId) {
       capturedSessionId = message.session_id;
-      setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
+      if (!utility) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
     }
 
     // Token-level streaming (when includePartialMessages: true)
@@ -6456,7 +6759,7 @@ async function sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit })
       }
     }
   }
-  if (capturedSessionId && !externalSessionId) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
+  if (capturedSessionId && !externalSessionId && !utility) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
   if (signal?.aborted) {
     if (emit) emit("complete", { finishReason: "cancelled", aborted: true });
     const stopped = new Error("生成已停止");
@@ -6485,11 +6788,11 @@ function mapCodexPermissionMode(value) {
   return { sandboxMode: "workspace-write", approvalPolicy: "untrusted" };
 }
 
-async function sendCodexChat({ fellow, sessionId, messages, signal }) {
+async function sendCodexChat({ fellow, sessionId, messages, signal, utility = false }) {
   const engine = "codex";
   const commandPath = shellCommandPath("codex");
   if (!commandPath) throw new Error("本机没有检测到 Codex CLI。请先安装并确认 `codex --version` 可用。");
-  const externalSessionId = getAgentSessionId(engine, fellow.key, sessionId);
+  const externalSessionId = utility ? "" : getAgentSessionId(engine, fellow.key, sessionId);
   const lastUser = lastUserPrompt(messages);
   const userText = expandLeadingSkillCommand(lastUser, { mode: "inline" }) || lastUser;
   const persona = !externalSessionId
@@ -6523,7 +6826,7 @@ async function sendCodexChat({ fellow, sessionId, messages, signal }) {
     : codex.startThread(threadOptions);
   const turn = await thread.run(prompt, { signal });
   const capturedSessionId = externalSessionId || thread.id || "";
-  if (capturedSessionId && !externalSessionId) setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
+  if (capturedSessionId && !externalSessionId && !utility) setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
   if (signal?.aborted) {
     const stopped = new Error("生成已停止");
     stopped.code = "AIMASHI_STOPPED";
@@ -6542,16 +6845,19 @@ async function sendCodexChat({ fellow, sessionId, messages, signal }) {
   });
 }
 
-async function sendChat({ fellowKey, personaKey, sessionId, messages, webContents }) {
-  if (activeChatAbortController) {
-    activeChatAbortController.abort();
-  }
+async function sendChat({ fellowKey, personaKey, sessionId, messages, webContents, utility = false }) {
   const abortController = new AbortController();
-  activeChatAbortController = abortController;
+  utility = Boolean(utility);
+  if (!utility) {
+    if (activeChatAbortController) {
+      activeChatAbortController.abort();
+    }
+    activeChatAbortController = abortController;
+  }
   const { signal } = abortController;
   const runId = `aimashi_${crypto.randomUUID()}`;
   let emitSeq = 0;
-  const emit = webContents && !webContents.isDestroyed()
+  const emit = !utility && webContents && !webContents.isDestroyed()
     ? (kind, data) => {
       try {
         if (webContents.isDestroyed()) return;
@@ -6577,7 +6883,7 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, webContent
       throw new Error("还没有可用的 fellow，请先在引导里创建一个再发起对话。");
     }
     const agentEngine = normalizeFellowAgentEngine(fellow.agentEngine || fellow.agent_engine || fellow.engine);
-    const shouldNotifyPet = !String(sessionId || "").startsWith("title:");
+    const shouldNotifyPet = !utility && !String(sessionId || "").startsWith("title:");
     const completeWithPetMessage = (response) => {
       if (shouldNotifyPet) notifyFellowPetMessage(fellow.key, responseMessageContent(response));
       return response;
@@ -6598,7 +6904,7 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, webContent
           }));
         }
       }
-      return completeWithPetMessage(await sendClaudeCodeChat({ fellow, sessionId, messages, signal, emit }));
+      return completeWithPetMessage(await sendClaudeCodeChat({ fellow, sessionId, messages, signal, abortController, emit, utility }));
     }
     if (agentEngine === "codex") {
       if (slashText) {
@@ -6612,7 +6918,7 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, webContent
           }));
         }
       }
-      return completeWithPetMessage(await sendCodexChat({ fellow, sessionId, messages, signal }));
+      return completeWithPetMessage(await sendCodexChat({ fellow, sessionId, messages, signal, utility }));
     }
 
     if (!engineState.running || !engineState.baseUrl) {
@@ -6743,6 +7049,10 @@ function saveChatSession({ personaKey, session, replaceMessages = false }) {
           out.pinned = true;
           out.pinnedAt = String(message.pinnedAt || message.pinned_at || now);
         }
+        const replyTo = normalizeMessageReply(message.replyTo);
+        if (replyTo) out.replyTo = replyTo;
+        const translation = normalizeMessageTranslation(message.translation);
+        if (translation && translation.status !== "loading") out.translation = translation;
         const attachments = normalizeAttachments(message.attachments);
         if (attachments.length) out.attachments = attachments;
         if (message.reasoning) out.reasoning = String(message.reasoning);
@@ -6766,12 +7076,15 @@ function saveChatSession({ personaKey, session, replaceMessages = false }) {
   if (index >= 0) {
     const existing = store.sessions[key][index];
     const mergedMessages = [...(existing.messages || [])];
-    const seen = new Set(mergedMessages.map((message) => `${message.role}\n${message.createdAt}\n${message.content}`));
+    const seen = new Map(mergedMessages.map((message, messageIndex) => [chatMessageMergeKey(message), messageIndex]));
     for (const message of next.messages) {
-      const messageKey = `${message.role}\n${message.createdAt}\n${message.content}`;
-      if (!seen.has(messageKey)) {
+      const messageKey = chatMessageMergeKey(message);
+      const existingIndex = seen.get(messageKey);
+      if (existingIndex == null) {
         mergedMessages.push(message);
-        seen.add(messageKey);
+        seen.set(messageKey, mergedMessages.length - 1);
+      } else {
+        mergedMessages[existingIndex] = mergeChatMessageRecord(mergedMessages[existingIndex], message);
       }
     }
     mergedMessages.sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
@@ -6998,6 +7311,7 @@ ipcMain.handle("auth:provider-cancel", () => cancelProviderOAuth());
 ipcMain.handle("chat:send", (event, payload) => sendChat({ ...payload, webContents: event.sender }));
 ipcMain.handle("chat:stop", () => stopChat());
 ipcMain.handle("chat:attachment-save", (_event, payload) => saveChatAttachment(payload));
+ipcMain.handle("chat:file-fetch", (_event, payload) => readLocalFileAttachment(payload));
 ipcMain.handle("commands:slash", () => loadHermesSlashCommands());
 ipcMain.handle("commands:agent-list", (_event, payload) => loadExternalAgentCommands(payload));
 ipcMain.handle("commands:agent-execute", (_event, payload) => executeExternalAgentCommand(payload));
@@ -7139,8 +7453,9 @@ function saveFellow(fellowInput) {
   saveFellowManifest(manifest);
 
   const hadExplicitPersona = Object.prototype.hasOwnProperty.call(fellowInput || {}, "personaText");
+  const explicitText = hadExplicitPersona ? String(fellowInput.personaText || "").trim() : "";
   const body = hadExplicitPersona
-    ? String(fellowInput.personaText || "").trim() || fellowPersonaBody(name, next.bio)
+    ? fellowPersonaBody(name, explicitText || next.bio)
     : fs.existsSync(fellowPersonaPath(key))
       ? readFellowPersona(key, name, next.bio)
       : fellowPersonaBody(name, fellowInput.description || fellowInput.bio || "");
