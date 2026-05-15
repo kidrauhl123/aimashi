@@ -6547,16 +6547,19 @@ els.avatarCropStage?.addEventListener("pointermove", (event) => {
   const stageSize = els.avatarCropStage?.clientWidth || 320;
   const zoom = state.avatarCropEditor.crop.zoom || 1;
   // Pan range in pixels = how far the image extends beyond the stage on one side.
-  // At zoom=1 the image fits exactly; no panning possible.
-  const panRangePx = stageSize * Math.max(zoom - 1, 0.001);
-  // Map screen-pixel drag to percent crop offset. Negative because dragging
-  // image right exposes more of its left side (crop center moves left).
-  const percentPerPx = -100 / panRangePx;
-  // Clamp per-frame change so a quick wide drag at low zoom doesn't fly off.
-  const clamped = (delta) => Math.max(Math.min(delta * percentPerPx, 20), -20);
+  const panRangePx = stageSize * Math.max(zoom - 1, 0);
+  if (panRangePx < 0.5) return; // no pan room; image fits the stage
+  // Mathematically 1px drag = 100/panRangePx percent. At low zoom that ratio
+  // explodes (e.g. zoom=1.01 → ~31% per pixel) which feels chaotic. Cap the
+  // felt sensitivity at 3% per pixel — the user just has to drag farther to
+  // span the full crop range, but every pixel of drag stays smooth.
+  const rawPerPx = 100 / panRangePx;
+  const sensitivity = Math.min(rawPerPx, 3);
+  // Negative: dragging image right exposes its left side (crop x decreases).
+  const percentPerPx = -sensitivity;
   updateAvatarCropEditor({
-    x: state.avatarCropEditor.crop.x + clamped(dx),
-    y: state.avatarCropEditor.crop.y + clamped(dy)
+    x: state.avatarCropEditor.crop.x + dx * percentPerPx,
+    y: state.avatarCropEditor.crop.y + dy * percentPerPx
   });
 });
 els.avatarCropStage?.addEventListener("pointerup", (event) => {
@@ -6573,9 +6576,26 @@ els.avatarCropStage?.addEventListener("wheel", (event) => {
     zoom: state.avatarCropEditor.crop.zoom + direction * 0.03
   });
 });
-els.confirmAvatarCrop?.addEventListener("click", () => {
+els.confirmAvatarCrop?.addEventListener("click", async () => {
   if (state.avatarCropEditor.target === "profile") {
     setProfileAvatarDraft(state.avatarCropEditor.image, state.avatarCropEditor.crop);
+    // Auto-persist the avatar so closing the profile dialog without clicking
+    // "保存资料" doesn't silently drop the new avatar. The display name field
+    // is preserved by reading whatever is currently in the input.
+    try {
+      const displayName = (els.profileDisplayName?.value || "").trim()
+        || state.runtime?.user?.displayName
+        || "Boss";
+      state.runtime = await window.aimashi.saveProfile({
+        displayName,
+        avatarText: initials(displayName),
+        avatarImage: state.profileAvatarDraft.image || els.profileAvatarImage?.value || "",
+        avatarCrop: normalizeCrop(state.profileAvatarDraft.crop),
+      });
+      render();
+    } catch (err) {
+      console.error("[profile] avatar auto-save failed:", err);
+    }
   } else {
     setFellowAvatarDraft(state.avatarCropEditor.image, state.avatarCropEditor.crop);
   }
