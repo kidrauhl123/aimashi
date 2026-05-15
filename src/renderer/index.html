@@ -547,6 +547,10 @@
             <span>也可以把图片拖到这里</span>
           </div>
         </section>
+        <section class="avatar-default-panel" aria-label="默认头像">
+          <div id="profileAvatarDefaultTabs" class="avatar-default-tabs" role="tablist" aria-label="默认头像风格"></div>
+          <section id="profileAvatarDefaults" class="avatar-defaults" aria-label="默认头像"></section>
+        </section>
         <footer class="fellow-dialog-actions">
           <button id="cancelProfile" class="secondary" type="button">取消</button>
           <button class="primary" type="submit">保存资料</button>
@@ -580,8 +584,8 @@
           </div>
         </section>
         <section class="avatar-default-panel" aria-label="默认头像">
-          <div class="avatar-default-tabs" role="tablist" aria-label="默认头像风格"></div>
-          <section class="avatar-defaults" aria-label="默认头像"></section>
+          <div id="fellowAvatarDefaultTabs" class="avatar-default-tabs" role="tablist" aria-label="默认头像风格"></div>
+          <section id="fellowAvatarDefaults" class="avatar-defaults" aria-label="默认头像"></section>
         </section>
         <label id="fellowAgentEngineField" class="hidden">
           Agent 引擎
@@ -673,6 +677,7 @@
     </section>
     <div id="skillContextMenu" class="skill-context-menu hidden" role="menu"></div>
     <div id="fellowContextMenu" class="skill-context-menu fellow-context-menu hidden" role="menu"></div>
+    <div id="groupContextMenu" class="skill-context-menu group-context-menu hidden" role="menu"></div>
     <div id="messageContextMenu" class="skill-context-menu message-context-menu hidden" role="menu"></div>
     <button id="petJobButton" class="pet-job-button hidden" type="button"></button>
     <div id="petJobPanel" class="pet-job-panel hidden"></div>
@@ -681,7 +686,7 @@
 
   <!-- Group create dialog — native .skill-preview-dialog style -->
   <section id="groupCreateDialog" class="skill-preview-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="groupCreateTitle">
-    <div class="skill-preview-card" style="width: min(520px, calc(100vw - 68px)); height: auto;">
+    <div class="skill-preview-card group-create-card">
       <div class="skill-preview-toolbar">
         <div class="skill-preview-title">
           <h2 id="groupCreateTitle">新建群聊</h2>
@@ -690,16 +695,26 @@
       </div>
       <div class="group-create-body">
         <section class="group-create-section">
-          <h3>选择成员 <span class="group-create-hint">(2-5 个)</span></h3>
-          <div id="groupCreateMembers" class="group-create-members"></div>
+          <div class="group-create-section-header">
+            <span class="group-create-section-title">选择成员</span>
+            <span class="group-create-section-meta"><span id="groupCreateCount">0</span> / 5</span>
+          </div>
+          <div id="groupCreateMembers" class="group-create-members" role="listbox" aria-multiselectable="true"></div>
         </section>
         <section class="group-create-section">
-          <h3>群主</h3>
-          <select id="groupCreateHost" class="group-create-select"></select>
+          <div class="group-create-section-header">
+            <span class="group-create-section-title">群主</span>
+          </div>
+          <div class="group-create-select-wrap">
+            <select id="groupCreateHost" class="group-create-select"></select>
+          </div>
         </section>
         <section class="group-create-section">
-          <h3>群名 <span class="group-create-hint">(可选)</span></h3>
-          <input id="groupCreateName" class="group-create-input" type="text" maxlength="40" placeholder="留空则用成员名拼接" />
+          <div class="group-create-section-header">
+            <span class="group-create-section-title">群名</span>
+            <span class="group-create-section-hint">留空则用成员名拼接</span>
+          </div>
+          <input id="groupCreateName" class="group-create-input" type="text" maxlength="40" placeholder="未命名群聊" />
         </section>
         <div class="group-create-actions">
           <button id="groupCreateCancel" class="button-soft" type="button">取消</button>
@@ -719,6 +734,11 @@
         <button id="groupInfoClose" class="icon-button" type="button" aria-label="关闭">×</button>
       </div>
       <div class="group-create-body">
+        <section class="group-create-section">
+          <h3>群名</h3>
+          <input id="groupInfoName" class="group-create-input" type="text" maxlength="40" />
+          <button id="groupInfoNameSave" class="button-soft" type="button" style="margin-top:8px;">保存群名</button>
+        </section>
         <section class="group-create-section">
           <h3>成员</h3>
           <div id="groupInfoMembers" class="group-info-members"></div>

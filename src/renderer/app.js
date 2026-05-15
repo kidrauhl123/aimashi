@@ -81,6 +81,7 @@ const state = {
   fellowDialogOpen: false,
   fellowDialogMode: "create",
   fellowAvatarPresetGroup: "human",
+  profileAvatarPresetGroup: "human",
   petGenerateOpen: false,
   petGenerateFellowKey: "",
   petReferences: [],
@@ -168,8 +169,10 @@ const els = {
   chooseFellowAvatar: document.getElementById("chooseFellowAvatar"),
   fellowAvatarDrop: document.getElementById("fellowAvatarDrop"),
   fellowAvatarPreview: document.getElementById("fellowAvatarPreview"),
-  fellowAvatarDefaultTabs: document.querySelector(".avatar-default-tabs"),
-  fellowAvatarDefaults: document.querySelector(".avatar-defaults"),
+  fellowAvatarDefaultTabs: document.getElementById("fellowAvatarDefaultTabs"),
+  fellowAvatarDefaults: document.getElementById("fellowAvatarDefaults"),
+  profileAvatarDefaultTabs: document.getElementById("profileAvatarDefaultTabs"),
+  profileAvatarDefaults: document.getElementById("profileAvatarDefaults"),
   fellowPersonaDetails: document.getElementById("fellowPersonaDetails"),
   fellowSeed: document.getElementById("fellowSeed"),
   closeFellowDialog: document.getElementById("closeFellowDialog"),
@@ -2769,7 +2772,7 @@ function render() {
       key: group.id,
       pinned: Boolean(group.pinned),
       pinnedAt: group.pinnedAt || "",
-      updatedAt: group.updatedAt || group.createdAt || "",
+      updatedAt: groupConversationUpdatedAt(group),
       group
     }))
   ]);
@@ -2823,8 +2826,7 @@ function render() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `persona message-card group-persona${group.id === state.activeKey ? " active" : ""}${group.pinned ? " pinned" : ""}`;
-    const previewText = "群聊 · " + ((group.members || []).length + 1) + " 人";
-    const updated = group.updatedAt ? formatConversationTime(group.updatedAt) : "";
+    const preview = groupConversationPreview(group, personas);
     btn.innerHTML = `
       <span class="avatar group-avatar"></span>
       <span class="persona-main">
@@ -2832,10 +2834,10 @@ function render() {
           <span class="persona-name">${escapeHtml(group.name || "未命名群聊")}</span>
           <span class="persona-type group">群聊</span>
         </span>
-        <span class="persona-key">${escapeHtml(previewText)}</span>
+        <span class="persona-key">${escapeHtml(preview.text)}</span>
       </span>
       <span class="persona-side">
-        <span class="persona-time">${escapeHtml(updated)}</span>
+        <span class="persona-time">${escapeHtml(preview.time)}</span>
         <span class="persona-pin${group.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
       </span>
     `;
@@ -5120,6 +5122,52 @@ function activeGroup() {
   return groups.find((g) => g.id === state.activeKey) || null;
 }
 
+function groupMessagesForPreview(group) {
+  return window.aimashiGroup?.moduleState?.messagesByGroup?.get?.(group.id) || [];
+}
+
+function groupLastPreviewMessage(group) {
+  const messages = groupMessagesForPreview(group);
+  const primary = [...messages].reverse().find((message) => (
+    (message.role === "user" || message.role === "fellow") &&
+    String(message.content || "").trim() &&
+    message.status !== "streaming"
+  ));
+  if (primary) return primary;
+  return [...messages].reverse().find((message) => String(message.content || "").trim() && message.status !== "streaming") || null;
+}
+
+function groupConversationUpdatedAt(group) {
+  const last = groupLastPreviewMessage(group);
+  return last?.createdAt || group.updatedAt || group.createdAt || "";
+}
+
+function groupMessageSpeaker(message, fellows = []) {
+  if (message?.role === "user") return state.runtime?.user?.displayName || "你";
+  if (message?.role === "fellow") {
+    const fellowId = message.senderFellowId || "";
+    const fellow = fellows.find((item) => (item.id || item.key) === fellowId);
+    return fellow?.name || fellowId || "伙伴";
+  }
+  return "系统";
+}
+
+function groupConversationPreview(group, fellows = []) {
+  const last = groupLastPreviewMessage(group);
+  if (!last) {
+    return {
+      text: "暂无消息",
+      time: formatConversationTime(group.updatedAt || group.createdAt)
+    };
+  }
+  const speaker = groupMessageSpeaker(last, fellows);
+  const content = String(last.content || "").replace(/\s+/g, " ").trim();
+  return {
+    text: `${speaker}：${content}`,
+    time: formatConversationTime(last.createdAt || group.updatedAt || group.createdAt)
+  };
+}
+
 function appendChat(role, content, options = {}) {
   const session = activeSession();
   const message = { role, content, createdAt: nowIso(), transient: Boolean(options.transient) };
@@ -6254,11 +6302,13 @@ function renderProfileAvatarDraft() {
   els.profileAvatarPreview.setAttribute("role", "button");
   els.profileAvatarPreview.setAttribute("tabindex", "0");
   els.profileAvatarPreview.setAttribute("aria-label", "调整头像裁剪");
+  renderProfileAvatarDefaults();
 }
 
 function openProfileDialog() {
   const user = state.runtime?.user || { displayName: "Boss", avatarImage: "", avatarCrop: DEFAULT_AVATAR_CROP };
   state.profileDialogOpen = true;
+  state.profileAvatarPresetGroup = avatarPresetGroupForSrc(user.avatarImage || "") || "human";
   if (els.profileDisplayName) els.profileDisplayName.value = user.displayName || "Boss";
   setProfileAvatarDraft(user.avatarImage || "", user.avatarCrop);
   renderView();
@@ -6298,6 +6348,54 @@ function renderFellowAvatarDefaults() {
     button.addEventListener("click", () => {
       setFellowAvatarDraft(button.dataset.avatar, avatarDefaultCropForSrc(button.dataset.avatar));
       if (els.fellowName) els.fellowName.value = button.dataset.avatarName || avatarPresetBySrc(button.dataset.avatar)?.name || "";
+    });
+  });
+}
+
+function renderProfileAvatarDefaults() {
+  if (!els.profileAvatarDefaults) return;
+  const activeGroup = avatarPresetGroups[state.profileAvatarPresetGroup]
+    ? state.profileAvatarPresetGroup
+    : "human";
+  state.profileAvatarPresetGroup = activeGroup;
+  if (els.profileAvatarDefaultTabs) {
+    els.profileAvatarDefaultTabs.innerHTML = avatarPresetGroupTabs.map((group) => `
+      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${escapeHtml(group.label)}</button>
+    `).join("");
+    els.profileAvatarDefaultTabs.querySelectorAll("[data-avatar-group]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const group = button.dataset.avatarGroup || "human";
+        if (!avatarPresetGroups[group] || state.profileAvatarPresetGroup === group) return;
+        state.profileAvatarPresetGroup = group;
+        renderProfileAvatarDefaults();
+      });
+    });
+  }
+  const selected = state.profileAvatarDraft.image;
+  const presets = avatarPresetGroups[activeGroup] || avatarPresetGroups.human;
+  els.profileAvatarDefaults.innerHTML = presets.map((preset) => `
+    <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${escapeHtml(preset.src)}" data-avatar-name="${escapeHtml(preset.name)}" title="${escapeHtml(preset.name)}" aria-label="${escapeHtml(preset.name)}" style="${avatarThumbBackgroundStyle(preset.src, avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
+  `).join("");
+  els.profileAvatarDefaults.querySelectorAll("[data-avatar]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const src = button.dataset.avatar;
+      setProfileAvatarDraft(src, avatarDefaultCropForSrc(src));
+      // Auto-save: clicking a preset is a decisive choice. Pull the current
+      // displayName from the input so we don't drop user's in-progress edit.
+      try {
+        const displayName = (els.profileDisplayName?.value || "").trim()
+          || state.runtime?.user?.displayName
+          || "Boss";
+        state.runtime = await window.aimashi.saveProfile({
+          displayName,
+          avatarText: initials(displayName),
+          avatarImage: state.profileAvatarDraft.image || src,
+          avatarCrop: normalizeCrop(state.profileAvatarDraft.crop),
+        });
+        render();
+      } catch (err) {
+        console.error("[profile] preset avatar auto-save failed:", err);
+      }
     });
   });
 }
