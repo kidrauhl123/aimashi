@@ -2666,7 +2666,10 @@ function render() {
   syncPermissionControl(runtime);
 
   const personas = runtime.fellows || runtime.personas || [];
-  if (!personas.some((persona) => persona.key === state.activeKey) && personas.length) {
+  // Only fall back to personas[0] when no persona matches AND no group is active.
+  // Without this guard, clicking a group (whose id doesn't match any persona key)
+  // immediately resets activeKey back to personas[0], making group selection a no-op.
+  if (!personas.some((persona) => persona.key === state.activeKey) && personas.length && !activeGroup()) {
     state.activeKey = personas[0].key;
   }
   if (!personas.some((persona) => persona.key === state.activeContactKey) && personas.length) {
