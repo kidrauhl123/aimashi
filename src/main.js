@@ -7290,6 +7290,14 @@ ipcMain.handle("group:update", (_event, payload) => ensureGroupStore().updateGro
 ipcMain.handle("group:append-message", (_event, payload) => { ensureGroupStore().appendMessage(payload.id, payload.message); return true; });
 ipcMain.handle("group:list-messages", (_event, id) => ensureGroupStore().listMessages(id));
 ipcMain.handle("group:save-context-card", (_event, payload) => { ensureGroupStore().saveContextCard(payload.id, payload.card); return true; });
+ipcMain.handle("group:load-prompts", () => {
+  const dir = path.join(__dirname, "..", "resources", "conductor", "default-prompts");
+  return {
+    dispatch: fs.readFileSync(path.join(dir, "dispatch.md"), "utf8"),
+    summarize: fs.readFileSync(path.join(dir, "summarize.md"), "utf8"),
+    nudge: fs.readFileSync(path.join(dir, "nudge.md"), "utf8"),
+  };
+});
 ipcMain.handle("persona:save", (_event, persona) => saveFellow(persona));
 ipcMain.handle("pet:jobs", () => getPetJobs());
 ipcMain.handle("pet:generate", (_event, payload) => startFellowPetGeneration(payload));

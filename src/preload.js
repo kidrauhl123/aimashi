@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld("aimashi", {
     appendMessage: (id, message) => ipcRenderer.invoke("group:append-message", { id, message }),
     listMessages: (id) => ipcRenderer.invoke("group:list-messages", id),
     saveContextCard: (id, card) => ipcRenderer.invoke("group:save-context-card", { id, card }),
+    loadPrompts: () => ipcRenderer.invoke("group:load-prompts"),
   },
   platform: process.platform,
   window: {
