@@ -28,6 +28,7 @@ const required = [
   "src/main/group-adapters.js",
   "src/renderer/group-prompts.js",
   "src/renderer/conductor.js",
+  "src/renderer/group.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md"

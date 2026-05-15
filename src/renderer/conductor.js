@@ -1,7 +1,8 @@
-const {
-  buildDispatchPrompt,
-  buildSummarizePrompt,
-} = require("./group-prompts.js");
+const promptsModule =
+  typeof require !== "undefined"
+    ? require("./group-prompts.js")
+    : (typeof window !== "undefined" ? window.aimashiGroupPrompts : {});
+const { buildDispatchPrompt, buildSummarizePrompt } = promptsModule;
 
 function safeParseJSON(text) {
   if (!text || typeof text !== "string") return null;
@@ -76,4 +77,9 @@ function createConductor({ engineCall, dispatchTemplate, summarizeTemplate }) {
   return { decideDispatch, summarize };
 }
 
-module.exports = { createConductor };
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { createConductor };
+}
+if (typeof window !== "undefined") {
+  window.aimashiConductor = { createConductor };
+}

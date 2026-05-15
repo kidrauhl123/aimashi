@@ -102,7 +102,7 @@ function shouldSummarize(group, messages) {
   return turns.size >= 4;
 }
 
-module.exports = {
+const __exports = {
   parseMentions,
   filterRecentTurnsForFellow,
   buildDispatchPrompt,
@@ -110,3 +110,9 @@ module.exports = {
   buildFellowGroupContext,
   shouldSummarize,
 };
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = __exports;
+}
+if (typeof window !== "undefined") {
+  window.aimashiGroupPrompts = __exports;
+}

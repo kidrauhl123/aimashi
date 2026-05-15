@@ -4664,6 +4664,24 @@ async function initializeRuntime() {
   state.runtime = runtime;
   await trackStartupTask("加载会话", loadChatSessions);
   render();
+  if (window.aimashiGroup && window.aimashiGroup.initGroupModule) {
+    try {
+      await window.aimashiGroup.initGroupModule({
+        getFellows: () => {
+          const list = Array.isArray(state.runtime && state.runtime.fellows) ? state.runtime.fellows
+            : Array.isArray(state.runtime && state.runtime.personas) ? state.runtime.personas
+            : [];
+          return list.map((f) => ({ id: f.id || f.key, name: f.name || f.key, key: f.key }));
+        },
+        engineCall: async ({ kind, prompt, group }) => {
+          // T14 wires this up to chat:send. For now throw to surface during dev.
+          throw new Error("engineCall not wired yet (T14 hooks this up)");
+        },
+      });
+    } catch (err) {
+      console.error("[group] init bootstrap failed:", err);
+    }
+  }
   setTimeout(() => {
     Promise.allSettled([
       trackStartupTask("加载 Hermes 模型列表", loadModelCatalog),
