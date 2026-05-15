@@ -73,6 +73,7 @@ const state = {
   skillStatusFilter: "all",
   skillContextMenu: { open: false, x: 0, y: 0, skillId: "" },
   fellowContextMenu: { open: false, x: 0, y: 0, fellowKey: "" },
+  groupContextMenu: { open: false, x: 0, y: 0, groupId: "" },
   messageContextMenu: { open: false, x: 0, y: 0, messageIndex: -1, selectionText: "" },
   replyDraft: null,
   fellowMenuOpen: false,
@@ -220,6 +221,7 @@ const els = {
   skillPreviewBody: document.getElementById("skillPreviewBody"),
   skillContextMenu: document.getElementById("skillContextMenu"),
   fellowContextMenu: document.getElementById("fellowContextMenu"),
+  groupContextMenu: document.getElementById("groupContextMenu"),
   messageContextMenu: document.getElementById("messageContextMenu"),
   profileDialog: document.getElementById("profileDialog"),
   profileForm: document.getElementById("profileForm"),
@@ -2007,6 +2009,11 @@ function conversationPreview(persona) {
   };
 }
 
+function conversationUpdatedAt(persona) {
+  const latest = sessionsForPersona(persona.key)[0];
+  return latest?.updatedAt || latest?.createdAt || "";
+}
+
 function sessionsForPersona(personaKey = state.activeKey) {
   if (!state.chatStore.sessions[personaKey]) state.chatStore.sessions[personaKey] = [];
   if (!state.chatStore.sessions[personaKey].length) {
@@ -2742,64 +2749,94 @@ function render() {
     if (composerBottom) composerBottom.classList.remove("hidden");
   }
   const filter = state.personaFilter.trim().toLowerCase();
-  const visiblePersonas = sortFellowsForSidebar(filter
+  const visiblePersonas = filter
     ? personas.filter((persona) => `${persona.name || ""} ${persona.key || ""}`.toLowerCase().includes(filter))
-    : personas);
+    : personas;
+  const visibleGroups = listGroups().filter((group) => (
+    !filter || `${group.name || ""} ${(group.members || []).join(" ")}`.toLowerCase().includes(filter)
+  ));
+  const messageRows = sortMessageCardsForSidebar([
+    ...visiblePersonas.map((persona) => ({
+      type: "fellow",
+      key: persona.key,
+      pinned: Boolean(persona.pinned),
+      pinnedAt: persona.pinnedAt || "",
+      updatedAt: conversationUpdatedAt(persona),
+      persona
+    })),
+    ...visibleGroups.map((group) => ({
+      type: "group",
+      key: group.id,
+      pinned: Boolean(group.pinned),
+      pinnedAt: group.pinnedAt || "",
+      updatedAt: group.updatedAt || group.createdAt || "",
+      group
+    }))
+  ]);
 
   els.personaList.innerHTML = "";
-  for (const persona of visiblePersonas) {
-    const preview = conversationPreview(persona);
-    const unread = unreadCountForPersona(persona.key);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `persona${persona.key === state.activeKey ? " active" : ""}${persona.pinned ? " pinned" : ""}`;
-    button.innerHTML = `
-      <span class="avatar fellow-photo" data-fellow-avatar="${escapeHtml(persona.key)}" style="${avatarThumbBackgroundStyle(persona.avatarImage || avatarAssetForKey(persona.key), persona.avatarCrop, persona.color || "#5e5ce6")}"></span>
-      <span class="persona-main">
-        <span class="persona-name">${escapeHtml(persona.name)}</span>
-        <span class="persona-key">${escapeHtml(preview.text)}</span>
-      </span>
-      <span class="persona-side">
-        <span class="persona-time">${escapeHtml(preview.time)}</span>
-        <span class="persona-pin${persona.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
-        <span class="persona-unread${unread ? "" : " hidden"}">${escapeHtml(unread > 99 ? "99+" : String(unread))}</span>
-      </span>
-    `;
-    button.addEventListener("click", () => {
-      state.activeKey = persona.key;
-      const latest = sessionsForPersona(persona.key)[0];
-      state.activeSessionIdByPersona[persona.key] = latest?.id;
-      state.replyDraft = null;
-      markPersonaRead(persona.key);
-      state.sessionMenuOpen = false;
-      showNarrowContent();
-      render();
-    });
-    button.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      openFellowContextMenu(persona.key, event.clientX, event.clientY);
-    });
-    els.personaList.appendChild(button);
-  }
+  for (const row of messageRows) {
+    if (row.type === "fellow") {
+      const persona = row.persona;
+      const preview = conversationPreview(persona);
+      const unread = unreadCountForPersona(persona.key);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `persona message-card private-message-card${persona.key === state.activeKey ? " active" : ""}${persona.pinned ? " pinned" : ""}`;
+      button.innerHTML = `
+        <span class="avatar fellow-photo" data-fellow-avatar="${escapeHtml(persona.key)}" style="${avatarThumbBackgroundStyle(persona.avatarImage || avatarAssetForKey(persona.key), persona.avatarCrop, persona.color || "#5e5ce6")}"></span>
+        <span class="persona-main">
+          <span class="persona-name-row">
+            <span class="persona-name">${escapeHtml(persona.name)}</span>
+            <span class="persona-type">私聊</span>
+          </span>
+          <span class="persona-key">${escapeHtml(preview.text || "暂无对话")}</span>
+        </span>
+        <span class="persona-side">
+          <span class="persona-time">${escapeHtml(preview.time)}</span>
+          <span class="persona-pin${persona.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
+          <span class="persona-unread${unread ? "" : " hidden"}">${escapeHtml(unread > 99 ? "99+" : String(unread))}</span>
+        </span>
+      `;
+      button.addEventListener("click", () => {
+        state.activeKey = persona.key;
+        state.activeGroupId = "";
+        if (window.aimashiGroup) window.aimashiGroup.moduleState.activeGroupId = null;
+        const latest = sessionsForPersona(persona.key)[0];
+        state.activeSessionIdByPersona[persona.key] = latest?.id;
+        state.replyDraft = null;
+        markPersonaRead(persona.key);
+        state.sessionMenuOpen = false;
+        showNarrowContent();
+        render();
+      });
+      button.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openFellowContextMenu(persona.key, event.clientX, event.clientY);
+      });
+      els.personaList.appendChild(button);
+      continue;
+    }
 
-  // Inject group entries after fellow rows
-  const groups = listGroups();
-  for (const group of groups) {
-    if (filter && !(group.name || "").toLowerCase().includes(filter)) continue;
+    const group = row.group;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `persona group-persona${group.id === state.activeKey ? " active" : ""}`;
+    btn.className = `persona message-card group-persona${group.id === state.activeKey ? " active" : ""}${group.pinned ? " pinned" : ""}`;
     const previewText = "群聊 · " + ((group.members || []).length + 1) + " 人";
     const updated = group.updatedAt ? formatConversationTime(group.updatedAt) : "";
     btn.innerHTML = `
       <span class="avatar group-avatar"></span>
       <span class="persona-main">
-        <span class="persona-name">${escapeHtml(group.name || "未命名群聊")}</span>
+        <span class="persona-name-row">
+          <span class="persona-name">${escapeHtml(group.name || "未命名群聊")}</span>
+          <span class="persona-type group">群聊</span>
+        </span>
         <span class="persona-key">${escapeHtml(previewText)}</span>
       </span>
       <span class="persona-side">
         <span class="persona-time">${escapeHtml(updated)}</span>
+        <span class="persona-pin${group.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
       </span>
     `;
     // Build composite avatar tiles (Boss first, then all Fellows)
@@ -2837,20 +2874,23 @@ function render() {
       state.activeKey = group.id;
       state.activeGroupId = group.id;
       if (window.aimashiGroup) window.aimashiGroup.moduleState.activeGroupId = group.id;
+      state.replyDraft = null;
+      state.sessionMenuOpen = false;
       showNarrowContent();
       render();
     });
     btn.addEventListener("contextmenu", (event) => {
       event.preventDefault();
-      // v1: group context menu deferred
+      event.stopPropagation();
+      openGroupContextMenu(group.id, event.clientX, event.clientY);
     });
     els.personaList.appendChild(btn);
   }
 
-  if (!visiblePersonas.length && !groups.length) {
+  if (!messageRows.length) {
     const empty = document.createElement("div");
     empty.className = "persona-empty";
-    empty.textContent = "没有匹配的伙伴";
+    empty.textContent = "没有匹配的消息";
     els.personaList.appendChild(empty);
   }
   renderView();
@@ -2881,6 +2921,7 @@ function renderView() {
   els.avatarCropDialog?.classList.toggle("hidden", !state.avatarCropEditor.open);
   renderSkillPreview();
   renderFellowContextMenu();
+  renderGroupContextMenu();
   renderPetGenerateDialog();
   renderPetJobs();
   document.querySelectorAll("[data-view]").forEach((button) => {
@@ -2943,6 +2984,7 @@ function skillSummaryZh(skill = {}) {
     "plugin-creator": "创建 Codex 插件目录和配置，适合把工具能力打包成可复用插件。",
     "skill-creator": "编写或改造 SKILL.md，适合把稳定工作流沉淀成 Codex 可调用的技能。",
     "skill-installer": "从本地清单或 GitHub 安装 Codex Skill，适合扩展本机技能库。",
+    "pet-generator": "把角色、品牌或参考图做成桌宠 spritesheet，并输出预览和打包文件。",
     "hatch-pet": "把角色图做成 Codex 宠物 spritesheet，并输出预览和打包文件。"
   };
   if (exact[skill.name]) return exact[skill.name];
@@ -3506,6 +3548,7 @@ function renderSkillPreview() {
 function openSkillContextMenu(skillId, x, y) {
   if (!skillId) return;
   closeMessageContextMenu();
+  closeGroupContextMenu();
   state.skillContextMenu = { open: true, x, y, skillId };
   renderSkillContextMenu();
 }
@@ -3517,7 +3560,7 @@ function closeSkillContextMenu() {
 }
 
 function syncTopbarClickCapture() {
-  document.body.classList.toggle("topbar-click-capture", Boolean(state.skillContextMenu.open || state.sessionMenuOpen));
+  document.body.classList.toggle("topbar-click-capture", Boolean(state.skillContextMenu.open || state.groupContextMenu.open || state.sessionMenuOpen));
 }
 
 function renderSkillContextMenu() {
@@ -3572,6 +3615,31 @@ function sortFellowsForSidebar(fellows = []) {
       return a.index - b.index;
     })
     .map((item) => item.fellow);
+}
+
+function sortableConversationTime(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sortMessageCardsForSidebar(rows = []) {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const pinnedDiff = Number(Boolean(b.row.pinned)) - Number(Boolean(a.row.pinned));
+      if (pinnedDiff) return pinnedDiff;
+      if (a.row.pinned && b.row.pinned) {
+        const timeDiff = sortableConversationTime(b.row.pinnedAt) - sortableConversationTime(a.row.pinnedAt);
+        if (timeDiff) return timeDiff;
+      }
+      const updatedDiff = sortableConversationTime(b.row.updatedAt) - sortableConversationTime(a.row.updatedAt);
+      if (updatedDiff) return updatedDiff;
+      return a.index - b.index;
+    })
+    .map((item) => item.row);
 }
 
 function contactSessionSummary(fellow) {
@@ -3890,6 +3958,7 @@ function petStatusForKey(key) {
 function openFellowContextMenu(fellowKey, x, y) {
   if (!fellowKey) return;
   closeMessageContextMenu();
+  closeGroupContextMenu();
   state.fellowContextMenu = { open: true, x, y, fellowKey };
   renderFellowContextMenu();
 }
@@ -3947,6 +4016,60 @@ function renderFellowContextMenu() {
   menu.querySelector('[data-fellow-action="delete"]')?.addEventListener("click", async () => {
     closeFellowContextMenu();
     await deleteFellow(fellow.key);
+  });
+}
+
+function groupById(groupId) {
+  return listGroups().find((group) => group.id === groupId) || null;
+}
+
+function openGroupContextMenu(groupId, x, y) {
+  if (!groupId) return;
+  closeMessageContextMenu();
+  closeFellowContextMenu();
+  closeSkillContextMenu();
+  state.groupContextMenu = { open: true, x, y, groupId };
+  renderGroupContextMenu();
+}
+
+function closeGroupContextMenu() {
+  if (!state.groupContextMenu.open) return;
+  state.groupContextMenu = { open: false, x: 0, y: 0, groupId: "" };
+  renderGroupContextMenu();
+}
+
+function renderGroupContextMenu() {
+  if (!els.groupContextMenu) return;
+  const menu = els.groupContextMenu;
+  const group = groupById(state.groupContextMenu.groupId);
+  const open = state.groupContextMenu.open && group;
+  menu.classList.toggle("hidden", !open);
+  syncTopbarClickCapture();
+  if (!open) return;
+  menu.innerHTML = `
+    ${menuItemHtml({ icon: "pin", label: group.pinned ? "取消置顶" : "置顶", attrs: 'data-group-action="pin"' })}
+    ${menuItemHtml({ icon: "edit", label: "编辑群组", attrs: 'data-group-action="edit"' })}
+    <div class="skill-context-menu-separator" role="separator"></div>
+    ${menuItemHtml({ icon: "delete", label: "删除群组", attrs: 'data-group-action="delete"', className: "danger" })}
+  `;
+  const rect = menu.getBoundingClientRect();
+  const width = rect.width || 138;
+  const height = rect.height || 126;
+  menu.style.left = `${Math.max(8, Math.min(state.groupContextMenu.x, window.innerWidth - width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(state.groupContextMenu.y, window.innerHeight - height - 8))}px`;
+  menu.querySelector('[data-group-action="pin"]')?.addEventListener("click", async () => {
+    closeGroupContextMenu();
+    await setGroupPinned(group.id, !group.pinned);
+  });
+  menu.querySelector('[data-group-action="edit"]')?.addEventListener("click", () => {
+    closeGroupContextMenu();
+    if (window.aimashiGroup && typeof window.aimashiGroup.openInfoDialog === "function") {
+      window.aimashiGroup.openInfoDialog(group);
+    }
+  });
+  menu.querySelector('[data-group-action="delete"]')?.addEventListener("click", async () => {
+    closeGroupContextMenu();
+    await deleteGroup(group.id);
   });
 }
 
@@ -4043,6 +4166,7 @@ function openMessageContextMenu(messageIndex, x, y, selection = null) {
   if (!messageAtIndex(index)) return;
   closeSkillContextMenu();
   closeFellowContextMenu();
+  closeGroupContextMenu();
   const selectionText = String(selection?.text || "").trim();
   state.messageContextMenu = { open: true, x, y, messageIndex: index, selectionText };
   if (selectionText) highlightMessageSelection(selection.range);
@@ -4316,6 +4440,47 @@ async function deleteFellow(fellowKey) {
   } catch (error) {
     appendTransientChat("assistant", `删除伙伴失败: ${error.message}`);
     await refreshRuntime();
+  }
+}
+
+async function setGroupPinned(groupId, pinned) {
+  const group = groupById(groupId);
+  if (!group) return;
+  try {
+    const patch = { pinned: Boolean(pinned), pinnedAt: pinned ? nowIso() : "" };
+    const updated = await window.aimashi.groups.update(group.id, patch);
+    if (window.aimashiGroup?.moduleState?.groups) {
+      const index = window.aimashiGroup.moduleState.groups.findIndex((item) => item.id === group.id);
+      if (index >= 0) window.aimashiGroup.moduleState.groups[index] = updated;
+    }
+    render();
+  } catch (error) {
+    appendTransientChat("assistant", `群组置顶失败: ${error.message}`);
+  }
+}
+
+async function deleteGroup(groupId) {
+  const group = groupById(groupId);
+  if (!group) return;
+  const ok = window.confirm(`删除群组「${group.name || "未命名群聊"}」？\n\n这会移除该群组和本地群聊记录。`);
+  if (!ok) return;
+  try {
+    await window.aimashi.groups.delete(group.id);
+    if (window.aimashiGroup?.moduleState) {
+      window.aimashiGroup.moduleState.groups = (window.aimashiGroup.moduleState.groups || []).filter((item) => item.id !== group.id);
+      window.aimashiGroup.moduleState.messagesByGroup?.delete?.(group.id);
+      if (window.aimashiGroup.moduleState.activeGroupId === group.id) {
+        window.aimashiGroup.moduleState.activeGroupId = null;
+      }
+    }
+    if (state.activeKey === group.id) {
+      const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+      state.activeKey = fellows[0]?.key || "";
+      state.activeGroupId = "";
+    }
+    render();
+  } catch (error) {
+    appendTransientChat("assistant", `删除群组失败: ${error.message}`);
   }
 }
 
@@ -5497,6 +5662,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (state.skillContextMenu.open) closeSkillContextMenu();
   if (state.fellowContextMenu.open) closeFellowContextMenu();
+  if (state.groupContextMenu.open) closeGroupContextMenu();
   if (state.messageContextMenu.open) closeMessageContextMenu();
   closeComposerAddMenu();
   if (state.skillPreviewOpen) {
@@ -5514,6 +5680,9 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (state.fellowContextMenu.open && !els.fellowContextMenu?.contains(event.target)) closeFellowContextMenu();
+});
+document.addEventListener("click", (event) => {
+  if (state.groupContextMenu.open && !els.groupContextMenu?.contains(event.target)) closeGroupContextMenu();
 });
 document.addEventListener("click", (event) => {
   if (state.messageContextMenu.open && !els.messageContextMenu?.contains(event.target)) closeMessageContextMenu();
@@ -6376,11 +6545,18 @@ els.avatarCropStage?.addEventListener("pointermove", (event) => {
   state.avatarCropEditor.lastX = event.clientX;
   state.avatarCropEditor.lastY = event.clientY;
   const stageSize = els.avatarCropStage?.clientWidth || 320;
-  const zoom = Math.max(state.avatarCropEditor.crop.zoom || 1, 1.001);
-  const percentDelta = 100 / (stageSize * (1 - zoom));
+  const zoom = state.avatarCropEditor.crop.zoom || 1;
+  // Pan range in pixels = how far the image extends beyond the stage on one side.
+  // At zoom=1 the image fits exactly; no panning possible.
+  const panRangePx = stageSize * Math.max(zoom - 1, 0.001);
+  // Map screen-pixel drag to percent crop offset. Negative because dragging
+  // image right exposes more of its left side (crop center moves left).
+  const percentPerPx = -100 / panRangePx;
+  // Clamp per-frame change so a quick wide drag at low zoom doesn't fly off.
+  const clamped = (delta) => Math.max(Math.min(delta * percentPerPx, 20), -20);
   updateAvatarCropEditor({
-    x: state.avatarCropEditor.crop.x + dx * percentDelta,
-    y: state.avatarCropEditor.crop.y + dy * percentDelta
+    x: state.avatarCropEditor.crop.x + clamped(dx),
+    y: state.avatarCropEditor.crop.y + clamped(dy)
   });
 });
 els.avatarCropStage?.addEventListener("pointerup", (event) => {
@@ -6394,7 +6570,7 @@ els.avatarCropStage?.addEventListener("wheel", (event) => {
   event.preventDefault();
   const direction = event.deltaY > 0 ? -1 : 1;
   updateAvatarCropEditor({
-    zoom: state.avatarCropEditor.crop.zoom + direction * 0.08
+    zoom: state.avatarCropEditor.crop.zoom + direction * 0.03
   });
 });
 els.confirmAvatarCrop?.addEventListener("click", () => {
