@@ -2,14 +2,12 @@
 // Loaded by <script src="./group.js"></script> from index.html, before app.js.
 
 (function (global) {
-  const promptsModule =
-    typeof require !== "undefined"
-      ? require("./group-prompts.js")
-      : global.aimashiGroupPrompts;
-  const conductorModule =
-    typeof require !== "undefined"
-      ? require("./conductor.js")
-      : global.aimashiConductor;
+  const promptsModule = (typeof window !== "undefined" && window.aimashiGroupPrompts)
+    ? window.aimashiGroupPrompts
+    : (typeof require !== "undefined" ? require("./group-prompts.js") : {});
+  const conductorModule = (typeof window !== "undefined" && window.aimashiConductor)
+    ? window.aimashiConductor
+    : (typeof require !== "undefined" ? require("./conductor.js") : {});
   const { createConductor } = conductorModule || {};
   // parseMentions/filterRecentTurnsForFellow/etc. accessed via promptsModule when needed.
 
@@ -457,13 +455,18 @@
 
     let dispatch;
     if (moduleState.conductor) {
-      dispatch = await moduleState.conductor.decideDispatch({
-        group,
-        members,
-        fellowNamesById: currentFellowNamesById(),
-        userMessage: userMsg,
-        messages: msgs,
-      });
+      try {
+        dispatch = await moduleState.conductor.decideDispatch({
+          group,
+          members,
+          fellowNamesById: currentFellowNamesById(),
+          userMessage: userMsg,
+          messages: msgs,
+        });
+      } catch (err) {
+        console.error("[group] decideDispatch threw", err);
+        dispatch = { speak: [], degraded: true };
+      }
       if (members.length > 0 && dispatch.speak && dispatch.speak.length === 0 && !dispatch.degraded) {
         console.warn("[group] dispatch returned empty speak list despite non-empty members:", members.map((f) => f.id || f.key));
       }

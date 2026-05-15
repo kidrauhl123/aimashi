@@ -1,7 +1,6 @@
-const promptsModule =
-  typeof require !== "undefined"
-    ? require("./group-prompts.js")
-    : (typeof window !== "undefined" ? window.aimashiGroupPrompts : {});
+const promptsModule = (typeof window !== "undefined" && window.aimashiGroupPrompts)
+  ? window.aimashiGroupPrompts
+  : (typeof require !== "undefined" ? require("./group-prompts.js") : {});
 const { buildDispatchPrompt, buildSummarizePrompt } = promptsModule;
 
 function safeParseJSON(text) {

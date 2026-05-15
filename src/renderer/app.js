@@ -5398,7 +5398,6 @@ async function initializeRuntime() {
           render();
         },
         engineCall: async ({ kind, prompt, group }) => {
-          // Conductor calls run as stateless ops on the host Fellow's engine.
           const hostFellowId = group && group.hostFellowId;
           if (!hostFellowId) throw new Error("no host fellow for group");
           const result = await window.aimashi.sendChatStateless({
