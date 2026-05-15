@@ -601,9 +601,23 @@
 
   async function dispatchToFellow(group, fellowId, userMsg, turnId) {
     const msgs = moduleState.messagesByGroup.get(group.id) || [];
-    const filterFn = promptsModule && promptsModule.filterRecentTurnsForFellow;
     const buildContext = promptsModule && promptsModule.buildFellowGroupContext;
-    const recent = filterFn ? filterFn(msgs, fellowId, 3) : [];
+    // Show the Fellow the full recent group conversation, not just turns they
+    // were @-mentioned in. Otherwise they can't see what other Fellows just
+    // said, which breaks free-flowing chat / relay games (成语接龙 等).
+    // Older history is compressed into the summary card; capping the live tail
+    // at 30 keeps token cost bounded.
+    const summaryCutoffId = group.contextCard ? group.contextCard.summaryUpToMsgId : null;
+    let liveTail;
+    if (summaryCutoffId) {
+      const cutoffIdx = msgs.findIndex((m) => m.id === summaryCutoffId);
+      liveTail = cutoffIdx >= 0 ? msgs.slice(cutoffIdx + 1) : msgs.slice();
+    } else {
+      liveTail = msgs.slice();
+    }
+    const recent = liveTail
+      .filter((m) => !(m.role === "fellow" && m.senderFellowId === fellowId && m.status === "streaming"))
+      .slice(-30);
     const contextBlock = buildContext
       ? buildContext({
           groupName: group.name,
