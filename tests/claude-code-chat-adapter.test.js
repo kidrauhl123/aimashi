@@ -30,13 +30,15 @@ function createDeps(messages, overrides = {}) {
       return overrides.expandedPrompt ?? text;
     },
     getAgentSessionEntry: () => overrides.savedEntry || {},
+    getSchedulerMcpSpec: () => overrides.schedulerMcpSpec ?? null,
     injectGroupContextForSdk: (prompt, contextBlock) => `GROUP:${contextBlock}\n${prompt}`,
     lastUserPrompt: () => "hello",
     normalizeEffortLevel: (level, engine) => `${engine}:${level}`,
     processEnvStrings: () => ({ PATH: "/bin" }),
     readFellowPersona: () => "persona",
     setAgentSessionEntry: (...args) => calls.push(["set-session", ...args]),
-    shellCommandPath: (command) => command === "claude" ? "/bin/claude" : ""
+    shellCommandPath: (command) => command === "claude" ? "/bin/claude" : "",
+    writeSchedulerMcpContext: () => {}
   };
 }
 

@@ -104,6 +104,8 @@ function createCodexChatAdapter(deps = {}) {
   const getAgentSessionId = requireDependency(deps, "getAgentSessionId");
   const setAgentSessionId = requireDependency(deps, "setAgentSessionId");
   const chatCompletionResponse = requireDependency(deps, "chatCompletionResponse");
+  const ensureCodexHome = requireDependency(deps, "ensureCodexHome");
+  const writeSchedulerMcpContext = requireDependency(deps, "writeSchedulerMcpContext");
   const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
   const cwd = deps.cwd || (() => process.cwd());
 
@@ -113,6 +115,14 @@ function createCodexChatAdapter(deps = {}) {
     if (!commandPath) throw new Error("本机没有检测到 Codex CLI。请先安装并确认 `codex --version` 可用。");
     const externalSessionId = utility ? "" : getAgentSessionId(engine, fellow.key, sessionId);
     const lastUser = lastUserPrompt(messages);
+    // Best-effort: grab id from last user message for scheduler context
+    const lastUserMessage = Array.isArray(messages) ? [...messages].reverse().find((m) => m?.role === "user") : null;
+    const originMessageId = String(lastUserMessage?.id || "");
+    try {
+      writeSchedulerMcpContext({ fellowId: fellow.key, sessionId, originMessageId });
+    } catch {
+      // Non-fatal; scheduler MCP context missing means tool works without context defaults
+    }
     const userText = expandLeadingSkillCommand(lastUser, { mode: "inline" }) || lastUser;
     const persona = !externalSessionId
       ? readFellowPersona(fellow.key, fellow.name, fellow.bio).trim()
@@ -131,7 +141,16 @@ function createCodexChatAdapter(deps = {}) {
       ? injectGroupContextForSdk(prompt, group.contextBlock)
       : prompt;
     const { Codex } = await codexSdk();
-    const env = processEnvStrings();
+    const baseEnv = processEnvStrings();
+    let codexHomePath = "";
+    try {
+      codexHomePath = ensureCodexHome();
+    } catch {
+      // Non-fatal; fall back to user's default CODEX_HOME
+    }
+    const env = codexHomePath
+      ? { ...baseEnv, CODEX_HOME: codexHomePath }
+      : baseEnv;
     const codex = new Codex({
       codexPathOverride: commandPath,
       env

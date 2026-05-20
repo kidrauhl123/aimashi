@@ -1,4 +1,6 @@
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 
 function firstTextValue(value) {
   if (typeof value === "string") return value;
@@ -55,6 +57,8 @@ function createClaudeCodeChatAdapter(deps = {}) {
   const processEnvStrings = requireDependency(deps, "processEnvStrings");
   const normalizeEffortLevel = requireDependency(deps, "normalizeEffortLevel");
   const chatCompletionResponse = requireDependency(deps, "chatCompletionResponse");
+  const getSchedulerMcpSpec = requireDependency(deps, "getSchedulerMcpSpec");
+  const writeSchedulerMcpContext = requireDependency(deps, "writeSchedulerMcpContext");
   const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
   const cwd = deps.cwd || (() => process.cwd());
 
@@ -63,6 +67,14 @@ function createClaudeCodeChatAdapter(deps = {}) {
     const commandPath = shellCommandPath("claude");
     if (!commandPath) throw new Error("本机没有检测到 Claude Code CLI。请先安装并确认 `claude --version` 可用。");
     const lastUser = lastUserPrompt(messages);
+    // Best-effort: grab id from last user message for scheduler context
+    const lastUserMessage = Array.isArray(messages) ? [...messages].reverse().find((m) => m?.role === "user") : null;
+    const originMessageId = String(lastUserMessage?.id || "");
+    try {
+      writeSchedulerMcpContext({ fellowId: fellow.key, sessionId, originMessageId });
+    } catch (error) {
+      appendEngineLog(`Scheduler MCP context write failed: ${error?.message || error}`);
+    }
     const prompt = expandLeadingSkillCommand(lastUser, { mode: "native" }) || lastUser;
     const promptWithGroup = group && group.contextBlock
       ? injectGroupContextForSdk(prompt, group.contextBlock)
@@ -82,6 +94,9 @@ function createClaudeCodeChatAdapter(deps = {}) {
     const externalSessionId = savedEntry.id && savedEntry.fingerprint === bridgeFingerprint
       ? savedEntry.id
       : "";
+    const schedulerMcpSpec = (() => {
+      try { return getSchedulerMcpSpec(); } catch { return null; }
+    })();
     const options = {
       abortController,
       cwd: cwd(),
@@ -96,7 +111,8 @@ function createClaudeCodeChatAdapter(deps = {}) {
         append: persona
       },
       includePartialMessages: Boolean(emit),
-      ...(bridgePluginPath ? { plugins: [{ type: "local", path: bridgePluginPath }], skills: "all" } : {})
+      ...(bridgePluginPath ? { plugins: [{ type: "local", path: bridgePluginPath }], skills: "all" } : {}),
+      ...(schedulerMcpSpec ? { mcpServers: { "aimashi-scheduler": schedulerMcpSpec } } : {})
     };
     if (externalSessionId) options.resume = externalSessionId;
     if (fellow.engineConfig?.model) options.model = String(fellow.engineConfig.model);

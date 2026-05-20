@@ -47,6 +47,7 @@ function createDeps(overrides = {}) {
       calls.push(["expand", text, options.mode]);
       return overrides.expandedPrompt ?? text;
     },
+    ensureCodexHome: () => overrides.codexHomePath ?? "",
     getAgentSessionId: () => overrides.externalSessionId || "",
     injectGroupContextForSdk: (prompt, contextBlock) => `GROUP:${contextBlock}\n${prompt}`,
     lastUserPrompt: () => "hello",
@@ -54,7 +55,8 @@ function createDeps(overrides = {}) {
     processEnvStrings: () => overrides.env || { PATH: "/bin" },
     readFellowPersona: () => "persona",
     setAgentSessionId: (...args) => calls.push(["set-session", ...args]),
-    shellCommandPath: (command) => command === "codex" ? "/bin/codex" : ""
+    shellCommandPath: (command) => command === "codex" ? "/bin/codex" : "",
+    writeSchedulerMcpContext: () => {}
   };
 }
 

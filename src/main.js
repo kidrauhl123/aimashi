@@ -868,6 +868,143 @@ function processEnvStrings() {
   return Object.fromEntries(Object.entries(processEnvWithCliPath()).filter(([, value]) => typeof value === "string"));
 }
 
+// ---------------------------------------------------------------------------
+// Scheduler MCP helpers
+// ---------------------------------------------------------------------------
+
+let _cachedNodePath = null;
+function resolveNodePath() {
+  if (_cachedNodePath !== null) return _cachedNodePath;
+  try {
+    const result = require("node:child_process").spawnSync("zsh", ["-lc", "command -v node"], {
+      encoding: "utf8", timeout: 1000, env: processEnvWithCliPath()
+    });
+    _cachedNodePath = String(result.stdout || "").trim();
+  } catch {
+    _cachedNodePath = "";
+  }
+  return _cachedNodePath;
+}
+
+function schedulerMcpContextPath() {
+  return path.join(runtimePaths().runtime, "scheduler-mcp", "context.json");
+}
+
+function schedulerMcpServerScriptPath() {
+  return path.join(__dirname, "main", "scheduler-mcp-server.js");
+}
+
+/**
+ * Write per-turn context for the scheduler MCP server.
+ * The MCP server reads this file on every tools/call to inject
+ * fellowId / sessionId / originMessageId into task creation requests.
+ */
+function writeSchedulerMcpContext({ fellowId = "", sessionId = "", originMessageId = "" } = {}) {
+  const contextPath = schedulerMcpContextPath();
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, JSON.stringify({ fellowId, sessionId, originMessageId }, null, 2), "utf8");
+}
+
+/**
+ * Returns the McpStdioServerConfig for the scheduler server, to be passed
+ * directly in the Claude Code SDK query options mcpServers map.
+ * Returns null if the daemon is not yet running (no baseUrl).
+ */
+function getSchedulerMcpSpec() {
+  const baseUrl = controlServerState.baseUrl;
+  if (!baseUrl) return null;
+  const scriptPath = schedulerMcpServerScriptPath();
+  if (!fs.existsSync(scriptPath)) return null;
+  const nodePath = resolveNodePath();
+  if (!nodePath) return null;
+  return {
+    type: "stdio",
+    command: nodePath,
+    args: [scriptPath],
+    env: {
+      AIMASHI_DAEMON_URL: baseUrl,
+      AIMASHI_DAEMON_TOKEN: daemonToken(),
+      AIMASHI_SCHEDULER_CONTEXT_FILE: schedulerMcpContextPath()
+    }
+  };
+}
+
+/**
+ * Ensure aimashi's private CODEX_HOME directory exists with a config.toml
+ * that includes the aimashi-scheduler MCP server config.
+ * Copies auth.json from the user's ~/.codex if present so API keys survive.
+ * Returns the path to the aimashi codex home, or "" on failure.
+ */
+function ensureCodexHome() {
+  const baseUrl = controlServerState.baseUrl;
+  if (!baseUrl) return "";
+  const scriptPath = schedulerMcpServerScriptPath();
+  if (!fs.existsSync(scriptPath)) return "";
+  const nodePath = resolveNodePath();
+  if (!nodePath) return "";
+
+  const aimashiCodexHome = path.join(runtimePaths().runtime, "codex-home");
+  fs.mkdirSync(aimashiCodexHome, { recursive: true });
+
+  // Copy auth.json from user's ~/.codex if present (needed for OpenAI API key)
+  const userCodexHome = path.join(require("node:os").homedir(), ".codex");
+  for (const name of ["auth.json"]) {
+    const src = path.join(userCodexHome, name);
+    const dst = path.join(aimashiCodexHome, name);
+    if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      try { fs.copyFileSync(src, dst); } catch { /* ignore */ }
+    }
+  }
+
+  // Merge user's config.toml (model, auth, etc.) with our MCP server section.
+  // Strategy: read user config, strip any existing aimashi-scheduler block, append ours.
+  const userConfigPath = path.join(userCodexHome, "config.toml");
+  let baseConfig = "";
+  try {
+    baseConfig = fs.readFileSync(userConfigPath, "utf8");
+  } catch { /* no user config */ }
+
+  // Remove existing [mcp_servers.aimashi-scheduler] block if present
+  // Simple line-by-line approach: drop lines between the section header and next [section]
+  const lines = baseConfig.split("\n");
+  const filtered = [];
+  let inOurSection = false;
+  for (const line of lines) {
+    if (line.trim() === "[mcp_servers.aimashi-scheduler]") {
+      inOurSection = true;
+      continue;
+    }
+    if (inOurSection && line.trimStart().startsWith("[")) {
+      inOurSection = false;
+    }
+    if (!inOurSection) filtered.push(line);
+  }
+
+  // Escape backslashes and double-quotes for TOML string values
+  function toTomlStr(s) {
+    return `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+
+  const mcpSection = [
+    "",
+    "[mcp_servers.aimashi-scheduler]",
+    `command = ${toTomlStr(nodePath)}`,
+    `args = [${toTomlStr(scriptPath)}]`,
+    "",
+    "[mcp_servers.aimashi-scheduler.env]",
+    `AIMASHI_DAEMON_URL = ${toTomlStr(baseUrl)}`,
+    `AIMASHI_DAEMON_TOKEN = ${toTomlStr(daemonToken())}`,
+    `AIMASHI_SCHEDULER_CONTEXT_FILE = ${toTomlStr(schedulerMcpContextPath())}`,
+    ""
+  ].join("\n");
+
+  const finalConfig = filtered.join("\n").trimEnd() + mcpSection;
+  const configPath = path.join(aimashiCodexHome, "config.toml");
+  fs.writeFileSync(configPath, finalConfig, "utf8");
+
+  return aimashiCodexHome;
+}
+
 function appearanceSettings() {
   const p = runtimePaths();
   const saved = readJson(p.appearanceSettings, {});
@@ -6201,13 +6338,15 @@ function createActiveClaudeCodeChatAdapter() {
     ensureClaudeBridgePlugin,
     expandLeadingSkillCommand,
     getAgentSessionEntry,
+    getSchedulerMcpSpec,
     injectGroupContextForSdk,
     lastUserPrompt,
     normalizeEffortLevel,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionEntry,
-    shellCommandPath
+    shellCommandPath,
+    writeSchedulerMcpContext
   });
 }
 
@@ -6215,6 +6354,7 @@ function createActiveCodexChatAdapter() {
   return createCodexChatAdapter({
     chatCompletionResponse,
     codexSdk,
+    ensureCodexHome,
     expandLeadingSkillCommand,
     getAgentSessionId,
     injectGroupContextForSdk,
@@ -6223,7 +6363,8 @@ function createActiveCodexChatAdapter() {
     processEnvStrings,
     readFellowPersona,
     setAgentSessionId,
-    shellCommandPath
+    shellCommandPath,
+    writeSchedulerMcpContext
   });
 }
 
