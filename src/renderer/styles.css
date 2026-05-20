@@ -349,6 +349,25 @@ body.window-blurred .traffic-spacer:hover .traffic-light.green {
   font-weight: 800;
 }
 
+.rail-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  padding: 0 4px;
+  background: var(--accent, #0162db);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px var(--bg-base, #fff);
+}
+.rail-badge.hidden { display: none; }
+
 .sidebar,
 .workspace {
   min-width: 0;

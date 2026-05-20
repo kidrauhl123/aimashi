@@ -27,8 +27,9 @@
       <button class="rail-button" type="button" data-view="skills" title="能力库" aria-label="能力库">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14 M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
       </button>
-      <button class="rail-button" type="button" data-view="workbench" title="工作台" aria-label="工作台">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v7H4z M13 3h5a2 2 0 0 1 2 2v3h-7z M4 12h7v9H6a2 2 0 0 1-2-2z M13 10h7v9a2 2 0 0 1-2 2h-5z"/></svg>
+      <button class="rail-button" type="button" data-view="tasks" title="任务" aria-label="任务">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18 M8 3v4 M16 3v4 M8 13h3 M8 17h7"/></svg>
+        <span id="tasksUnreadBadge" class="rail-badge hidden" aria-hidden="true">0</span>
       </button>
       <div class="rail-spacer"></div>
       <button id="openSettings" class="rail-button" type="button" title="设置" aria-label="设置">
@@ -97,6 +98,16 @@
         </label>
       </header>
       <section id="skillNav" class="skills-nav"></section>
+    </aside>
+
+    <aside id="tasksSidebar" class="sidebar tasks-sidebar hidden">
+      <header class="sidebar-tools tasks-sidebar-tools">
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="taskSearch" autocomplete="off" placeholder="搜索任务">
+        </label>
+      </header>
+      <section id="tasksNav" class="tasks-nav"></section>
     </aside>
 
     <div id="sidebarResizeHandle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="调整中栏宽度"></div>
@@ -232,6 +243,22 @@
         <div id="skillChipRow" class="skill-chip-row" aria-label="Skill 分类"></div>
 
         <section id="skillCardGrid" class="skill-card-grid" aria-label="Skill 列表"></section>
+      </section>
+    </section>
+
+    <section id="tasksView" class="workspace tasks-workspace hidden">
+      <header class="topbar">
+        <button class="narrow-back-button" type="button" data-narrow-back title="返回任务" aria-label="返回任务">‹</button>
+        <div class="group-title">
+          <div>
+            <h1><span id="tasksPageTitle">任务</span></h1>
+            <p id="tasksPageMeta">日常任务和定时执行的统一入口</p>
+          </div>
+        </div>
+        <div class="top-actions" id="taskActions"></div>
+      </header>
+      <section class="tasks-layout">
+        <div id="tasksContent" class="tasks-content"></div>
       </section>
     </section>
 
