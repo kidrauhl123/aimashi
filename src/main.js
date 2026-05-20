@@ -34,11 +34,11 @@ const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
 const { createTasksStore } = require("./main/tasks-store.js");
-const { computeNextFire, isFireable, createScheduler } = require("./main/scheduler.js");
+const { createScheduler } = require("./main/scheduler.js");
 const { createFireRunner } = require("./main/scheduler-fire.js");
 const { createTasksEventBus } = require("./main/tasks-events.js");
 const { createTasksRoutes } = require("./main/tasks-routes.js");
-const { createSchedulerMcp, SCHEDULER_MCP_NAME } = require("./main/scheduler-mcp.js");
+const { createSchedulerMcp } = require("./main/scheduler-mcp.js");
 
 app.setName("Aimashi");
 const startupTimer = createStartupTimer({ scope: "startup" });
@@ -4928,13 +4928,12 @@ async function handleControlRequest(req, res) {
       return;
     }
     // Route: tasks subsystem
-    const taskUrl = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
-    if (taskUrl.pathname === "/api/tasks/events" && req.method === "GET") {
+    if (url.pathname === "/api/tasks/events" && req.method === "GET") {
       initSchedulerSubsystem();
       tasksRoutes.handleEventsStream(req, res);
       return;
     }
-    if (taskUrl.pathname.startsWith("/api/tasks") || taskUrl.pathname === "/api/tasks") {
+    if (url.pathname.startsWith("/api/tasks")) {
       initSchedulerSubsystem();
       const body = ["POST", "PATCH"].includes(req.method) ? await readControlBody(req) : null;
       const handled = await tasksRoutes.handle(req, res, body);
@@ -4982,7 +4981,11 @@ function initSchedulerSubsystem() {
     scheduler,
     events: tasksEvents
   });
-  // TODO(scheduler-mcp-bridge): expose schedule.* tools to Claude Code/Codex via stdio MCP server
+  // schedulerMcp is created here so the MCP server object exists alongside the
+  // other subsystem state, but it is not yet started or exposed. Wiring it into
+  // the Claude Code / Codex bridge requires a stdio MCP server contract that
+  // the current `ensureClaudeBridgePlugin` (SKILL.md symlinks) does not cover.
+  // TODO(scheduler-mcp-bridge): expose schedule.* tools via stdio MCP server.
   if (IS_DAEMON_PROCESS) {
     sweepExpiredOneshotTasks(tasksStore);
     scheduler.start();
