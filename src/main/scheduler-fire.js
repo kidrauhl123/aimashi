@@ -12,7 +12,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
         sessionId: task.sessionId,
         text: task.prompt,
         displayText: task.prompt,
-        meta: { taskId: task.id, taskRunId: runId }
+        meta: { taskId: task.id, taskRunId: runId, firedAt }
       });
       // Identify the message id of the assistant reply we just appended.
       // runRemoteChatRequest currently appends to session.messages; the last

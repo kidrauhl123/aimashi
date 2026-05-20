@@ -5038,6 +5038,7 @@ async function startControlServer(options = {}) {
     controlServer.once("error", reject);
     controlServer.listen(port, host, resolve);
   });
+  initSchedulerSubsystem();
   controlServerState.running = true;
   controlServerState.starting = false;
   writeDaemonSettings({ ...settings, host, port });
@@ -6923,6 +6924,13 @@ function subscribeDaemonTaskEvents() {
       headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" }
     });
     req.on("response", (res) => {
+      if (res.statusCode >= 400) {
+        // Treat HTTP errors as connection failures — don't reset backoff
+        reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+        res.resume();  // drain to allow connection close
+        res.on("end", () => setTimeout(connect, reconnectDelay));
+        return;
+      }
       reconnectDelay = 1000;
       let buf = "";
       res.on("data", (chunk) => {
