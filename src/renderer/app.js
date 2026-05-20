@@ -1867,23 +1867,50 @@ function renderAttachmentChips(attachments = []) {
 }
 
 function renderAttachmentThumb(attachment = {}, className = "attachment-thumb") {
-  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "").trim();
+  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || "").trim();
   if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(attachmentGlyph(attachment))}</span>`;
   return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
 }
 
 function renderAttachmentChip(attachment = {}) {
-  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl);
+  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl);
   const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
   const tag = href ? "a" : "span";
   const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
+  if (image) {
+    return `
+      <button class="message-attachment image" type="button" title="${escapeHtml(attachment.path || attachment.name || "")}" aria-label="预览图片">
+        ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
+      </button>
+    `;
+  }
   return `
-    <${tag} class="message-attachment${image ? " image" : ""}"${download} title="${escapeHtml(attachment.path || attachment.name || "")}">
+    <${tag} class="message-attachment"${download} title="${escapeHtml(attachment.path || attachment.name || "")}">
       ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
       <strong>${escapeHtml(attachment.name || "附件")}</strong>
       <em>${escapeHtml(formatBytes(attachment.size))}</em>
     </${tag}>
   `;
+}
+
+function closeImagePreview() {
+  document.querySelector(".image-preview-overlay")?.remove();
+}
+
+function openImagePreview(src, title = "") {
+  const imageSrc = String(src || "").trim();
+  if (!imageSrc.startsWith("data:image/")) return;
+  closeImagePreview();
+  const overlay = document.createElement("div");
+  overlay.className = "image-preview-overlay";
+  overlay.innerHTML = `
+    <button class="image-preview-close" type="button" aria-label="关闭">×</button>
+    <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(title || "图片预览")}">
+  `;
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest(".image-preview-close")) closeImagePreview();
+  });
+  document.body.appendChild(overlay);
 }
 
 function extractLocalFilePaths(text = "") {
@@ -1925,10 +1952,34 @@ function generatedAttachmentsForMessage(message = {}) {
   });
 }
 
+function hydrateAttachmentPreview(attachment = {}) {
+  const filePath = String(attachment.path || "").trim();
+  if (!filePath || attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return attachment;
+  const kind = String(attachment.kind || attachmentKind(attachment));
+  if (kind !== "image") return attachment;
+  const entry = state.generatedFiles.get(filePath);
+  if (entry?.status === "ready" && entry.attachment) {
+    return { ...attachment, ...entry.attachment };
+  }
+  return attachment;
+}
+
+function attachmentPreviewPaths(messages = []) {
+  return messages.flatMap((message) => Array.isArray(message.attachments) ? message.attachments : [])
+    .filter((attachment) => {
+      const filePath = String(attachment.path || "").trim();
+      if (!filePath) return false;
+      if (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return false;
+      return String(attachment.kind || attachmentKind(attachment)) === "image";
+    })
+    .map((attachment) => String(attachment.path).trim());
+}
+
 function queueGeneratedFileFetches(messages = []) {
   const paths = [...new Set(messages
     .filter((message) => message.role === "assistant")
-    .flatMap((message) => extractLocalFilePaths(message.content)))];
+    .flatMap((message) => extractLocalFilePaths(message.content))
+    .concat(attachmentPreviewPaths(messages)))];
   for (const filePath of paths) {
     if (state.generatedFiles.has(filePath)) continue;
     state.generatedFiles.set(filePath, { status: "loading" });
@@ -5074,7 +5125,7 @@ function renderChat() {
     const bodyHtml = String(message.content || "").trim() ? renderMarkdown(message.content) : "";
     const replyHtml = replyQuoteHtml(message.replyTo);
     const translation = translationHtml(message, messageIndex);
-    const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)]);
+    const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)].map(hydrateAttachmentPreview));
     const pinnedHtml = message.pinned ? `<span class="message-pin-badge">${ICON_PARK_PIN_SVG}置顶</span>` : "";
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? escapeHtml(label) : ""}</div>
@@ -5210,7 +5261,8 @@ function appendChat(role, content, options = {}) {
       mime: String(attachment.mime || attachment.type || ""),
       size: Number(attachment.size) || 0,
       kind: String(attachment.kind || attachmentKind(attachment)),
-      thumbnailDataUrl: String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "")
+      thumbnailDataUrl: String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || ""),
+      dataUrl: String(attachment.dataUrl || "")
     }));
   }
   if (Array.isArray(options.tools) && options.tools.length) {
@@ -5723,6 +5775,7 @@ els.skillPreviewDialog?.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  closeImagePreview();
   if (state.skillContextMenu.open) closeSkillContextMenu();
   if (state.fellowContextMenu.open) closeFellowContextMenu();
   if (state.groupContextMenu.open) closeGroupContextMenu();
@@ -7043,6 +7096,13 @@ els.sendChat.addEventListener("click", async (event) => {
   await window.aimashi.stopChat?.();
 });
 els.chat.addEventListener("click", async (event) => {
+  const imageButton = event.target.closest(".message-attachment.image");
+  if (imageButton && els.chat.contains(imageButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    openImagePreview(imageButton.querySelector("img")?.src || "", imageButton.title || "");
+    return;
+  }
   const setupButton = event.target.closest("[data-setup-action]");
   if (setupButton && els.chat.contains(setupButton)) {
     event.preventDefault();
@@ -7155,12 +7215,14 @@ els.chatForm.addEventListener("submit", async (event) => {
       sessionId: session.id,
       messages: history
     });
-    const answer = response.choices?.[0]?.message?.content || "(No response)";
+    const responseMessage = response.choices?.[0]?.message || {};
+    const responseAttachments = Array.isArray(responseMessage.attachments) ? responseMessage.attachments : [];
+    const answer = responseMessage.content || (responseAttachments.length ? "" : "(No response)");
     const traceSnapshot = state.streaming
       ? { reasoning: state.streaming.reasoning || "", tools: state.streaming.tools.slice() }
       : { reasoning: "", tools: [] };
     state.streaming = null;
-    appendChat("assistant", answer, { reasoning: traceSnapshot.reasoning, tools: traceSnapshot.tools });
+    appendChat("assistant", answer, { reasoning: traceSnapshot.reasoning, tools: traceSnapshot.tools, attachments: responseAttachments });
     await persistSessionQuietly(session);
     persistReadStateQuietly();
     if (shouldGenerateTitle) {

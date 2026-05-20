@@ -720,8 +720,16 @@ input {
 }
 
 .message-attachment.image {
-  min-height: 46px;
-  padding: 6px;
+  position: relative;
+  display: block;
+  width: min(100%, 320px);
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  cursor: zoom-in;
 }
 
 .message-attachment span {
@@ -737,6 +745,15 @@ input {
   border-radius: 8px;
   object-fit: cover;
   background: rgba(0, 0, 0, 0.06);
+}
+
+.message-attachment.image .message-attachment-thumb {
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .message-attachment strong {
@@ -758,6 +775,38 @@ input {
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.image-preview-overlay img {
+  display: block;
+  max-width: 96vw;
+  max-height: 92vh;
+  border-radius: 10px;
+  object-fit: contain;
+}
+
+.image-preview-close {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
 }
 
 .attachment-tray {

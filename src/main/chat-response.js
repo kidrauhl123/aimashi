@@ -1,6 +1,11 @@
 const crypto = require("node:crypto");
 
-function chatCompletionResponse({ id, model, content, finishReason = "stop", aimashi = {} }) {
+function chatCompletionResponse({ id, model, content, attachments = [], finishReason = "stop", aimashi = {} }) {
+  const message = {
+    role: "assistant",
+    content: content || ""
+  };
+  if (Array.isArray(attachments) && attachments.length) message.attachments = attachments;
   return {
     id: id || `chatcmpl_${crypto.randomUUID()}`,
     object: "chat.completion",
@@ -9,10 +14,7 @@ function chatCompletionResponse({ id, model, content, finishReason = "stop", aim
     choices: [
       {
         index: 0,
-        message: {
-          role: "assistant",
-          content: content || ""
-        },
+        message,
         finish_reason: finishReason
       }
     ],

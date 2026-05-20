@@ -2930,9 +2930,17 @@ body.topbar-click-capture .topbar {
 }
 
 .message-attachment.image {
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  height: 40px;
-  padding-left: 3px;
+  position: relative;
+  display: block;
+  width: min(360px, 58vw);
+  height: auto;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  cursor: zoom-in;
 }
 
 .message-attachment span {
@@ -2948,6 +2956,15 @@ body.topbar-click-capture .topbar {
   border-radius: 6px;
   object-fit: cover;
   background: var(--field);
+}
+
+.message-attachment.image .message-attachment-thumb {
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .message-attachment strong {
@@ -2969,6 +2986,42 @@ body.topbar-click-capture .topbar {
 
 :root[data-theme="dark"] .bubble {
   background: rgba(255, 255, 255, 0.10);
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.78);
+  cursor: zoom-out;
+}
+
+.image-preview-overlay img {
+  display: block;
+  max-width: min(96vw, 1280px);
+  max-height: 92vh;
+  border-radius: 10px;
+  object-fit: contain;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.42);
+  cursor: default;
+}
+
+.image-preview-close {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .assistant .bubble {

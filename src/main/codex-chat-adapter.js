@@ -1,4 +1,7 @@
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 function mapCodexPermissionMode(value) {
   const id = String(value || "default").trim();
@@ -16,6 +19,72 @@ function stoppedError() {
   const stopped = new Error("生成已停止");
   stopped.code = "AIMASHI_STOPPED";
   return stopped;
+}
+
+function generatedImagesRoot(env = {}) {
+  const codexHome = String(env.CODEX_HOME || "").trim();
+  if (codexHome) return path.join(codexHome, "generated_images");
+  const home = String(env.HOME || "").trim() || os.homedir();
+  return path.join(home, ".codex", "generated_images");
+}
+
+function recentGeneratedImagePaths(sessionId, { env = {}, startedAtMs = 0, max = 8 } = {}) {
+  const id = String(sessionId || "").trim();
+  if (!id) return [];
+  const dir = path.join(generatedImagesRoot(env), id);
+  if (!fs.existsSync(dir)) return [];
+  const since = Number(startedAtMs) - 5000;
+  return fs.readdirSync(dir)
+    .filter((name) => /\.(?:png|jpe?g|webp)$/i.test(name))
+    .map((name) => {
+      const filePath = path.join(dir, name);
+      try {
+        return { filePath, mtimeMs: fs.statSync(filePath).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter((item) => item && item.mtimeMs >= since)
+    .sort((a, b) => a.mtimeMs - b.mtimeMs)
+    .slice(-max)
+    .map((item) => item.filePath);
+}
+
+function contentWithGeneratedImages(content, imagePaths = []) {
+  const text = String(content || "").trim();
+  const paths = imagePaths.filter(Boolean);
+  if (!paths.length) return text;
+  return text;
+}
+
+function mimeForImagePath(filePath) {
+  const ext = path.extname(String(filePath || "")).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  return "image/png";
+}
+
+function generatedImageAttachments(imagePaths = []) {
+  return imagePaths.map((filePath) => {
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || stat.size > 25 * 1024 * 1024) return null;
+      const mime = mimeForImagePath(filePath);
+      const dataUrl = `data:${mime};base64,${fs.readFileSync(filePath).toString("base64")}`;
+      return {
+        id: `generated:${crypto.createHash("sha1").update(filePath).digest("hex").slice(0, 16)}`,
+        name: path.basename(filePath),
+        path: filePath,
+        mime,
+        size: stat.size,
+        kind: "image",
+        thumbnailDataUrl: dataUrl,
+        dataUrl
+      };
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
 }
 
 function requireDependency(deps, key) {
@@ -62,9 +131,10 @@ function createCodexChatAdapter(deps = {}) {
       ? injectGroupContextForSdk(prompt, group.contextBlock)
       : prompt;
     const { Codex } = await codexSdk();
+    const env = processEnvStrings();
     const codex = new Codex({
       codexPathOverride: commandPath,
-      env: processEnvStrings()
+      env
     });
     const permission = mapCodexPermissionMode(fellow.engineConfig?.permissionMode || fellow.agentPermissionMode || "default");
     const threadOptions = {
@@ -77,8 +147,10 @@ function createCodexChatAdapter(deps = {}) {
     const thread = externalSessionId
       ? codex.resumeThread(externalSessionId, threadOptions)
       : codex.startThread(threadOptions);
+    const startedAtMs = Date.now();
     const turn = await thread.run(promptWithGroup, { signal });
     const capturedSessionId = externalSessionId || thread.id || "";
+    const imagePaths = recentGeneratedImagePaths(capturedSessionId, { env, startedAtMs });
     if (capturedSessionId && !externalSessionId && !utility) {
       setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
     }
@@ -86,7 +158,8 @@ function createCodexChatAdapter(deps = {}) {
     return chatCompletionResponse({
       id: capturedSessionId || `codex_${randomUUID()}`,
       model: "codex-cli",
-      content: String(turn?.finalResponse || "").trim(),
+      content: contentWithGeneratedImages(turn?.finalResponse, imagePaths),
+      attachments: generatedImageAttachments(imagePaths),
       aimashi: {
         transport: "codex-sdk",
         engine,

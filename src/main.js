@@ -1392,6 +1392,7 @@ function normalizeAttachment(input = {}) {
   const size = Number(input.size) || (filePath && fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
   const kind = String(input.kind || "").trim() || attachmentKind({ mime, name });
   const thumbnailDataUrl = normalizeAttachmentThumbnail(input.thumbnailDataUrl || input.thumbnail || input.previewDataUrl);
+  const dataUrl = normalizeAttachmentDataUrl(input.dataUrl);
   const next = {
     id: String(input.id || crypto.randomUUID()),
     name,
@@ -1401,7 +1402,15 @@ function normalizeAttachment(input = {}) {
     kind
   };
   if (thumbnailDataUrl && kind === "image") next.thumbnailDataUrl = thumbnailDataUrl;
+  if (dataUrl && kind === "image") next.dataUrl = dataUrl;
   return next;
+}
+
+function normalizeAttachmentDataUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 35 * 1024 * 1024) return "";
+  if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i.test(raw)) return "";
+  return raw.replace(/\s+/g, "");
 }
 
 function normalizeAttachmentThumbnail(value) {
@@ -4686,7 +4695,9 @@ async function runRemoteChatRequest(body, eventSink = null) {
     messages: runMessages,
     webContents: tracedEventSink
   });
+  const responseMessage = response?.choices?.[0]?.message || {};
   const assistantText = responseMessageContent(response);
+  const assistantAttachments = normalizeAttachments(responseMessage.attachments);
   const savedUser = {
     role: "user",
     content: String(body?.displayText || "").trim() || userMessage.content || "请查看附件。",
@@ -4698,6 +4709,7 @@ async function runRemoteChatRequest(body, eventSink = null) {
     content: assistantText,
     createdAt: new Date().toISOString()
   };
+  if (assistantAttachments.length) savedAssistant.attachments = assistantAttachments;
   const reasoning = String(trace.reasoning || "").trim();
   if (reasoning) savedAssistant.reasoning = reasoning;
   if (trace.tools.length) {

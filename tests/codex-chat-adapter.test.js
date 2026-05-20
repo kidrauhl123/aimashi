@@ -1,5 +1,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const {
   createCodexChatAdapter,
   mapCodexPermissionMode
@@ -18,7 +21,8 @@ function createDeps(overrides = {}) {
         id: overrides.startedThreadId || "thread_1",
         run: async (prompt, runOptions) => {
           calls.push(["run", prompt, runOptions]);
-          return { finalResponse: overrides.finalResponse || "codex out" };
+          if (overrides.onRun) await overrides.onRun(prompt, runOptions);
+          return { finalResponse: Object.hasOwn(overrides, "finalResponse") ? overrides.finalResponse : "codex out" };
         }
       };
     }
@@ -28,7 +32,8 @@ function createDeps(overrides = {}) {
         id,
         run: async (prompt, runOptions) => {
           calls.push(["run", prompt, runOptions]);
-          return { finalResponse: overrides.finalResponse || "resumed out" };
+          if (overrides.onRun) await overrides.onRun(prompt, runOptions);
+          return { finalResponse: Object.hasOwn(overrides, "finalResponse") ? overrides.finalResponse : "resumed out" };
         }
       };
     }
@@ -46,7 +51,7 @@ function createDeps(overrides = {}) {
     injectGroupContextForSdk: (prompt, contextBlock) => `GROUP:${contextBlock}\n${prompt}`,
     lastUserPrompt: () => "hello",
     normalizeEffortLevel: (level, engine) => `${engine}:${level}`,
-    processEnvStrings: () => ({ PATH: "/bin" }),
+    processEnvStrings: () => overrides.env || { PATH: "/bin" },
     readFellowPersona: () => "persona",
     setAgentSessionId: (...args) => calls.push(["set-session", ...args]),
     shellCommandPath: (command) => command === "codex" ? "/bin/codex" : ""
@@ -113,6 +118,34 @@ test("sendChat resumes existing thread without persona injection", async () => {
   assert.equal(deps.calls[3][1], "expanded");
   assert.equal(deps.calls.some((call) => call[0] === "set-session"), false);
   assert.equal(response.id, "thread_old");
+});
+
+test("sendChat surfaces generated image paths when Codex returns empty text", async () => {
+  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "aimashi-codex-images-"));
+  const imageDir = path.join(codexHome, "generated_images", "thread_1");
+  const imagePath = path.join(imageDir, "ig_generated.png");
+  const deps = createDeps({
+    finalResponse: "",
+    env: { PATH: "/bin", CODEX_HOME: codexHome },
+    onRun: async () => {
+      fs.mkdirSync(imageDir, { recursive: true });
+      fs.writeFileSync(imagePath, "png");
+    }
+  });
+  const adapter = createCodexChatAdapter(deps);
+  const response = await adapter.sendChat({
+    fellow: { key: "alice", name: "Alice", bio: "" },
+    sessionId: "s1",
+    messages: [{ role: "user", content: "生成个黑狗图片" }],
+    signal: null,
+    utility: false
+  });
+
+  assert.equal(response.choices[0].message.content, "");
+  assert.equal(response.choices[0].message.attachments.length, 1);
+  assert.equal(response.choices[0].message.attachments[0].name, "ig_generated.png");
+  assert.equal(response.choices[0].message.attachments[0].kind, "image");
+  assert.match(response.choices[0].message.attachments[0].thumbnailDataUrl, /^data:image\/png;base64,/);
 });
 
 test("sendStateless starts a fresh default thread", async () => {

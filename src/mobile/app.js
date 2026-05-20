@@ -1042,23 +1042,50 @@ function renderAttachmentChips(attachments = []) {
 }
 
 function attachmentThumb(attachment = {}, className = "attachment-thumb") {
-  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || "").trim();
+  const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || "").trim();
   if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(attachmentGlyph(attachment))}</span>`;
   return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
 }
 
 function renderAttachmentChip(attachment = {}) {
-  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl);
+  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl);
   const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
   const tag = href ? "a" : "span";
   const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
+  if (image) {
+    return `
+      <button class="message-attachment image" type="button" title="${escapeHtml(attachment.name || "")}" aria-label="预览图片">
+        ${attachmentThumb(attachment, "message-attachment-thumb")}
+      </button>
+    `;
+  }
   return `
-    <${tag} class="message-attachment${image ? " image" : ""}"${download} title="${escapeHtml(attachment.name || "")}">
+    <${tag} class="message-attachment"${download} title="${escapeHtml(attachment.name || "")}">
       ${attachmentThumb(attachment, "message-attachment-thumb")}
       <strong>${escapeHtml(attachment.name || "附件")}</strong>
       <em>${escapeHtml(formatBytes(attachment.size))}</em>
     </${tag}>
   `;
+}
+
+function closeImagePreview() {
+  document.querySelector(".image-preview-overlay")?.remove();
+}
+
+function openImagePreview(src, title = "") {
+  const imageSrc = String(src || "").trim();
+  if (!imageSrc.startsWith("data:image/")) return;
+  closeImagePreview();
+  const overlay = document.createElement("div");
+  overlay.className = "image-preview-overlay";
+  overlay.innerHTML = `
+    <button class="image-preview-close" type="button" aria-label="关闭">×</button>
+    <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(title || "图片预览")}">
+  `;
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest(".image-preview-close")) closeImagePreview();
+  });
+  document.body.appendChild(overlay);
 }
 
 function extractLocalFilePaths(text = "") {
@@ -1091,10 +1118,34 @@ function generatedAttachmentsForMessage(message = {}) {
   });
 }
 
+function hydrateAttachmentPreview(attachment = {}) {
+  const filePath = String(attachment.path || "").trim();
+  if (!filePath || attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return attachment;
+  const kind = String(attachment.kind || attachmentKind(attachment));
+  if (kind !== "image") return attachment;
+  const entry = state.generatedFiles.get(filePath);
+  if (entry?.status === "ready" && entry.attachment) {
+    return { ...attachment, ...entry.attachment };
+  }
+  return attachment;
+}
+
+function attachmentPreviewPaths(messages = []) {
+  return messages.flatMap((message) => Array.isArray(message.attachments) ? message.attachments : [])
+    .filter((attachment) => {
+      const filePath = String(attachment.path || "").trim();
+      if (!filePath) return false;
+      if (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return false;
+      return String(attachment.kind || attachmentKind(attachment)) === "image";
+    })
+    .map((attachment) => String(attachment.path).trim());
+}
+
 function queueGeneratedFileFetches(messages = []) {
   const paths = [...new Set(messages
     .filter((message) => message.role === "assistant")
-    .flatMap((message) => extractLocalFilePaths(message.content)))];
+    .flatMap((message) => extractLocalFilePaths(message.content))
+    .concat(attachmentPreviewPaths(messages)))];
   for (const filePath of paths) {
     if (state.generatedFiles.has(filePath)) continue;
     state.generatedFiles.set(filePath, { status: "loading" });
@@ -1280,7 +1331,7 @@ function renderChat() {
   const messages = messagesForActiveSession();
   queueGeneratedFileFetches(messages);
   els.messageList.innerHTML = messages.length ? messages.map((message) => {
-    const attachments = [...(message.attachments || []), ...generatedAttachmentsForMessage(message)];
+    const attachments = [...(message.attachments || []), ...generatedAttachmentsForMessage(message)].map(hydrateAttachmentPreview);
     const attachmentHtml = renderAttachmentChips(attachments);
     const content = String(message.content || "").trim();
     const traceHtml = message.role === "assistant"
@@ -1931,6 +1982,13 @@ els.slashCommandMenu?.addEventListener("pointerdown", (event) => {
   if (command) sendSlashCommand(command);
 });
 els.messageList?.addEventListener("click", async (event) => {
+  const imageButton = event.target.closest(".message-attachment.image");
+  if (imageButton && els.messageList.contains(imageButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    openImagePreview(imageButton.querySelector("img")?.src || "", imageButton.title || "");
+    return;
+  }
   const copyButton = event.target.closest("[data-copy-code]");
   if (copyButton) {
     const code = copyButton.closest(".message-code-block")?.querySelector("code");
@@ -2030,6 +2088,10 @@ els.chatInput.addEventListener("keydown", (event) => {
     event.preventDefault();
     sendMessage();
   }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeImagePreview();
 });
 
 document.querySelectorAll("[data-tab]").forEach((button) => {
