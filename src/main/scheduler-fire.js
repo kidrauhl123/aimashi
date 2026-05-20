@@ -19,7 +19,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       // assistant message is ours.
       const messages = result?.session?.messages || [];
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-      const outputMessageId = lastAssistant?.id || result?.response?.id || null;
+      const outputMessageId = result?.assistantMessageId || lastAssistant?.id || null;
       const run = store.recordRun(task.id, {
         id: runId,
         firedAt,

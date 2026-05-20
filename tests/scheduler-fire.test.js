@@ -32,7 +32,8 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
             { role: "assistant", content: "done", createdAt: "2026-05-20T09:00:01Z", meta: { taskId: t.id, taskRunId: "r-fixed" } }
           ]
         },
-        response: { id: "msg-final" }
+        response: { id: "msg-final" },
+        assistantMessageId: "msg-mock"
       };
     },
     emit: () => {}
@@ -45,6 +46,7 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
   const after = store.get(t.id);
   assert.equal(after.runs.length, 1);
   assert.equal(after.runs[0].status, "ok");
+  assert.equal(after.runs[0].outputMessageId, "msg-mock");
 });
 
 test("createFireRunner.fire: error path records run with status=failed", async () => {

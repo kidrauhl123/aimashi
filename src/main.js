@@ -4698,18 +4698,24 @@ async function runRemoteChatRequest(body, eventSink = null) {
   const responseMessage = response?.choices?.[0]?.message || {};
   const assistantText = responseMessageContent(response);
   const assistantAttachments = normalizeAttachments(responseMessage.attachments);
+  const userMessageId = "msg-" + crypto.randomBytes(6).toString("hex");
+  const assistantMessageId = "msg-" + crypto.randomBytes(6).toString("hex");
   const savedUser = {
+    id: userMessageId,
     role: "user",
     content: String(body?.displayText || "").trim() || userMessage.content || "请查看附件。",
     createdAt: userMessage.createdAt || now
   };
   if (userMessage.attachments.length) savedUser.attachments = userMessage.attachments;
+  if (body?.meta) savedUser.meta = { ...body.meta, fired: true };
   const savedAssistant = {
+    id: assistantMessageId,
     role: "assistant",
     content: assistantText,
     createdAt: new Date().toISOString()
   };
   if (assistantAttachments.length) savedAssistant.attachments = assistantAttachments;
+  if (body?.meta) savedAssistant.meta = body.meta;
   const reasoning = String(trace.reasoning || "").trim();
   if (reasoning) savedAssistant.reasoning = reasoning;
   if (trace.tools.length) {
@@ -4732,7 +4738,7 @@ async function runRemoteChatRequest(body, eventSink = null) {
     session.title = fallbackSessionTitle(session.messages);
   }
   saveChatStore(store);
-  return { fellow, session, response };
+  return { fellow, session, response, userMessageId, assistantMessageId };
 }
 
 async function handleControlRequest(req, res) {
