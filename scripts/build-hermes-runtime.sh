@@ -163,6 +163,34 @@ find "$OUT_DIR/site-packages" -type d -name "__pycache__" -prune -exec rm -rf {}
 find "$OUT_DIR/site-packages" -type d \( -name "tests" -o -name "test" -o -name "__tests__" \) -prune -exec rm -rf {} + 2>/dev/null || true
 find "$OUT_DIR/site-packages" -name "*.dist-info" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
+# Strip native binaries (debug symbols). Hermes runtime is sealed — we never
+# need backtraces with symbol names in production builds.
+# On macOS arm64, `strip` invalidates the ad-hoc signature pip wheels ship
+# with, which causes dlopen to fail under stricter signature enforcement
+# (notarized contexts, future macOS versions). Re-sign ad-hoc after stripping.
+if [[ "$TARGET_ID" == mac-* ]]; then
+  while IFS= read -r -d '' bin; do
+    strip -x "$bin" 2>/dev/null || true
+    codesign --force --sign - --timestamp=none "$bin" >/dev/null 2>&1 || true
+  done < <(find "$OUT_DIR/site-packages" \( -name "*.so" -o -name "*.dylib" \) -type f -print0)
+elif [[ "$TARGET_ID" == linux-* ]]; then
+  find "$OUT_DIR/site-packages" \( -name "*.so" -o -name "*.so.*" \) -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
+fi
+
+# Drop Python stdlib modules the sealed runtime never uses (GUI/REPL/2to3/pip).
+PY_STDLIB=""
+case "$TARGET_ID" in
+  mac-*|linux-*) PY_STDLIB="$OUT_DIR/python/lib/python${PYTHON_VERSION%.*}";;
+  win-*)         PY_STDLIB="$OUT_DIR/python/Lib";;
+esac
+if [[ -n "$PY_STDLIB" && -d "$PY_STDLIB" ]]; then
+  for unused in tkinter idlelib turtledemo ensurepip lib2to3 pydoc_data; do
+    rm -rf "$PY_STDLIB/$unused" 2>/dev/null || true
+  done
+  # tk shared libs follow tkinter
+  find "$PY_STDLIB/../.." -maxdepth 3 \( -name "_tkinter*.so" -o -name "libtcl*.dylib" -o -name "libtk*.dylib" \) -delete 2>/dev/null || true
+fi
+
 cat > "$OUT_DIR/runtime-build-info.json" <<JSON
 {
   "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
