@@ -6376,3 +6376,37 @@ pre {
 .task-history-row:hover { background: var(--color-hover, rgba(0,0,0,0.04)); }
 .task-history-row em { color: var(--accent, #0162db); font-style: normal; text-align: right; }
 .task-history-empty { padding: 12px; color: var(--color-text-secondary, #888); font-size: 12px; }
+.run-detail { padding: 20px; max-width: 900px; }
+.run-detail-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  margin-bottom: 16px;
+}
+.run-detail-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.run-detail-head .link { background: none; border: none; color: var(--accent, #0162db); padding: 0; cursor: pointer; font-size: 13px; }
+.run-detail-actions { display: flex; gap: 8px; }
+.run-detail-prompt { margin-bottom: 16px; }
+.run-detail-prompt summary { cursor: pointer; font-size: 12px; color: var(--color-text-secondary, #888); }
+.run-detail-prompt pre { padding: 8px 12px; background: var(--color-bg-subtle, #f8fafc); border-radius: 4px; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; }
+.run-detail-output h3 {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  color: var(--color-text-secondary, #888); letter-spacing: 0.05em;
+  margin: 0 0 8px;
+}
+.run-output-shell {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--color-bg-subtle, #fafafa);
+}
+.run-output-shell .message { margin: 0; }
+.run-detail-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--color-text-secondary, #888);
+  font-size: 13px;
+}

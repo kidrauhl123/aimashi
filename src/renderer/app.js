@@ -4000,8 +4000,85 @@ function renderTasksEmpty() {
 }
 
 function renderRunDetail(task) {
-  // Task 16 implements this. Placeholder for now.
-  els.tasksContent.innerHTML = `<div class="tasks-empty-placeholder">运行历史详情（待 Task 16 实现）</div>`;
+  const run = (task.runs || []).find((r) => r.id === state.selectedRunId);
+  if (!run) {
+    state.selectedRunId = "";
+    renderTaskDetail(task);
+    return;
+  }
+  const message = lookupMessage(task.sessionId, run.outputMessageId);
+  const user = state.runtime?.user || { displayName: "Boss", avatarText: "B", avatarColor: "#111827" };
+  const persona = (state.runtime?.fellows || state.runtime?.personas || []).find((f) => f.key === task.fellowId) || null;
+  const messageHtml = message
+    ? renderMessageHtml(message, {
+        messageIndex: 0,
+        user,
+        persona,
+        showTaskAffordance: false
+      })
+    : `<div class="run-detail-empty">本次输出消息已不在会话历史里${run.error ? `（失败：${escapeHtml(run.error)}）` : "（可能被清理过）"}</div>`;
+  const statusLabel = run.status === "ok" ? "完成" : run.status === "failed" ? "失败" : "跳过";
+  els.tasksContent.innerHTML = `
+    <article class="run-detail">
+      <header class="run-detail-head">
+        <button class="link" type="button" data-action="back-to-task">← 返回任务</button>
+        <h2>${escapeHtml(task.title)} · ${escapeHtml(formatRunTime(run.firedAt))} ${escapeHtml(statusLabel)}</h2>
+        <div class="run-detail-actions">
+          <button class="link" type="button" data-action="open-conversation">打开对话 →</button>
+          <button class="secondary" type="button" data-action="run-now">运行一次</button>
+        </div>
+      </header>
+      <details class="run-detail-prompt">
+        <summary>原始指令</summary>
+        <pre>${escapeHtml(task.prompt)}</pre>
+      </details>
+      <section class="run-detail-output">
+        <h3>AI 输出</h3>
+        <div class="run-output-shell">
+          ${messageHtml}
+        </div>
+      </section>
+    </article>
+  `;
+  els.tasksContent.querySelector("[data-action='back-to-task']")?.addEventListener("click", () => {
+    state.selectedRunId = "";
+    renderTaskSidebar();
+    renderTaskView();
+  });
+  els.tasksContent.querySelector("[data-action='open-conversation']")?.addEventListener("click", () => {
+    jumpToTaskSession(task);
+  });
+  els.tasksContent.querySelector("[data-action='run-now']")?.addEventListener("click", async () => {
+    try { await window.aimashi.tasks.runNow(task.id); } catch (e) { console.warn("run-now failed", e); }
+    await loadTasksFromDaemon();
+    renderTaskView();
+  });
+}
+
+function lookupMessage(sessionId, messageId) {
+  if (!messageId) return null;
+  const buckets = state.chatStore?.sessions || {};
+  for (const key of Object.keys(buckets)) {
+    const bucket = buckets[key];
+    const arr = Array.isArray(bucket) ? bucket : (bucket?.sessions || []);
+    for (const s of arr) {
+      if (s.id !== sessionId) continue;
+      return (s.messages || []).find((m) => m.id === messageId) || null;
+    }
+  }
+  return null;
+}
+
+function jumpToTaskSession(task) {
+  const fellowKey = findFellowForSession(task.sessionId) || task.fellowId;
+  state.activeKey = fellowKey;
+  state.activeContactKey = fellowKey;
+  if (state.activeSessionIdByPersona) {
+    state.activeSessionIdByPersona[fellowKey] = task.sessionId;
+  }
+  state.activeView = "chat";
+  if (typeof render === "function") render();
+  else { renderView(); if (typeof renderChat === "function") renderChat(); }
 }
 
 function renderTaskDetail(task) {
@@ -4151,15 +4228,7 @@ function attachTaskDetailHandlers(task) {
   });
   els.tasksContent.querySelectorAll("[data-jump-session]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const sessionId = btn.dataset.jumpSession;
-      const fellowKey = findFellowForSession(sessionId);
-      if (fellowKey) {
-        state.activeKey = fellowKey;
-        state.activeContactKey = fellowKey;
-        state.activeSessionIdByPersona[fellowKey] = sessionId;
-      }
-      state.activeView = "chat";
-      render();
+      jumpToTaskSession(task);
     });
   });
 }
