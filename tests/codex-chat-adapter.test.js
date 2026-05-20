@@ -61,17 +61,23 @@ function createDeps(overrides = {}) {
 }
 
 test("mapCodexPermissionMode maps known permission modes", () => {
+  // approvalPolicy is forced to "never" everywhere because aimashi has no
+  // approval UI inside chat; sandbox mode still varies per user preference.
   assert.deepEqual(mapCodexPermissionMode("acceptEdits"), {
     sandboxMode: "workspace-write",
-    approvalPolicy: "on-request"
+    approvalPolicy: "never"
   });
   assert.deepEqual(mapCodexPermissionMode("bypassPermissions"), {
     sandboxMode: "danger-full-access",
     approvalPolicy: "never"
   });
+  assert.deepEqual(mapCodexPermissionMode("readOnly"), {
+    sandboxMode: "read-only",
+    approvalPolicy: "never"
+  });
   assert.deepEqual(mapCodexPermissionMode("other"), {
     sandboxMode: "workspace-write",
-    approvalPolicy: "untrusted"
+    approvalPolicy: "never"
   });
 });
 
@@ -97,6 +103,7 @@ test("sendChat starts new thread with persona on first turn", async () => {
   assert.match(deps.calls[3][1], /^GROUP:ctx\n以下是 Aimashi 给当前 Fellow 的人设/);
   assert.match(deps.calls[3][1], /persona/);
   assert.match(deps.calls[3][1], /expanded/);
+  assert.deepEqual(deps.calls[3][2], {});
   assert.deepEqual(deps.calls.find((call) => call[0] === "set-session"), [
     "set-session", "codex", "alice", "s1", "thread_1"
   ]);
@@ -162,5 +169,21 @@ test("sendStateless starts a fresh default thread", async () => {
   assert.equal(deps.calls[1][0], "startThread");
   assert.equal(deps.calls[1][1].modelReasoningEffort, "codex:medium");
   assert.equal(deps.calls[2][1], "sys\n\nuser");
+  assert.deepEqual(deps.calls[2][2], {});
   assert.deepEqual(response, { content: "stateless out" });
+});
+
+test("sendChat passes through real abort signals", async () => {
+  const deps = createDeps();
+  const adapter = createCodexChatAdapter(deps);
+  const controller = new AbortController();
+  await adapter.sendChat({
+    fellow: { key: "alice", name: "Alice", bio: "" },
+    sessionId: "s1",
+    messages: [{ role: "user", content: "hello" }],
+    signal: controller.signal,
+    utility: false
+  });
+
+  assert.equal(deps.calls[3][2].signal, controller.signal);
 });
