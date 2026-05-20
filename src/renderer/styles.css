@@ -6410,3 +6410,24 @@ pre {
   color: var(--color-text-secondary, #888);
   font-size: 13px;
 }
+.task-fire-affordance {
+  font-size: 11px;
+  color: var(--color-text-secondary, #888);
+  border-top: 1px dashed var(--color-border, #e5e7eb);
+  border-bottom: 1px dashed var(--color-border, #e5e7eb);
+  padding: 4px 8px;
+  margin: 4px 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.task-fire-affordance .task-fire-icon { margin-right: 2px; }
+.task-fire-affordance .link {
+  background: none;
+  border: none;
+  color: var(--accent, #0162db);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
+.task-fire-affordance .link:hover { text-decoration: underline; }

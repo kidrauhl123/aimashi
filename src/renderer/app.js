@@ -5398,11 +5398,22 @@ function renderMessageHtml(message, ctx) {
   //   messageIndex: number,
   //   user: { displayName, avatarText, avatarImage, avatarCrop, avatarColor },
   //   persona: { name, key, color, avatarImage, avatarCrop } | null,
-  //   showTaskAffordance: boolean,  // currently unused, Task 17 wires up
-  //   tasks?: Task[],               // optional, Task 17 hooks
+  //   showTaskAffordance: boolean,
   // }
   // Returns: string of <article>...</article> HTML
   const { messageIndex, user, persona } = ctx;
+  const taskMeta = (ctx.showTaskAffordance && message?.meta?.taskId)
+    ? (state.tasks || []).find((t) => t.id === message.meta.taskId)
+    : null;
+  const firedAt = message?.meta?.firedAt || message?.createdAt || Date.now();
+  const taskAffordanceHtml = taskMeta
+    ? `<div class="task-fire-affordance">
+         <span class="task-fire-icon">📅</span>
+         来自定时任务「${escapeHtml(taskMeta.title)}」 ·
+         ${escapeHtml(formatRunTime(typeof firedAt === "string" ? new Date(firedAt).getTime() : firedAt))} ·
+         <button class="link" type="button" data-jump-task="${escapeHtml(taskMeta.id)}">打开任务</button>
+       </div>`
+    : "";
   const label = message.role === "user" ? (user.avatarText || initials(user.displayName)) : initials(persona?.name || "A");
   const color = message.role === "user" ? user.avatarColor : (persona?.color || "#23444d");
   const fellowAvatarImage = persona?.avatarImage || avatarAssetForKey(persona?.key);
@@ -5433,7 +5444,7 @@ function renderMessageHtml(message, ctx) {
   const roleClass = message.role === "user" ? "user" : "assistant";
   return `<article class="message ${roleClass}">
       <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? escapeHtml(label) : ""}</div>
-      <div class="message-stack">${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
+      <div class="message-stack">${taskAffordanceHtml}${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
     </article>`;
 }
 
@@ -5463,7 +5474,7 @@ function renderChat() {
       messageIndex,
       user,
       persona: active,
-      showTaskAffordance: false  // Task 17 will set this true
+      showTaskAffordance: true
     });
     els.chat.insertAdjacentHTML("beforeend", html);
   }
@@ -7437,6 +7448,17 @@ els.sendChat.addEventListener("click", async (event) => {
   await window.aimashi.stopChat?.();
 });
 els.chat.addEventListener("click", async (event) => {
+  const jumpBtn = event.target.closest?.("[data-jump-task]");
+  if (jumpBtn && els.chat.contains(jumpBtn)) {
+    const taskId = jumpBtn.dataset.jumpTask;
+    state.selectedTaskId = taskId;
+    state.selectedRunId = "";
+    state.activeView = "tasks";
+    state.tasksUnread?.delete(taskId);
+    updateTasksRailBadge();
+    render();
+    return;
+  }
   const imageButton = event.target.closest(".message-attachment.image");
   if (imageButton && els.chat.contains(imageButton)) {
     event.preventDefault();
