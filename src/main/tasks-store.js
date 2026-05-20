@@ -33,11 +33,28 @@ function validateInput(input) {
   if (input.trigger.type === "event") {
     throw new Error("event-triggered tasks are not supported in v1");
   }
-  if (input.trigger.type === "cron" && !input.trigger.cron) {
-    throw new Error("trigger.cron is required for type=cron");
+  if (input.trigger.type === "cron") {
+    if (!input.trigger.cron) throw new Error("trigger.cron is required for type=cron");
+    try {
+      require("cron-parser").parseExpression(input.trigger.cron);
+    } catch {
+      throw new Error("trigger.cron is not a valid cron expression");
+    }
   }
-  if (input.trigger.type === "oneshot" && !input.trigger.at) {
-    throw new Error("trigger.at is required for type=oneshot");
+  if (input.trigger.type === "oneshot") {
+    if (!input.trigger.at) throw new Error("trigger.at is required for type=oneshot");
+    if (Number.isNaN(new Date(input.trigger.at).getTime())) {
+      throw new Error("trigger.at is not a valid ISO-8601 timestamp");
+    }
+  }
+  // Timezone (optional, defaults to UTC)
+  if (input.timezone) {
+    try {
+      // Intl.DateTimeFormat throws on invalid IANA tz names
+      new Intl.DateTimeFormat("en-US", { timeZone: input.timezone });
+    } catch {
+      throw new Error(`invalid timezone: ${input.timezone}`);
+    }
   }
 }
 

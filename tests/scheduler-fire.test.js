@@ -87,3 +87,30 @@ test("createFireRunner.fire: emits lifecycle events", async () => {
   assert.ok(types.includes("started"));
   assert.ok(types.includes("finished"));
 });
+
+test("createFireRunner.fire: tolerates task deletion during run", async () => {
+  const store = tmpStore();
+  const t = store.create({
+    title: "x", fellowId: "f", sessionId: "s", originMessageId: "m",
+    trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
+  });
+  const events = [];
+  const runner = createFireRunner({
+    store,
+    runRemoteChatRequest: async () => {
+      // Simulate task being deleted during the chat call
+      store.delete(t.id);
+      return {
+        fellow: { key: "f" },
+        session: { id: "s", messages: [{ role: "assistant", content: "x", id: "msg-1" }] },
+        response: { id: "msg-1" },
+        assistantMessageId: "msg-1"
+      };
+    },
+    emit: (type, payload) => events.push({ type, payload })
+  });
+  // Should not throw
+  await runner.fire({ ...t });
+  assert.ok(events.some((e) => e.type === "started"));
+  assert.ok(events.some((e) => e.type === "finished"));
+});

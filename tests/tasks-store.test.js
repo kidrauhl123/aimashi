@@ -97,6 +97,30 @@ test("createTasksStore: pause/resume toggles status", () => {
   assert.equal(store.resume(t.id).status, "active");
 });
 
+test("createTasksStore: rejects invalid cron expression", () => {
+  const store = createTasksStore(tmpFile());
+  assert.throws(() => store.create({
+    title: "t", fellowId: "f", sessionId: "s", originMessageId: "m",
+    trigger: { type: "cron", cron: "not a cron" }, timezone: "UTC", prompt: "p"
+  }), /not a valid cron expression/);
+});
+
+test("createTasksStore: rejects invalid timezone", () => {
+  const store = createTasksStore(tmpFile());
+  assert.throws(() => store.create({
+    title: "t", fellowId: "f", sessionId: "s", originMessageId: "m",
+    trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "Not/A_Zone", prompt: "p"
+  }), /invalid timezone/);
+});
+
+test("createTasksStore: rejects invalid oneshot at", () => {
+  const store = createTasksStore(tmpFile());
+  assert.throws(() => store.create({
+    title: "t", fellowId: "f", sessionId: "s", originMessageId: "m",
+    trigger: { type: "oneshot", at: "tomorrow" }, timezone: "UTC", prompt: "p"
+  }), /not a valid ISO-8601 timestamp/);
+});
+
 test("orphanByFellow: pauses active tasks of that fellow", () => {
   const store = createTasksStore(tmpFile());
   const t1 = store.create({

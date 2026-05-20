@@ -69,12 +69,14 @@ function createScheduler({ store, onFire, logger = console }) {
       logger.error?.("[scheduler] onFire failed", e);
     } finally {
       inflight.delete(taskId);
-      // For oneshot tasks, mark as done after first successful fire
+      // For oneshot tasks, mark as done/failed after the fire completes
       const after = store.get(taskId);
       if (after && after.trigger.type === "oneshot") {
         const lastRun = after.runs[after.runs.length - 1];
         if (lastRun && lastRun.status === "ok") {
           store.update(taskId, { status: "done" });
+        } else if (lastRun && lastRun.status === "failed") {
+          store.update(taskId, { status: "failed" });
         }
       }
       schedule();

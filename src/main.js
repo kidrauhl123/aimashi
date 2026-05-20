@@ -4735,17 +4735,22 @@ async function runRemoteChatRequest(body, eventSink = null) {
       error: Boolean(tool.error)
     }));
   }
-  session.messages = [
-    ...history,
+  // Reload to incorporate any concurrent writes that happened during the await,
+  // then APPEND rather than overwrite to avoid losing messages.
+  const freshStore = loadChatStore();
+  if (!freshStore.sessions[fellow.key]) freshStore.sessions[fellow.key] = [];
+  const freshSession = freshStore.sessions[fellow.key].find((s) => s.id === session.id) || session;
+  freshSession.messages = [
+    ...(freshSession.messages || []),
     savedUser,
     savedAssistant
   ];
-  session.updatedAt = new Date().toISOString();
-  if (!session.titleGenerated) {
-    session.title = fallbackSessionTitle(session.messages);
+  freshSession.updatedAt = new Date().toISOString();
+  if (!freshSession.titleGenerated) {
+    freshSession.title = fallbackSessionTitle(freshSession.messages);
   }
-  saveChatStore(store);
-  return { fellow, session, response, userMessageId, assistantMessageId };
+  saveChatStore(freshStore);
+  return { fellow, session: freshSession, response, userMessageId, assistantMessageId };
 }
 
 async function handleControlRequest(req, res) {

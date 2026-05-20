@@ -1,6 +1,15 @@
 // src/main/scheduler-fire.js
 const crypto = require("node:crypto");
 
+function safeRecordRun(store, taskId, run) {
+  try {
+    return store.recordRun(taskId, run);
+  } catch (e) {
+    if (/task not found/i.test(String(e?.message))) return null;
+    throw e;
+  }
+}
+
 function createFireRunner({ store, runRemoteChatRequest, emit, logger = console }) {
   async function fire(task) {
     const runId = "r-" + crypto.randomBytes(6).toString("hex");
@@ -20,7 +29,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       const messages = result?.session?.messages || [];
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
       const outputMessageId = result?.assistantMessageId || lastAssistant?.id || null;
-      const run = store.recordRun(task.id, {
+      const run = safeRecordRun(store, task.id, {
         id: runId,
         firedAt,
         finishedAt: Date.now(),
@@ -29,7 +38,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       });
       emit("finished", {
         taskId: task.id,
-        runId: run.id,
+        runId: run?.id || runId,
         sessionId: task.sessionId,
         messageId: outputMessageId,
         status: "ok"
@@ -37,7 +46,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       return run;
     } catch (e) {
       logger.error?.("[scheduler-fire] task failed", task.id, e);
-      const run = store.recordRun(task.id, {
+      const run = safeRecordRun(store, task.id, {
         id: runId,
         firedAt,
         finishedAt: Date.now(),
@@ -46,9 +55,9 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       });
       emit("failed", {
         taskId: task.id,
-        runId: run.id,
+        runId: run?.id || runId,
         sessionId: task.sessionId,
-        error: run.error
+        error: run?.error || String(e?.message || e)
       });
       return run;
     }
@@ -56,4 +65,4 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
   return { fire };
 }
 
-module.exports = { createFireRunner };
+module.exports = { createFireRunner, safeRecordRun };
