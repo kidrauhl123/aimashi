@@ -3995,8 +3995,24 @@ function renderTaskView() {
 }
 
 function renderTasksEmpty() {
-  // Task 18 fills this in fully; for now, a friendly fallback.
-  els.tasksContent.innerHTML = `<div class="tasks-empty-placeholder">选择左侧任务查看详情。</div>`;
+  if ((state.tasks || []).length === 0) {
+    // No tasks anywhere — onboarding state
+    els.tasksContent.innerHTML = `
+      <div class="tasks-empty">
+        <div class="tasks-empty-emoji">📅</div>
+        <h2>还没有定时任务</h2>
+        <p>回到任意聊天告诉 Aimashi：<br><em>"每天 9 点帮我做 X"</em><br>它会自动帮你建好任务。</p>
+      </div>
+    `;
+    return;
+  }
+  // Tasks exist but none selected
+  els.tasksContent.innerHTML = `
+    <div class="tasks-empty">
+      <div class="tasks-empty-emoji">←</div>
+      <p>选择左侧任务查看详情</p>
+    </div>
+  `;
 }
 
 function renderRunDetail(task) {

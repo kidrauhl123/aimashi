@@ -6325,8 +6325,41 @@ pre {
 .task-status { width: 16px; text-align: center; font-size: 12px; color: var(--color-text-secondary, #888); }
 .task-unread { min-width: 18px; height: 18px; border-radius: 9px; padding: 0 6px; background: var(--accent, #0162db); color: #fff; font-size: 10px; line-height: 18px; text-align: center; font-style: normal; font-weight: 600; }
 .task-empty-side { padding: 32px 16px; text-align: center; color: var(--color-text-secondary, #888); font-size: 12px; }
-.tasks-empty-placeholder { padding: 60px; text-align: center; color: var(--color-text-secondary, #888); }
 .tasks-content { padding: 16px; }
+
+/* Empty state (Task 18) */
+.tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 320px;
+  text-align: center;
+  color: var(--color-text-secondary, #888);
+  gap: 12px;
+  padding: 32px;
+}
+.tasks-empty-emoji {
+  font-size: 64px;
+  opacity: 0.7;
+  line-height: 1;
+}
+.tasks-empty h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text-primary, #111);
+}
+.tasks-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.tasks-empty em {
+  font-style: italic;
+  color: var(--color-text-primary, #111);
+}
 
 /* ── Task detail view (Task 15) ─────────────────────────────────────────── */
 .task-detail { padding: 20px; max-width: 800px; }
