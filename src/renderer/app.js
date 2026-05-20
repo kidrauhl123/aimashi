@@ -66,8 +66,6 @@ const state = {
   mobileRelayLinkExpanded: false,
   personaFilter: "",
   contactFilter: "",
-  workbenchFilter: "",
-  workbenchSection: "recent",
   skillFilter: "",
   skillCategoryFilter: "",
   skillStatusFilter: "all",
@@ -186,13 +184,11 @@ const els = {
   conversationSidebar: document.getElementById("conversationSidebar"),
   contactsSidebar: document.getElementById("contactsSidebar"),
   skillsSidebar: document.getElementById("skillsSidebar"),
-  workbenchSidebar: document.getElementById("workbenchSidebar"),
   sidebarResizeHandle: document.getElementById("sidebarResizeHandle"),
   narrowBackButtons: document.querySelectorAll("[data-narrow-back]"),
   chatView: document.getElementById("chatView"),
   contactsView: document.getElementById("contactsView"),
   skillsView: document.getElementById("skillsView"),
-  workbenchView: document.getElementById("workbenchView"),
   settingsView: document.getElementById("settingsView"),
   engineStatus: document.getElementById("engineStatus"),
   hermesHome: document.getElementById("hermesHome"),
@@ -208,11 +204,6 @@ const els = {
   engineWarning: document.getElementById("engineWarning"),
   chat: document.getElementById("chat"),
   skillSearch: document.getElementById("skillSearch"),
-  workbenchSearch: document.getElementById("workbenchSearch"),
-  workbenchNav: document.getElementById("workbenchNav"),
-  workbenchPageTitle: document.getElementById("workbenchPageTitle"),
-  workbenchPageMeta: document.getElementById("workbenchPageMeta"),
-  workbenchContent: document.getElementById("workbenchContent"),
   skillNav: document.getElementById("skillNav"),
   skillPageTitle: document.getElementById("skillPageTitle"),
   skillChipRow: document.getElementById("skillChipRow"),
@@ -2476,151 +2467,6 @@ function currentRelayPairingLink() {
   return String(els.mobileRelayLink?.dataset?.link || els.mobileRelayLink?.textContent || "").trim();
 }
 
-const workbenchSections = [
-  {
-    id: "recent",
-    title: "最近",
-    subtitle: "从近期对话继续整理",
-    detail: "适合把刚聊完的修复、调研、创作想法临时收住。"
-  },
-  {
-    id: "projects",
-    title: "项目",
-    subtitle: "会话变成可推进的事项",
-    detail: "例如 Aimashi 输入体验修复、Hermes runtime 调查、消息 UI 重设计。"
-  },
-  {
-    id: "drafts",
-    title: "草稿",
-    subtitle: "文案、prompt、方案草稿",
-    detail: "适合收集产品命名、角色设定、回复模板和待润色文本。"
-  },
-  {
-    id: "materials",
-    title: "素材",
-    subtitle: "文件、截图、生成物",
-    detail: "适合放代码补丁、截图、图片、桌宠资源和工具结果摘要。"
-  }
-];
-
-function workbenchSectionRows() {
-  const sessionCount = sessionsForPersona(state.activeKey).filter(hasPersistableMessages).length;
-  return workbenchSections.map((section) => ({
-    ...section,
-    count: section.id === "recent" ? sessionCount : 0
-  }));
-}
-
-function renderWorkbenchNav() {
-  if (!els.workbenchNav) return;
-  const filter = state.workbenchFilter.trim().toLowerCase();
-  const rows = workbenchSectionRows().filter((row) => (
-    !filter || `${row.title} ${row.subtitle} ${row.detail}`.toLowerCase().includes(filter)
-  ));
-  els.workbenchNav.innerHTML = rows.length ? rows.map((row) => `
-    <button class="workbench-nav-row${row.id === state.workbenchSection ? " active" : ""}" type="button" data-workbench-section="${escapeHtml(row.id)}">
-      <span>
-        <strong>${escapeHtml(row.title)}</strong>
-        <small>${escapeHtml(row.subtitle)}</small>
-      </span>
-      <em>${escapeHtml(String(row.count))}</em>
-    </button>
-  `).join("") : `<div class="workbench-empty-nav">没有匹配的工作台分组</div>`;
-}
-
-function renderWorkbenchAction({ title, desc, meta }) {
-  return `
-    <button class="workbench-action" type="button" disabled>
-      <span>
-        <strong>${escapeHtml(title)}</strong>
-        <small>${escapeHtml(desc)}</small>
-      </span>
-      <em>${escapeHtml(meta || "即将支持")}</em>
-    </button>
-  `;
-}
-
-function renderWorkbenchExample({ title, desc, tags }) {
-  return `
-    <article class="workbench-example">
-      <header>
-        <strong>${escapeHtml(title)}</strong>
-        <span>示例</span>
-      </header>
-      <p>${escapeHtml(desc)}</p>
-      <div>
-        ${tags.map((tag) => `<em>${escapeHtml(tag)}</em>`).join("")}
-      </div>
-    </article>
-  `;
-}
-
-function renderWorkbench() {
-  renderWorkbenchNav();
-  if (!els.workbenchContent) return;
-  const active = workbenchSections.find((section) => section.id === state.workbenchSection) || workbenchSections[0];
-  const currentSession = activeSession();
-  const currentFellow = activePersona();
-  const exchangeCount = (currentSession.messages || []).filter((message) => !message.transient && String(message.content || "").trim()).length;
-  setText(els.workbenchPageTitle, "工作台");
-  setText(els.workbenchPageMeta, `${active.title} · ${active.detail}`);
-  els.workbenchContent.innerHTML = `
-    <section class="workbench-hero">
-      <div>
-        <span class="workbench-kicker">Workbench</span>
-        <h2>把聊天里的过程，整理成下一步能继续用的东西。</h2>
-        <p>这里先作为 Aimashi 的第四个入口：项目、草稿、素材和当前任务都可以从对话里沉淀出来。第一版只搭骨架，等方向明确后再接真实存储。</p>
-      </div>
-      <aside>
-        <span>当前上下文</span>
-        <strong>${escapeHtml(currentSession.title || "新对话")}</strong>
-        <p>${escapeHtml(currentFellow?.name || "当前伙伴")} · ${exchangeCount} 条消息</p>
-      </aside>
-    </section>
-
-    <section class="workbench-action-grid" aria-label="工作台操作">
-      ${renderWorkbenchAction({
-        title: "从当前对话创建",
-        desc: "把这一轮聊天整理成项目摘要、待办和相关消息。",
-        meta: "对话 -> 项目"
-      })}
-      ${renderWorkbenchAction({
-        title: "保存选中消息",
-        desc: "以后可从消息右键把关键片段收进项目或草稿。",
-        meta: "选区 -> 卡片"
-      })}
-      ${renderWorkbenchAction({
-        title: "新建草稿",
-        desc: "放 prompt、文案、角色设定、方案草稿。",
-        meta: "空白草稿"
-      })}
-      ${renderWorkbenchAction({
-        title: "导入文件",
-        desc: "收纳截图、补丁、文档、图片和生成物。",
-        meta: "文件素材"
-      })}
-    </section>
-
-    <section class="workbench-examples" aria-label="工作台示例">
-      ${renderWorkbenchExample({
-        title: "Aimashi 输入体验修复",
-        desc: "从连续对话里提炼已修复、待验证和相关文件，适合后续生成 PR 描述。",
-        tags: ["项目", "代码", "待办"]
-      })}
-      ${renderWorkbenchExample({
-        title: "消息正文样式重设计",
-        desc: "收集你挑过的截图、代码块样式要求和最终设计判断。",
-        tags: ["创意", "UI", "截图"]
-      })}
-      ${renderWorkbenchExample({
-        title: "Hermes runtime 冲突调查",
-        desc: "保留关键结论、后台路径、日志和下一步排查入口。",
-        tags: ["调查", "日志", "运行时"]
-      })}
-    </section>
-  `;
-}
-
 function render() {
   const runtime = state.runtime;
   if (!runtime) return;
@@ -2990,11 +2836,9 @@ function renderView() {
   els.conversationSidebar?.classList.toggle("hidden", state.activeView !== "chat");
   els.contactsSidebar?.classList.toggle("hidden", state.activeView !== "contacts");
   els.skillsSidebar?.classList.toggle("hidden", state.activeView !== "skills");
-  els.workbenchSidebar?.classList.toggle("hidden", state.activeView !== "workbench");
   els.chatView.classList.toggle("hidden", state.activeView !== "chat");
   els.contactsView?.classList.toggle("hidden", state.activeView !== "contacts");
   els.skillsView?.classList.toggle("hidden", state.activeView !== "skills");
-  els.workbenchView?.classList.toggle("hidden", state.activeView !== "workbench");
   els.settingsView.classList.toggle("hidden", !state.settingsOpen);
   els.profileDialog?.classList.toggle("hidden", !state.profileDialogOpen);
   els.fellowCreateMenu?.classList.toggle("hidden", !state.fellowMenuOpen);
@@ -3017,7 +2861,6 @@ function renderView() {
   });
   renderSkillLibrary();
   renderContacts();
-  renderWorkbench();
 }
 
 function skillTone(skill = {}) {
@@ -5866,16 +5709,6 @@ els.contactSearch?.addEventListener("input", () => {
 els.skillSearch?.addEventListener("input", () => {
   state.skillFilter = els.skillSearch.value;
   renderSkillLibrary();
-});
-els.workbenchSearch?.addEventListener("input", () => {
-  state.workbenchFilter = els.workbenchSearch.value;
-  renderWorkbench();
-});
-els.workbenchNav?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-workbench-section]");
-  if (!button) return;
-  state.workbenchSection = button.dataset.workbenchSection || "recent";
-  renderWorkbench();
 });
 document.querySelectorAll("[data-skill-filter]").forEach((button) => {
   button.addEventListener("click", () => {
