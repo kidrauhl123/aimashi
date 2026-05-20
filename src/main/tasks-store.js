@@ -113,6 +113,36 @@ function createTasksStore(filePath) {
   function pause(id) { return update(id, { status: "paused" }); }
   function resume(id) { return update(id, { status: "active" }); }
 
+  function orphanByFellow(fellowId) {
+    const state = load();
+    let changed = 0;
+    state.tasks.forEach((t) => {
+      if (t.fellowId === fellowId && t.status !== "done") {
+        t.status = "paused";
+        t.orphanReason = "fellow_deleted";
+        t.updatedAt = Date.now();
+        changed += 1;
+      }
+    });
+    if (changed) save(state);
+    return changed;
+  }
+
+  function orphanBySession(sessionId) {
+    const state = load();
+    let changed = 0;
+    state.tasks.forEach((t) => {
+      if (t.sessionId === sessionId && t.status !== "done") {
+        t.status = "paused";
+        t.orphanReason = "session_deleted";
+        t.updatedAt = Date.now();
+        changed += 1;
+      }
+    });
+    if (changed) save(state);
+    return changed;
+  }
+
   function recordRun(id, run) {
     const state = load();
     const task = state.tasks.find((t) => t.id === id);
@@ -131,7 +161,7 @@ function createTasksStore(filePath) {
     return runEntry;
   }
 
-  return { list, get, create, update, delete: deleteTask, pause, resume, recordRun };
+  return { list, get, create, update, delete: deleteTask, pause, resume, orphanByFellow, orphanBySession, recordRun };
 }
 
 module.exports = { createTasksStore };

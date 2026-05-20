@@ -96,3 +96,20 @@ test("createTasksStore: pause/resume toggles status", () => {
   assert.equal(store.pause(t.id).status, "paused");
   assert.equal(store.resume(t.id).status, "active");
 });
+
+test("orphanByFellow: pauses active tasks of that fellow", () => {
+  const store = createTasksStore(tmpFile());
+  const t1 = store.create({
+    title: "a", fellowId: "F1", sessionId: "s1", originMessageId: "m",
+    trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "p"
+  });
+  const t2 = store.create({
+    title: "b", fellowId: "F2", sessionId: "s2", originMessageId: "m",
+    trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "p"
+  });
+  const changed = store.orphanByFellow("F1");
+  assert.equal(changed, 1);
+  assert.equal(store.get(t1.id).status, "paused");
+  assert.equal(store.get(t1.id).orphanReason, "fellow_deleted");
+  assert.equal(store.get(t2.id).status, "active");
+});

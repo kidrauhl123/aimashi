@@ -6835,6 +6835,16 @@ function deleteFellow(input = {}) {
     if (sessionKey.split(":")[1] === key) delete agentSessions[sessionKey];
   }
   saveAgentSessionMap(agentSessions);
+  try {
+    initSchedulerSubsystem();
+    const orphaned = tasksStore.orphanByFellow(key);
+    if (orphaned > 0) {
+      tasksEvents.emit("orphaned", { fellowId: key, count: orphaned });
+      scheduler.rescan();
+    }
+  } catch (error) {
+    console.warn("[tasks] orphan-by-fellow failed", error);
+  }
   recallFellowPet(key);
   return getRuntimeStatus();
 }
