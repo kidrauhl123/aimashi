@@ -28,6 +28,7 @@ const {
 const { createChatEventEmitter } = require("./main/chat-events.js");
 const { chatCompletionResponse, responseMessageContent } = require("./main/chat-response.js");
 const { requireFellow } = require("./main/fellow-registry.js");
+const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 
 app.setName("Aimashi");
 
@@ -6310,60 +6311,13 @@ async function sendCodexStateless({ systemPrompt, userPrompt, signal }) {
   return { content: String(turn?.finalResponse || "").trim() };
 }
 
-async function sendHermesStateless({ fellow, systemPrompt, userPrompt, signal }) {
-  const accountId = fellow.account_id || fellow.key;
-  const routeProfile = fellow.route_profile || accountId;
-  // Use a unique ephemeral session id so Hermes doesn't resume the Fellow's real thread.
-  const ephemeralSessionId = `_stateless_${crypto.randomUUID()}`;
-  const runBody = {
-    model: "hermes-agent",
-    input: userPrompt,
-    session_id: ephemeralSessionId,
-    account_id: accountId,
-    metadata: {
-      fellow_key: fellow.key,
-      persona_key: fellow.key,
-      account_id: accountId,
-      route_profile: routeProfile,
-      display_name: fellow.name
-    }
-  };
-  // Inject caller-supplied system prompt as instructions (no persona).
-  if (systemPrompt) runBody.instructions = systemPrompt;
-  // Omit X-Aimashi-Fellow so fellow_overlay.py doesn't inject the Fellow's persona.
-  const hermesHeaders = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey()}`
-  };
-  const response = await fetch(`${engineState.baseUrl}/v1/runs`, {
-    method: "POST",
-    headers: hermesHeaders,
-    body: JSON.stringify(runBody),
-    signal
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    let message = text;
-    try {
-      message = JSON.parse(text).error?.message || text;
-    } catch {
-      // Keep the raw response text.
-    }
-    throw new Error(normalizeHermesError(message) || `${response.status} ${response.statusText}`);
-  }
-  const run = JSON.parse(text);
-  const hermesRunId = run.run_id || run.id;
-  if (!hermesRunId) throw new Error("Hermes did not return a run_id.");
-  const stream = await readRunEventStream({ runId: hermesRunId, signal, emit: null });
-  return { content: stream.content || "" };
-}
-
 function createActiveStatelessChatEngineAdapters() {
+  const hermesAdapter = createActiveHermesChatAdapter();
   return createStatelessChatEngineAdapters({
     ensureHermesReady: ensureHermesChatEngineReady,
     sendClaudeCodeStateless,
     sendCodexStateless,
-    sendHermesStateless
+    sendHermesStateless: hermesAdapter.sendStateless
   });
 }
 
@@ -6386,92 +6340,29 @@ async function ensureHermesChatEngineReady() {
   }
 }
 
-function hermesSlashCommandResponse({ id, content }) {
-  return {
-    id,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: adapterForEngine("hermes").responseModel,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: content || "(command completed)"
-        },
-        finish_reason: "stop"
-      }
-    ]
-  };
-}
-
-async function sendHermesChat({ fellow, sessionId, messages, group, signal, emit }) {
-  const runBody = buildRunPayload({ fellow, sessionId, messages });
-  const hermesHeaders = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey()}`,
-    "X-Aimashi-Fellow": fellow.key,
-    "X-Alkaka-Fellow": fellow.key
-  };
-  if (group && group.contextBlock) {
-    hermesHeaders["X-Aimashi-Group-Context"] = buildHermesGroupHeader(group.contextBlock);
-  }
-  const response = await fetch(`${engineState.baseUrl}/v1/runs`, {
-    method: "POST",
-    headers: hermesHeaders,
-    body: JSON.stringify(runBody),
-    signal
+function createActiveHermesChatAdapter() {
+  return createHermesChatAdapter({
+    apiKey,
+    baseUrl: () => engineState.baseUrl,
+    buildGroupHeader: buildHermesGroupHeader,
+    buildRunPayload,
+    normalizeError: normalizeHermesError,
+    readRunEventStream,
+    responseModel: adapterForEngine("hermes").responseModel
   });
-  const text = await response.text();
-  if (!response.ok) {
-    let message = text;
-    try {
-      message = JSON.parse(text).error?.message || text;
-    } catch {
-      // Keep the raw response text.
-    }
-    throw new Error(normalizeHermesError(message) || `${response.status} ${response.statusText}`);
-  }
-  const run = JSON.parse(text);
-  const hermesRunId = run.run_id || run.id;
-  if (!hermesRunId) throw new Error("Hermes did not return a run_id.");
-  const stream = await readRunEventStream({ runId: hermesRunId, signal, emit });
-  if (emit) emit("complete", { finishReason: stream.finishReason || "stop", aborted: false });
-  return {
-    id: hermesRunId,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: adapterForEngine("hermes").responseModel,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: stream.content || ""
-        },
-        finish_reason: stream.finishReason
-      }
-    ],
-    aimashi: {
-      transport: "runs",
-      run_id: hermesRunId,
-      session_id: runBody.session_id,
-      fellow_key: fellow.key,
-      events: stream.events
-    }
-  };
 }
 
 function createActiveChatEngineAdapters() {
+  const hermesAdapter = createActiveHermesChatAdapter();
   return createChatEngineAdapters({
     chatCompletionResponse,
     ensureHermesReady: ensureHermesChatEngineReady,
-    hermesSlashCommandResponse,
+    hermesSlashCommandResponse: hermesAdapter.slashCommandResponse,
     runExternalSlashCommand,
     runHermesSlashCommand,
     sendClaudeCodeChat,
     sendCodexChat,
-    sendHermesChat
+    sendHermesChat: hermesAdapter.sendChat
   });
 }
 
