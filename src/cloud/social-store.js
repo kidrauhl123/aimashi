@@ -26,12 +26,12 @@ function createSocialStore(db) {
     "SELECT user_a, user_b FROM friendships WHERE user_a = ? OR user_b = ?"
   );
 
-  const insertRequest = db.prepare(`
+  const insertRequestByUsername = db.prepare(`
     INSERT INTO friend_requests (id, from_user, to_user, code, status, created_at)
-    VALUES (?, ?, ?, ?, 'pending', ?)
+    VALUES (?, ?, ?, NULL, 'pending', ?)
   `);
-  const selectRequestByCode = db.prepare(
-    "SELECT * FROM friend_requests WHERE code = ?"
+  const selectRequestById = db.prepare(
+    "SELECT * FROM friend_requests WHERE id = ?"
   );
   const updateRequestStatus = db.prepare(
     "UPDATE friend_requests SET status = ?, resolved_at = ? WHERE id = ?"
@@ -41,8 +41,13 @@ function createSocialStore(db) {
     WHERE to_user = ? AND status = 'pending'
     ORDER BY created_at DESC
   `);
-  const expirePendingOlderThan = db.prepare(
-    "UPDATE friend_requests SET status = 'expired' WHERE status = 'pending' AND created_at < ?"
+  const selectOutgoingPending = db.prepare(`
+    SELECT * FROM friend_requests
+    WHERE from_user = ? AND status = 'pending'
+    ORDER BY created_at DESC
+  `);
+  const selectDuplicatePending = db.prepare(
+    "SELECT 1 FROM friend_requests WHERE from_user = ? AND to_user = ? AND status = 'pending'"
   );
 
   function addFriendship(userA, userB) {
@@ -66,54 +71,61 @@ function createSocialStore(db) {
     return selectFriendsOf.all(id, id).map((row) => (row.user_a === id ? row.user_b : row.user_a));
   }
 
-  function createFriendRequest({ fromUser, toUser = null, code }) {
-    const id = randomId("fr");
+  function createFriendRequestByUsername({ fromUserId, toUserId }) {
+    const from = String(fromUserId);
+    const to = String(toUserId);
+    if (from === to) throw new Error("cannot send friend request to yourself");
+    if (areFriends(from, to)) throw new Error("already friends");
+    if (selectDuplicatePending.get(from, to)) throw new Error("friend request already pending");
+    const reqId = randomId("fr");
     const createdAt = nowIso();
-    insertRequest.run(id, String(fromUser), toUser ? String(toUser) : null, String(code), createdAt);
-    return { id, from_user: String(fromUser), to_user: toUser ? String(toUser) : null, code: String(code), status: "pending", created_at: createdAt, resolved_at: null };
+    insertRequestByUsername.run(reqId, from, to, createdAt);
+    return { id: reqId, from_user: from, to_user: to, code: null, status: "pending", created_at: createdAt, resolved_at: null };
   }
 
-  function getFriendRequestByCode(code) {
-    return selectRequestByCode.get(String(code)) || null;
-  }
-
-  function acceptFriendRequest(code, accepterUserId) {
-    const row = selectRequestByCode.get(String(code));
-    if (!row) throw new Error("friend request not found");
-    if (row.status !== "pending") throw new Error("friend request not pending");
-    if (row.from_user === String(accepterUserId)) throw new Error("cannot accept self friend request");
-    const resolvedAt = nowIso();
-    db.exec("BEGIN");
-    try {
-      updateRequestStatus.run("accepted", resolvedAt, row.id);
-      const [a, b] = orderPair(row.from_user, String(accepterUserId));
-      insertFriendship.run(a, b, resolvedAt);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    return { ...row, status: "accepted", resolved_at: resolvedAt };
-  }
-
-  function revokeFriendRequest(code, ownerUserId) {
-    const row = selectRequestByCode.get(String(code));
-    if (!row) throw new Error("friend request not found");
-    if (row.from_user !== String(ownerUserId)) throw new Error("not owner of friend request");
-    if (row.status !== "pending") return row;
-    const resolvedAt = nowIso();
-    updateRequestStatus.run("expired", resolvedAt, row.id);
-    return { ...row, status: "expired", resolved_at: resolvedAt };
+  function getFriendRequestById(requestId) {
+    return selectRequestById.get(String(requestId)) || null;
   }
 
   function listIncomingPending(userId) {
     return selectIncomingPending.all(String(userId));
   }
 
-  function expireOldRequests(maxAgeMs) {
-    const cutoff = new Date(Date.now() - Number(maxAgeMs)).toISOString();
-    const info = expirePendingOlderThan.run(cutoff);
-    return info.changes;
+  function listOutgoingPending(userId) {
+    return selectOutgoingPending.all(String(userId));
+  }
+
+  function respondToFriendRequest(requestId, accepterUserId, action) {
+    if (action !== "accept" && action !== "reject") throw new Error("action must be 'accept' or 'reject'");
+    const row = selectRequestById.get(String(requestId));
+    if (!row) throw new Error("friend request not found");
+    if (row.status !== "pending") throw new Error("friend request not pending");
+    if (row.to_user !== String(accepterUserId)) throw new Error("not the recipient of this friend request");
+    const resolvedAt = nowIso();
+    db.exec("BEGIN");
+    try {
+      updateRequestStatus.run(action === "accept" ? "accepted" : "rejected", resolvedAt, row.id);
+      if (action === "accept") {
+        const [a, b] = orderPair(row.from_user, String(accepterUserId));
+        insertFriendship.run(a, b, resolvedAt);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return { ...row, status: action === "accept" ? "accepted" : "rejected", resolved_at: resolvedAt };
+  }
+
+  function cancelFriendRequest(requestId, fromUserId) {
+    const row = selectRequestById.get(String(requestId));
+    if (!row) throw new Error("friend request not found");
+    if (row.from_user !== String(fromUserId)) throw new Error("not the sender of this friend request");
+    if (row.status === "cancelled") return row;
+    if (row.status !== "pending") throw new Error("friend request not pending");
+    const resolvedAt = nowIso();
+    updateRequestStatus.run("cancelled", resolvedAt, row.id);
+    return { ...row, status: "cancelled", resolved_at: resolvedAt };
   }
 
   const insertRoom = db.prepare(`
@@ -242,12 +254,12 @@ function createSocialStore(db) {
     removeFriendship,
     areFriends,
     listFriends,
-    createFriendRequest,
-    getFriendRequestByCode,
-    acceptFriendRequest,
-    revokeFriendRequest,
+    createFriendRequestByUsername,
+    getFriendRequestById,
     listIncomingPending,
-    expireOldRequests,
+    listOutgoingPending,
+    respondToFriendRequest,
+    cancelFriendRequest,
     createRoom,
     getRoom,
     updateRoom,

@@ -208,6 +208,11 @@ function createCloudStore(options = {}) {
     return db.prepare("SELECT * FROM users WHERE account = ?").get(account);
   }
 
+  function getUserByUsername(username) {
+    const row = db.prepare("SELECT * FROM users WHERE account = ?").get(String(username || "").trim().toLowerCase());
+    return row ? publicUser(row) : null;
+  }
+
   function getUserById(userId) {
     return db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
   }
@@ -542,6 +547,7 @@ function createCloudStore(options = {}) {
     listBridgeRuns,
     getBridgeRun,
     getUserPublic,
+    getUserByUsername,
     getDb: () => db,
     close: () => db.close()
   };

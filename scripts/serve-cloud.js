@@ -499,17 +499,6 @@ function safeAttachmentUrl(value) {
   return "";
 }
 
-const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const INVITE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
-
-function generateInviteCode() {
-  let out = "";
-  for (let i = 0; i < 8; i++) {
-    out += INVITE_CODE_ALPHABET[crypto.randomInt(INVITE_CODE_ALPHABET.length)];
-  }
-  return out;
-}
-
 function userIsMemberOfRoom(socialStore, roomId, userId) {
   if (roomId.startsWith("dm:")) {
     const parts = roomId.split(":");
@@ -686,61 +675,94 @@ async function handleRequest(req, res, context) {
     if (req.method === "GET" && serveAuthorizedFile(req, res, cloudStore, auth, url.pathname)) return;
     if (!auth) return writeError(res, 401, "请先登录。");
 
-    if (req.method === "POST" && url.pathname === "/api/social/invite-codes") {
-      let code = null;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const candidate = generateInviteCode();
-        if (!context.socialStore.getFriendRequestByCode(candidate)) {
-          code = candidate;
-          break;
-        }
+    // POST /api/social/friend-requests
+    if (req.method === "POST" && url.pathname === "/api/social/friend-requests") {
+      const body = await readJson(req);
+      const toUsername = String(body.toUsername || "").trim();
+      if (!toUsername) return writeError(res, 400, "toUsername is required");
+      const toUser = context.cloudStore.getUserByUsername(toUsername);
+      if (!toUser) return writeError(res, 404, "user not found");
+      if (toUser.id === auth.user.id) return writeError(res, 400, "cannot add yourself");
+      if (context.socialStore.areFriends(auth.user.id, toUser.id)) {
+        return writeError(res, 409, "already friends");
       }
-      if (!code) return writeError(res, 500, "could not generate unique invite code");
-      const created = context.socialStore.createFriendRequest({ fromUser: auth.user.id, code });
-      const expiresAt = new Date(new Date(created.created_at).getTime() + INVITE_CODE_TTL_MS).toISOString();
-      return writeJson(res, 201, { id: created.id, code: created.code, expiresAt });
+      let created;
+      try {
+        created = context.socialStore.createFriendRequestByUsername({ fromUserId: auth.user.id, toUserId: toUser.id });
+      } catch (e) {
+        return writeError(res, 409, e.message);
+      }
+      // notify the addressee
+      broadcastEvent(context.eventHub, toUser.id, {
+        type: "social.friend_request_received",
+        request: { ...created, from: context.cloudStore.getUserPublic(auth.user.id) }
+      });
+      return writeJson(res, 201, { request: created });
     }
 
-    const inviteMatch = url.pathname.match(/^\/api\/social\/invite-codes\/([A-Z0-9]+)(\/accept)?$/);
-    if (req.method === "POST" && inviteMatch && inviteMatch[2] === "/accept") {
-      const code = inviteMatch[1];
-      const row = context.socialStore.getFriendRequestByCode(code);
-      if (!row) return writeError(res, 404, "invite code not found");
-      if (row.status !== "pending") return writeError(res, 409, "invite code already " + row.status);
-      if (row.from_user === auth.user.id) return writeError(res, 400, "cannot accept your own invite");
-      const createdAtMs = new Date(row.created_at).getTime();
-      if (Date.now() - createdAtMs > INVITE_CODE_TTL_MS) {
-        context.socialStore.revokeFriendRequest(code, row.from_user);
-        return writeError(res, 410, "invite code expired");
+    // GET /api/social/friend-requests?direction=incoming|outgoing
+    if (req.method === "GET" && url.pathname === "/api/social/friend-requests") {
+      const direction = url.searchParams.get("direction") || "incoming";
+      let rows;
+      if (direction === "outgoing") {
+        rows = context.socialStore.listOutgoingPending(auth.user.id);
+      } else {
+        rows = context.socialStore.listIncomingPending(auth.user.id);
       }
+      // hydrate with public user info on the other side
+      const hydrated = rows.map((row) => {
+        const otherId = direction === "outgoing" ? row.to_user : row.from_user;
+        return { ...row, other: context.cloudStore.getUserPublic(otherId) };
+      });
+      return writeJson(res, 200, { requests: hydrated });
+    }
+
+    // POST /api/social/friend-requests/:id/respond
+    const respondMatch = url.pathname.match(/^\/api\/social\/friend-requests\/([a-zA-Z0-9_-]+)\/respond$/);
+    if (req.method === "POST" && respondMatch) {
+      const requestId = respondMatch[1];
+      const body = await readJson(req);
+      const action = String(body.action || "");
+      if (action !== "accept" && action !== "reject") {
+        return writeError(res, 400, "action must be 'accept' or 'reject'");
+      }
+      let updated;
       try {
-        context.socialStore.acceptFriendRequest(code, auth.user.id);
+        updated = context.socialStore.respondToFriendRequest(requestId, auth.user.id, action);
       } catch (e) {
         return writeError(res, 400, e.message);
       }
-      const room = ensureDmRoom(context.socialStore, row.from_user, auth.user.id);
-      const friend = context.cloudStore.getUserPublic(row.from_user);
-      broadcastEvent(context.eventHub, row.from_user, { type: "social.friend_added", friend: context.cloudStore.getUserPublic(auth.user.id), room });
-      broadcastEvent(context.eventHub, auth.user.id, { type: "social.friend_added", friend, room });
-      return writeJson(res, 200, { friend, room });
+      if (action === "accept") {
+        const room = ensureDmRoom(context.socialStore, updated.from_user, auth.user.id);
+        const senderPublic = context.cloudStore.getUserPublic(updated.from_user);
+        const accepterPublic = context.cloudStore.getUserPublic(auth.user.id);
+        // notify both
+        broadcastEvent(context.eventHub, updated.from_user, {
+          type: "social.friend_added",
+          friend: accepterPublic,
+          room
+        });
+        broadcastEvent(context.eventHub, auth.user.id, {
+          type: "social.friend_added",
+          friend: senderPublic,
+          room
+        });
+        return writeJson(res, 200, { request: updated, friend: senderPublic, room });
+      }
+      // reject: do NOT notify sender (QQ-style)
+      return writeJson(res, 200, { request: updated });
     }
 
-    if (req.method === "DELETE" && inviteMatch && !inviteMatch[2]) {
-      const code = inviteMatch[1];
+    // DELETE /api/social/friend-requests/:id  (cancel by sender)
+    const cancelFrMatch = url.pathname.match(/^\/api\/social\/friend-requests\/([a-zA-Z0-9_-]+)$/);
+    if (req.method === "DELETE" && cancelFrMatch) {
+      const requestId = cancelFrMatch[1];
       try {
-        context.socialStore.revokeFriendRequest(code, auth.user.id);
-        return writeJson(res, 200, { ok: true });
+        const updated = context.socialStore.cancelFriendRequest(requestId, auth.user.id);
+        return writeJson(res, 200, { request: updated });
       } catch (e) {
         return writeError(res, 400, e.message);
       }
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/social/invite-codes") {
-      const db = context.cloudStore.getDb();
-      const rows = db.prepare(
-        "SELECT id, code, status, created_at FROM friend_requests WHERE from_user = ? AND status = 'pending' ORDER BY created_at DESC"
-      ).all(auth.user.id);
-      return writeJson(res, 200, { invites: rows });
     }
 
     if (req.method === "GET" && url.pathname === "/api/social/friends") {

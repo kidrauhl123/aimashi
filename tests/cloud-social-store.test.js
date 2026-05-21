@@ -44,67 +44,153 @@ test("areFriends returns true after addFriendship, false after remove", () => {
   } finally { cleanup(ctx); }
 });
 
-test("createFriendRequest stores pending with code", () => {
+test("createFriendRequestByUsername happy path returns pending row", () => {
   const ctx = makeStores();
   try {
-    const req = ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "ABC12345" });
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
     assert.ok(req.id);
     assert.equal(req.status, "pending");
-    assert.equal(req.code, "ABC12345");
-    const fetched = ctx.social.getFriendRequestByCode("ABC12345");
-    assert.equal(fetched.id, req.id);
+    assert.equal(req.from_user, ctx.alice.id);
+    assert.equal(req.to_user, ctx.bob.id);
+    assert.equal(req.code, null);
   } finally { cleanup(ctx); }
 });
 
-test("acceptFriendRequest creates friendship and marks accepted atomically", () => {
+test("createFriendRequestByUsername rejects self-request", () => {
   const ctx = makeStores();
   try {
-    ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "CODE1" });
-    const resolved = ctx.social.acceptFriendRequest("CODE1", ctx.bob.id);
-    assert.equal(resolved.status, "accepted");
-    assert.ok(resolved.resolved_at);
+    assert.throws(
+      () => ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.alice.id }),
+      /yourself/i
+    );
+  } finally { cleanup(ctx); }
+});
+
+test("createFriendRequestByUsername rejects already-friends", () => {
+  const ctx = makeStores();
+  try {
+    ctx.social.addFriendship(ctx.alice.id, ctx.bob.id);
+    assert.throws(
+      () => ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id }),
+      /already friends/i
+    );
+  } finally { cleanup(ctx); }
+});
+
+test("createFriendRequestByUsername rejects duplicate pending", () => {
+  const ctx = makeStores();
+  try {
+    ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    assert.throws(
+      () => ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id }),
+      /already pending/i
+    );
+  } finally { cleanup(ctx); }
+});
+
+test("getFriendRequestById returns row or null", () => {
+  const ctx = makeStores();
+  try {
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    const fetched = ctx.social.getFriendRequestById(req.id);
+    assert.equal(fetched.id, req.id);
+    assert.equal(fetched.status, "pending");
+    assert.equal(ctx.social.getFriendRequestById("nonexistent_id"), null);
+  } finally { cleanup(ctx); }
+});
+
+test("listOutgoingPending returns sender's pending requests", () => {
+  const ctx = makeStores();
+  try {
+    const charlie = ctx.cloudStore.registerUser({ username: "charlie", password: "Pa55word!" }).user;
+    ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: charlie.id });
+    const outgoing = ctx.social.listOutgoingPending(ctx.alice.id);
+    assert.equal(outgoing.length, 2);
+    const bobOutgoing = ctx.social.listOutgoingPending(ctx.bob.id);
+    assert.equal(bobOutgoing.length, 0);
+  } finally { cleanup(ctx); }
+});
+
+test("listIncomingPending returns recipient's pending requests", () => {
+  const ctx = makeStores();
+  try {
+    const charlie = ctx.cloudStore.registerUser({ username: "charlie", password: "Pa55word!" }).user;
+    ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    ctx.social.createFriendRequestByUsername({ fromUserId: charlie.id, toUserId: ctx.bob.id });
+    const incoming = ctx.social.listIncomingPending(ctx.bob.id);
+    assert.equal(incoming.length, 2);
+    const aliceIncoming = ctx.social.listIncomingPending(ctx.alice.id);
+    assert.equal(aliceIncoming.length, 0);
+  } finally { cleanup(ctx); }
+});
+
+test("respondToFriendRequest accept creates friendship atomically", () => {
+  const ctx = makeStores();
+  try {
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    const updated = ctx.social.respondToFriendRequest(req.id, ctx.bob.id, "accept");
+    assert.equal(updated.status, "accepted");
+    assert.ok(updated.resolved_at);
     assert.equal(ctx.social.areFriends(ctx.alice.id, ctx.bob.id), true);
   } finally { cleanup(ctx); }
 });
 
-test("acceptFriendRequest rejects already-consumed code", () => {
+test("respondToFriendRequest reject does NOT create friendship", () => {
   const ctx = makeStores();
   try {
-    ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "ONCE" });
-    ctx.social.acceptFriendRequest("ONCE", ctx.bob.id);
-    const charlie = ctx.cloudStore.registerUser({ username: "charlie", password: "Pa55word!" }).user;
-    assert.throws(() => ctx.social.acceptFriendRequest("ONCE", charlie.id), /not pending|already/i);
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    const updated = ctx.social.respondToFriendRequest(req.id, ctx.bob.id, "reject");
+    assert.equal(updated.status, "rejected");
+    assert.ok(updated.resolved_at);
+    assert.equal(ctx.social.areFriends(ctx.alice.id, ctx.bob.id), false);
   } finally { cleanup(ctx); }
 });
 
-test("acceptFriendRequest rejects self-accept", () => {
+test("respondToFriendRequest rejects when non-recipient tries to respond", () => {
   const ctx = makeStores();
   try {
-    ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "SELF" });
-    assert.throws(() => ctx.social.acceptFriendRequest("SELF", ctx.alice.id), /self/i);
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    assert.throws(
+      () => ctx.social.respondToFriendRequest(req.id, ctx.alice.id, "accept"),
+      /not the recipient/i
+    );
   } finally { cleanup(ctx); }
 });
 
-test("revokeFriendRequest marks expired only by owner", () => {
+test("respondToFriendRequest rejects invalid action", () => {
   const ctx = makeStores();
   try {
-    ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "REV" });
-    assert.throws(() => ctx.social.revokeFriendRequest("REV", ctx.bob.id), /not owner|forbidden/i);
-    ctx.social.revokeFriendRequest("REV", ctx.alice.id);
-    const row = ctx.social.getFriendRequestByCode("REV");
-    assert.equal(row.status, "expired");
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    assert.throws(
+      () => ctx.social.respondToFriendRequest(req.id, ctx.bob.id, "maybe"),
+      /action must be/i
+    );
   } finally { cleanup(ctx); }
 });
 
-test("expireOldRequests transitions pending older than maxAgeMs to expired", async () => {
+test("cancelFriendRequest only sender can cancel", () => {
   const ctx = makeStores();
   try {
-    ctx.social.createFriendRequest({ fromUser: ctx.alice.id, code: "OLD" });
-    await new Promise((r) => setTimeout(r, 50));
-    const n = ctx.social.expireOldRequests(25);
-    assert.ok(n >= 1);
-    const row = ctx.social.getFriendRequestByCode("OLD");
-    assert.equal(row.status, "expired");
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    assert.throws(
+      () => ctx.social.cancelFriendRequest(req.id, ctx.bob.id),
+      /not the sender/i
+    );
+    const cancelled = ctx.social.cancelFriendRequest(req.id, ctx.alice.id);
+    assert.equal(cancelled.status, "cancelled");
+    assert.ok(cancelled.resolved_at);
+  } finally { cleanup(ctx); }
+});
+
+test("cancelFriendRequest is idempotent if already cancelled", () => {
+  const ctx = makeStores();
+  try {
+    const req = ctx.social.createFriendRequestByUsername({ fromUserId: ctx.alice.id, toUserId: ctx.bob.id });
+    ctx.social.cancelFriendRequest(req.id, ctx.alice.id);
+    // second cancel should be a no-op returning the existing row
+    const again = ctx.social.cancelFriendRequest(req.id, ctx.alice.id);
+    assert.equal(again.status, "cancelled");
   } finally { cleanup(ctx); }
 });
 
