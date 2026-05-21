@@ -515,6 +515,11 @@ function createCloudStore(options = {}) {
     return rowToBridgeRun(db.prepare("SELECT * FROM bridge_runs WHERE id = ? AND user_id = ?").get(runId, userId));
   }
 
+  function getUserPublic(userId) {
+    const row = getUserById(userId);
+    return row ? publicUser(row) : null;
+  }
+
   return {
     registerUser,
     loginUser,
@@ -536,6 +541,7 @@ function createCloudStore(options = {}) {
     cancelBridgeRun,
     listBridgeRuns,
     getBridgeRun,
+    getUserPublic,
     getDb: () => db,
     close: () => db.close()
   };

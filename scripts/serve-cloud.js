@@ -11,6 +11,9 @@ try {
 } catch {
   ({ createCloudStore } = require("./src/cloud/sqlite-store.js"));
 }
+const { createSocialStore } = require("../src/cloud/social-store.js");
+const { createMessagesStore } = require("../src/cloud/messages-store.js");
+const { dmRoomId, ensureDmRoom } = require("../src/cloud/dm-room.js");
 
 const host = process.env.AIMASHI_CLOUD_HOST || "127.0.0.1";
 const port = Number(process.env.AIMASHI_CLOUD_PORT || process.env.PORT || 4175);
@@ -480,6 +483,17 @@ function safeAttachmentUrl(value) {
   return "";
 }
 
+const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const INVITE_CODE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function generateInviteCode() {
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += INVITE_CODE_ALPHABET[crypto.randomInt(INVITE_CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
 function tokenFromRequest(req) {
   const auth = String(req.headers.authorization || "");
   return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
@@ -641,6 +655,63 @@ async function handleRequest(req, res, context) {
     const auth = cloudStore.authenticateToken(tokenFromRequest(req));
     if (req.method === "GET" && serveAuthorizedFile(req, res, cloudStore, auth, url.pathname)) return;
     if (!auth) return writeError(res, 401, "请先登录。");
+
+    if (req.method === "POST" && url.pathname === "/api/social/invite-codes") {
+      let code = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidate = generateInviteCode();
+        if (!context.socialStore.getFriendRequestByCode(candidate)) {
+          code = candidate;
+          break;
+        }
+      }
+      if (!code) return writeError(res, 500, "could not generate unique invite code");
+      const created = context.socialStore.createFriendRequest({ fromUser: auth.user.id, code });
+      const expiresAt = new Date(new Date(created.created_at).getTime() + INVITE_CODE_TTL_MS).toISOString();
+      return writeJson(res, 201, { id: created.id, code: created.code, expiresAt });
+    }
+
+    const inviteMatch = url.pathname.match(/^\/api\/social\/invite-codes\/([A-Z0-9]+)(\/accept)?$/);
+    if (req.method === "POST" && inviteMatch && inviteMatch[2] === "/accept") {
+      const code = inviteMatch[1];
+      const row = context.socialStore.getFriendRequestByCode(code);
+      if (!row) return writeError(res, 404, "invite code not found");
+      if (row.status !== "pending") return writeError(res, 409, "invite code already " + row.status);
+      if (row.from_user === auth.user.id) return writeError(res, 400, "cannot accept your own invite");
+      const createdAtMs = new Date(row.created_at).getTime();
+      if (Date.now() - createdAtMs > INVITE_CODE_TTL_MS) {
+        context.socialStore.revokeFriendRequest(code, row.from_user);
+        return writeError(res, 410, "invite code expired");
+      }
+      try {
+        context.socialStore.acceptFriendRequest(code, auth.user.id);
+      } catch (e) {
+        return writeError(res, 400, e.message);
+      }
+      const room = ensureDmRoom(context.socialStore, row.from_user, auth.user.id);
+      const friend = context.cloudStore.getUserPublic(row.from_user);
+      broadcastEvent(context.eventHub, row.from_user, { type: "social.friend_added", friend: context.cloudStore.getUserPublic(auth.user.id), room });
+      broadcastEvent(context.eventHub, auth.user.id, { type: "social.friend_added", friend, room });
+      return writeJson(res, 200, { friend, room });
+    }
+
+    if (req.method === "DELETE" && inviteMatch && !inviteMatch[2]) {
+      const code = inviteMatch[1];
+      try {
+        context.socialStore.revokeFriendRequest(code, auth.user.id);
+        return writeJson(res, 200, { ok: true });
+      } catch (e) {
+        return writeError(res, 400, e.message);
+      }
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/social/invite-codes") {
+      const db = context.cloudStore.getDb();
+      const rows = db.prepare(
+        "SELECT id, code, status, created_at FROM friend_requests WHERE from_user = ? AND status = 'pending' ORDER BY created_at DESC"
+      ).all(auth.user.id);
+      return writeJson(res, 200, { invites: rows });
+    }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       cloudStore.logoutSession(tokenFromRequest(req));
@@ -865,8 +936,12 @@ function createAimashiCloudServer(options = {}) {
     allowedOrigins: allowedOriginsFromOptions(options),
     allowQueryTokenAuth: Boolean(options.allowQueryTokenAuth || process.env.AIMASHI_CLOUD_ALLOW_QUERY_TOKEN === "1"),
     webRoot: options.webRoot || defaultWebRoot(),
-    releaseManifest: options.releaseManifest === undefined ? defaultReleaseManifest() : options.releaseManifest
+    releaseManifest: options.releaseManifest === undefined ? defaultReleaseManifest() : options.releaseManifest,
+    socialStore: null,
+    messagesStore: null
   };
+  context.socialStore = createSocialStore(context.cloudStore.getDb());
+  context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => handleBridgeUpgrade(req, socket, head, context, wss));
