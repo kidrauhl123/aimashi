@@ -116,15 +116,26 @@ function createGroupStore(rootDir) {
   function updateGroup(id, patch) {
     const existing = get(id);
     if (!existing) throw new Error("group not found: " + id);
-    const updated = { ...existing, ...patch, updatedAt: Date.now() };
+    const normalizedPatch = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, "members")) {
+      normalizedPatch.members = normalizeMembersList(normalizedPatch.members);
+    }
+    // host field upgrade: prefer new hostMember; fall back to legacy hostFellowId
+    if (normalizedPatch.hostMember != null) {
+      normalizedPatch.hostMember = normalizeMember(normalizedPatch.hostMember);
+    } else if (normalizedPatch.hostFellowId != null) {
+      normalizedPatch.hostMember = normalizeMember(normalizedPatch.hostFellowId);
+    }
+    delete normalizedPatch.hostFellowId;
+    const updated = { ...existing, ...normalizedPatch, updatedAt: Date.now() };
     atomicWrite(groupJsonPath(id), JSON.stringify(updated, null, 2));
-    if (patch.name) {
+    if (normalizedPatch.name) {
       const manifest = loadManifest();
       const entry = manifest.groups.find((g) => g.id === id);
-      if (entry) entry.name = patch.name;
+      if (entry) entry.name = normalizedPatch.name;
       saveManifest(manifest);
     }
-    if (patch && Object.prototype.hasOwnProperty.call(patch, 'contextCard') && patch.contextCard === null) {
+    if (normalizedPatch && Object.prototype.hasOwnProperty.call(normalizedPatch, "contextCard") && normalizedPatch.contextCard === null) {
       try { fs.unlinkSync(contextCardPath(id)); } catch { /* may not exist */ }
     }
     return updated;

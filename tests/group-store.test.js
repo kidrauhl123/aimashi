@@ -91,15 +91,46 @@ test("appendMessage and listMessages roundtrip", () => {
   assert.equal(manifest.groups[0].updatedAt, group.updatedAt + 20);
 });
 
-test("updateGroup persists host switch", () => {
+test("updateGroup persists hostMember switch", () => {
   const root = makeTmpRoot();
   const store = createGroupStore(root);
   const group = store.create({
-    name: "G", members: [makeFellowMember("a"), makeFellowMember("b")], hostMember: makeFellowMember("a"),
+    name: "G",
+    members: [makeFellowMember("a"), makeFellowMember("b")],
+    hostMember: makeFellowMember("a"),
   });
   store.updateGroup(group.id, { hostMember: makeFellowMember("b") });
   const fresh = store.get(group.id);
   assert.equal(fresh.hostMember.fellowId, "b");
+  assert.equal(fresh.hostFellowId, undefined);
+});
+
+test("updateGroup accepts legacy hostFellowId and normalizes", () => {
+  const root = makeTmpRoot();
+  const store = createGroupStore(root);
+  const group = store.create({
+    name: "G",
+    members: [makeFellowMember("a"), makeFellowMember("b")],
+    hostMember: makeFellowMember("a"),
+  });
+  store.updateGroup(group.id, { hostFellowId: "b" });
+  const fresh = store.get(group.id);
+  assert.equal(fresh.hostMember.fellowId, "b");
+});
+
+test("updateGroup normalizes members when patch provides them", () => {
+  const root = makeTmpRoot();
+  const store = createGroupStore(root);
+  const group = store.create({
+    name: "G",
+    members: [makeFellowMember("a"), makeFellowMember("b")],
+    hostMember: makeFellowMember("a"),
+  });
+  store.updateGroup(group.id, { members: ["a", "b", "c"] });
+  const fresh = store.get(group.id);
+  assert.equal(fresh.members.length, 3);
+  assert.equal(fresh.members[2].fellowId, "c");
+  assert.equal(fresh.members[2].kind, "fellow");
 });
 
 test("deleteGroup removes manifest entry and group files", () => {
