@@ -332,3 +332,38 @@ test("post DM message emits room.message_appended to both members", async () => 
     }
   } finally { await stopServer(ctx); }
 });
+
+test("end-to-end: two users meet, friend up, exchange DM messages with seq", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const bob = await register(ctx.port, "bob");
+
+    const invite = await api(ctx.port, "POST", "/api/social/invite-codes", { token: alice.token, body: {} });
+    assert.equal(invite.status, 201);
+
+    const accepted = await api(ctx.port, "POST", "/api/social/invite-codes/" + invite.body.code + "/accept", { token: bob.token, body: {} });
+    assert.equal(accepted.status, 200);
+    const roomId = accepted.body.room.id;
+
+    const aFriends = await api(ctx.port, "GET", "/api/social/friends", { token: alice.token });
+    assert.equal(aFriends.body.friends.length, 1);
+
+    const aRooms = await api(ctx.port, "GET", "/api/rooms", { token: alice.token });
+    assert.equal(aRooms.body.rooms.length, 1);
+    assert.equal(aRooms.body.rooms[0].id, roomId);
+
+    const m1 = await api(ctx.port, "POST", "/api/rooms/" + roomId + "/messages", { token: alice.token, body: { bodyMd: "hi bob" } });
+    const m2 = await api(ctx.port, "POST", "/api/rooms/" + roomId + "/messages", { token: bob.token, body: { bodyMd: "hey alice" } });
+    const m3 = await api(ctx.port, "POST", "/api/rooms/" + roomId + "/messages", { token: alice.token, body: { bodyMd: "tomorrow at 9?" } });
+    assert.deepEqual([m1.body.message.seq, m2.body.message.seq, m3.body.message.seq], [1, 2, 3]);
+
+    const all = await api(ctx.port, "GET", "/api/rooms/" + roomId + "/messages?since_seq=0", { token: bob.token });
+    assert.equal(all.body.messages.length, 3);
+    assert.deepEqual(all.body.messages.map((m) => m.body_md), ["hi bob", "hey alice", "tomorrow at 9?"]);
+
+    const partial = await api(ctx.port, "GET", "/api/rooms/" + roomId + "/messages?since_seq=1", { token: bob.token });
+    assert.equal(partial.body.messages.length, 2);
+    assert.deepEqual(partial.body.messages.map((m) => m.seq), [2, 3]);
+  } finally { await stopServer(ctx); }
+});
