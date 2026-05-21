@@ -58,6 +58,9 @@
           <button class="rail-button" type="button" data-view="workbench" title="工作台" aria-label="工作台">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v7H4z M13 3h5a2 2 0 0 1 2 2v3h-7z M4 12h7v9H6a2 2 0 0 1-2-2z M13 10h7v9a2 2 0 0 1-2 2h-5z"/></svg>
           </button>
+          <button class="rail-button" type="button" data-view="social" title="好友" aria-label="好友">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </button>
           <div class="rail-spacer"></div>
           <button id="themeToggle" class="rail-button" type="button" title="切换主题" aria-label="切换主题">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2 M12 19v2 M5.64 5.64l1.42 1.42 M16.94 16.94l1.42 1.42 M3 12h2 M19 12h2 M5.64 18.36l1.42-1.42 M16.94 7.06l1.42-1.42 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
@@ -73,6 +76,7 @@
             <button id="newConversation" class="icon-button" type="button" title="新对话" aria-label="新对话">＋</button>
           </header>
           <section id="conversationList" class="persona-list" aria-label="会话列表"></section>
+          <section id="social-panel" class="social-panel hidden" aria-label="好友与聊天"></section>
         </aside>
 
         <section class="workspace">
@@ -115,6 +119,13 @@
             </form>
           </section>
           <section id="utilityView" class="utility-view hidden" aria-live="polite"></section>
+          <section id="social-chat-layout" class="social-chat-layout hidden">
+            <div id="social-chat" class="chat" aria-live="polite"></div>
+            <div class="social-composer">
+              <textarea id="socialChatInput" placeholder="输入消息，Enter 发送"></textarea>
+              <button id="socialSendBtn" class="send-button" type="button" title="发送">↗</button>
+            </div>
+          </section>
         </section>
       </section>
       <div id="toast" class="toast hidden" role="status"></div>

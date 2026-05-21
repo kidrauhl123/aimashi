@@ -66,6 +66,17 @@ let state = {
     contacts: [],
     skills: [],
     workbench: []
+  },
+  social: {
+    friends: [],
+    rooms: [],
+    incomingRequests: [],
+    outgoingRequests: [],
+    messageCache: new Map(),
+    activeRoomId: null,
+    roomMembersCache: new Map(),
+    myUsername: "",
+    myUserId: ""
   }
 };
 
@@ -294,10 +305,24 @@ function bridgeDeviceListHtml() {
 }
 
 function renderSidebar() {
-  const isChat = (state.activeView || "chat") === "chat";
-  els.conversationSearch.placeholder = isChat ? "搜索" : `搜索${utilityViewName(state.activeView)}`;
+  const view = state.activeView || "chat";
+  const isChat = view === "chat";
+  const isSocial = view === "social";
+  const socialPanel = document.getElementById("social-panel");
+  const convList = els.conversationList;
+  const sidebarTools = document.querySelector(".sidebar-tools");
+  if (isSocial) {
+    if (sidebarTools) sidebarTools.classList.add("hidden");
+    if (convList) convList.classList.add("hidden");
+    if (socialPanel) { socialPanel.classList.remove("hidden"); renderSocialUI(); }
+    return;
+  }
+  if (sidebarTools) sidebarTools.classList.remove("hidden");
+  if (convList) convList.classList.remove("hidden");
+  if (socialPanel) socialPanel.classList.add("hidden");
+  els.conversationSearch.placeholder = isChat ? "搜索" : `搜索${utilityViewName(view)}`;
   els.newConversation.textContent = isChat ? "＋" : "·";
-  els.newConversation.title = isChat ? "新对话" : utilityViewName(state.activeView);
+  els.newConversation.title = isChat ? "新对话" : utilityViewName(view);
   els.newConversation.disabled = !isChat;
   if (isChat) renderConversationList();
   else renderUtilityList();
@@ -487,8 +512,25 @@ function renderPendingAttachments() {
 function render() {
   setAuthView();
   if (!state.token) return;
-  if ((state.activeView || "chat") === "chat") renderChat();
-  else renderUtilityView();
+  const view = state.activeView || "chat";
+  const socialChatLayout = document.getElementById("social-chat-layout");
+  if (view === "social") {
+    els.chatLayout.classList.add("hidden");
+    els.utilityView.classList.add("hidden");
+    if (socialChatLayout) {
+      if (state.social.activeRoomId) {
+        socialChatLayout.classList.remove("hidden");
+        renderActiveRoomChat();
+      } else {
+        socialChatLayout.classList.add("hidden");
+      }
+    }
+    renderSidebar();
+  } else {
+    if (socialChatLayout) socialChatLayout.classList.add("hidden");
+    if (view === "chat") renderChat();
+    else renderUtilityView();
+  }
   renderPendingAttachments();
   renderBridgeStatus();
 }
@@ -619,6 +661,252 @@ function applyEventWorkspace(workspace) {
   render();
 }
 
+async function bootstrapSocial() {
+  if (!state.token) return;
+  try {
+    const me = await api("/api/me");
+    state.social.myUsername = me.user?.username || me.user?.account || "";
+    state.social.myUserId = me.user?.id || "";
+  } catch { /* ignore */ }
+  try {
+    const [friendsRes, roomsRes, incRes, outRes] = await Promise.all([
+      api("/api/social/friends"),
+      api("/api/rooms"),
+      api("/api/social/friend-requests?direction=incoming"),
+      api("/api/social/friend-requests?direction=outgoing")
+    ]);
+    state.social.friends = friendsRes.friends || [];
+    state.social.rooms = roomsRes.rooms || [];
+    state.social.incomingRequests = incRes.requests || [];
+    state.social.outgoingRequests = outRes.requests || [];
+    const cap = Math.min(state.social.rooms.length, 30);
+    for (let i = 0; i < cap; i++) {
+      const room = state.social.rooms[i];
+      try {
+        const r = await api(`/api/rooms/${encodeURIComponent(room.id)}/messages?since_seq=0&limit=100`);
+        const messages = r.messages || [];
+        const maxSeq = messages.reduce((m, x) => Math.max(m, Number(x.seq) || 0), 0);
+        state.social.messageCache.set(room.id, { messages, maxSeq });
+      } catch { /* ignore individual room failures */ }
+    }
+    renderSocialUI();
+  } catch (err) {
+    console.warn("[web] bootstrapSocial failed:", err?.message || err);
+  }
+}
+
+function socialRoomName(room) {
+  if (!room) return "未知房间";
+  if (room.name) return room.name;
+  if (room.kind === "dm") {
+    const friendId = [room.member_a, room.member_b].find((id) => id !== state.social.myUserId);
+    const friend = state.social.friends.find((f) => f.id === friendId);
+    return friend ? (friend.username || friend.account || "好友") : "私信";
+  }
+  return `群聊`;
+}
+
+function socialMessageSender(message) {
+  if (!message) return "";
+  if (message.sender_kind === "user") {
+    if (message.sender_ref === state.social.myUserId || message.sender_id === state.social.myUserId) return "我";
+    const friend = state.social.friends.find((f) => f.id === (message.sender_ref || message.sender_id));
+    return friend ? (friend.username || friend.account || "用户") : (message.sender_ref || "用户");
+  }
+  if (message.sender_kind === "fellow") {
+    return `[fellow:${message.sender_ref || message.sender_id || "?"}]`;
+  }
+  return message.sender_ref || message.sender_kind || "系统";
+}
+
+function renderSocialUI() {
+  const panel = document.getElementById("social-panel");
+  if (!panel) return;
+  const s = state.social;
+  const usernameHtml = `
+    <div class="social-my-user">
+      <span>我：<strong>${escapeHtml(s.myUsername || "（未登录）")}</strong></span>
+      <button type="button" class="social-copy-btn" data-copy="${escapeHtml(s.myUsername)}" title="复制用户名">复制</button>
+    </div>
+  `;
+  const addFriendHtml = `
+    <div class="social-add-friend-row">
+      <button type="button" class="social-toggle-add-friend icon-button" id="socialAddFriendToggle">＋ 加好友</button>
+    </div>
+    <div id="socialAddFriendForm" class="social-add-friend-form hidden">
+      <input id="socialAddFriendInput" type="text" placeholder="输入用户名" autocomplete="off">
+      <button type="button" class="social-send-btn" id="socialAddFriendSend">发送</button>
+    </div>
+    <div id="socialAddFriendResult" class="social-add-friend-result"></div>
+  `;
+  const incHtml = s.incomingRequests.length ? s.incomingRequests.map((r) => `
+    <div class="social-request-item">
+      <span>${escapeHtml(r.from_username || r.from_user || "?")}</span>
+      <div class="social-request-actions">
+        <button type="button" class="social-accept-btn" data-request-id="${escapeHtml(r.id)}">同意</button>
+        <button type="button" class="social-reject-btn" data-request-id="${escapeHtml(r.id)}">拒绝</button>
+      </div>
+    </div>
+  `).join("") : `<div class="social-empty">暂无请求</div>`;
+  const outHtml = s.outgoingRequests.length ? s.outgoingRequests.map((r) => `
+    <div class="social-request-item">
+      <span>→ ${escapeHtml(r.to_username || r.to_user || "?")}</span>
+      <button type="button" class="social-cancel-btn" data-request-id="${escapeHtml(r.id)}">撤回</button>
+    </div>
+  `).join("") : `<div class="social-empty">暂无</div>`;
+  const roomsHtml = s.rooms.length ? s.rooms.map((room) => `
+    <button type="button" class="persona ${s.activeRoomId === room.id ? "active" : ""}" data-social-room-id="${escapeHtml(room.id)}">
+      <span class="avatar utility-avatar">${escapeHtml(room.kind === "dm" ? "💬" : "👥")}</span>
+      <span class="persona-main">
+        <strong class="persona-name">${escapeHtml(socialRoomName(room))}</strong>
+        <span class="persona-preview">${escapeHtml(room.kind === "dm" ? "私信" : "群聊")}</span>
+      </span>
+    </button>
+  `).join("") : `<div class="social-empty">暂无聊天</div>`;
+  panel.innerHTML = `
+    <div class="social-panel-inner">
+      ${usernameHtml}
+      ${addFriendHtml}
+      <div class="social-section-header">好友请求</div>
+      <div class="social-subsection-header">收到</div>
+      <div class="social-request-list">${incHtml}</div>
+      <div class="social-subsection-header">发出</div>
+      <div class="social-request-list">${outHtml}</div>
+      <div class="social-section-header">聊天</div>
+      <div class="social-room-list">${roomsHtml}</div>
+    </div>
+  `;
+}
+
+function renderActiveRoomChat() {
+  const chatEl = document.getElementById("social-chat");
+  if (!chatEl) return;
+  const roomId = state.social.activeRoomId;
+  if (!roomId) {
+    chatEl.innerHTML = `<div class="social-chat-empty">选择一个聊天开始</div>`;
+    return;
+  }
+  const entry = state.social.messageCache.get(roomId) || { messages: [] };
+  const messagesHtml = entry.messages.map((msg) => {
+    const isMe = msg.sender_ref === state.social.myUserId || msg.sender_id === state.social.myUserId;
+    const sender = socialMessageSender(msg);
+    const body = escapeHtml(msg.body_md || msg.body || "").replace(/\n/g, "<br>");
+    const timeStr = msg.created_at ? shortTime(msg.created_at) : "";
+    return `
+      <article class="message ${isMe ? "user" : "assistant"}">
+        <span class="avatar utility-avatar">${escapeHtml(sender.slice(0, 2))}</span>
+        <div class="message-stack">
+          <div class="social-msg-sender">${escapeHtml(sender)}</div>
+          <div class="bubble">${body}</div>
+          <span class="message-time">${escapeHtml(timeStr)}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+  chatEl.innerHTML = messagesHtml || `<div class="social-chat-empty">暂无消息</div>`;
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+async function setActiveRoom(roomId) {
+  state.social.activeRoomId = roomId;
+  if (roomId && !state.social.roomMembersCache.has(roomId)) {
+    try {
+      const r = await api(`/api/rooms/${encodeURIComponent(roomId)}`);
+      state.social.roomMembersCache.set(roomId, r.members || []);
+    } catch { /* ignore */ }
+  }
+  const room = state.social.rooms.find((r) => r.id === roomId);
+  const title = room ? socialRoomName(room) : "聊天";
+  els.activeTitle.textContent = title;
+  els.activeMeta.textContent = room?.kind === "dm" ? "私信" : "群聊";
+  els.activeAvatar.textContent = room?.kind === "dm" ? "💬" : "👥";
+  els.activeAvatar.classList.add("utility-avatar");
+  els.activeAvatar.style.backgroundImage = "";
+  const socialChatLayout = document.getElementById("social-chat-layout");
+  if (socialChatLayout) {
+    socialChatLayout.classList.remove("hidden");
+    els.chatLayout.classList.add("hidden");
+    els.utilityView.classList.add("hidden");
+  }
+  renderSocialUI();
+  renderActiveRoomChat();
+}
+
+async function sendFriendRequest(username) {
+  if (!username) return;
+  try {
+    await api("/api/social/friend-requests", { method: "POST", body: { toUsername: username } });
+    const outRes = await api("/api/social/friend-requests?direction=outgoing");
+    state.social.outgoingRequests = outRes.requests || [];
+    renderSocialUI();
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message || "发送失败" };
+  }
+}
+
+async function respondFriendRequest(requestId, action) {
+  try {
+    const data = await api(`/api/social/friend-requests/${encodeURIComponent(requestId)}/respond`, {
+      method: "POST",
+      body: { action }
+    });
+    state.social.incomingRequests = state.social.incomingRequests.filter((r) => r.id !== requestId);
+    if (action === "accept" && data.friend) {
+      if (!state.social.friends.some((f) => f.id === data.friend.id)) state.social.friends.unshift(data.friend);
+    }
+    if (action === "accept" && data.room) {
+      if (!state.social.rooms.some((r) => r.id === data.room.id)) {
+        state.social.rooms.unshift(data.room);
+        state.social.messageCache.set(data.room.id, { messages: [], maxSeq: 0 });
+      }
+    }
+    renderSocialUI();
+  } catch (err) {
+    showToast(err.message || "操作失败");
+  }
+}
+
+async function cancelFriendRequest(requestId) {
+  try {
+    await api(`/api/social/friend-requests/${encodeURIComponent(requestId)}`, { method: "DELETE" });
+    state.social.outgoingRequests = state.social.outgoingRequests.filter((r) => r.id !== requestId);
+    renderSocialUI();
+  } catch (err) {
+    showToast(err.message || "撤回失败");
+  }
+}
+
+async function sendMessageInActiveRoom(text) {
+  const roomId = state.social.activeRoomId;
+  if (!roomId || !text.trim()) return;
+  const members = state.social.roomMembersCache.get(roomId) || [];
+  const mentionRegex = /@([A-Za-z0-9_.-]+)/g;
+  const mentions = [];
+  let match;
+  while ((match = mentionRegex.exec(text)) !== null) {
+    const fellowKey = match[1];
+    const fellowMember = members.find((m) => m.kind === "fellow" && (m.member_ref === fellowKey || m.fellow_id === fellowKey || m.member_ref?.endsWith(fellowKey)));
+    if (fellowMember) {
+      mentions.push({ kind: "fellow", fellowId: fellowMember.fellow_id || fellowMember.member_ref });
+    }
+  }
+  try {
+    const body = { bodyMd: text };
+    if (mentions.length) body.mentions = mentions;
+    const data = await api(`/api/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body });
+    const entry = state.social.messageCache.get(roomId) || { messages: [], maxSeq: 0 };
+    if (data.message && !entry.messages.some((m) => m.id === data.message.id)) {
+      entry.messages.push(data.message);
+      entry.maxSeq = Math.max(entry.maxSeq, Number(data.message.seq) || 0);
+      state.social.messageCache.set(roomId, entry);
+    }
+    renderActiveRoomChat();
+  } catch (err) {
+    showToast(err.message || "发送失败");
+  }
+}
+
 function startCloudEvents() {
   if (!state.token || eventsSocket?.readyState === WebSocket.OPEN || eventsSocket?.readyState === WebSocket.CONNECTING) return;
   const socket = new WebSocket(eventsUrl(), [`aimashi-token.${state.token}`]);
@@ -629,6 +917,45 @@ function startCloudEvents() {
     try {
       message = JSON.parse(String(event.data || ""));
     } catch {
+      return;
+    }
+    if (message.type === "social.friend_request_received") {
+      state.social.incomingRequests.unshift(message.request);
+      renderSocialUI();
+      return;
+    }
+    if (message.type === "social.friend_added") {
+      state.social.friends.unshift(message.friend);
+      state.social.outgoingRequests = state.social.outgoingRequests.filter((r) => r.to_user !== message.friend.id);
+      state.social.incomingRequests = state.social.incomingRequests.filter((r) => r.from_user !== message.friend.id);
+      if (message.room && !state.social.rooms.some((r) => r.id === message.room.id)) {
+        state.social.rooms.unshift(message.room);
+        state.social.messageCache.set(message.room.id, { messages: [], maxSeq: 0 });
+      }
+      renderSocialUI();
+      return;
+    }
+    if (message.type === "social.room_invited") {
+      if (message.room && !state.social.rooms.some((r) => r.id === message.room.id)) {
+        state.social.rooms.unshift(message.room);
+        state.social.messageCache.set(message.room.id, { messages: [], maxSeq: 0 });
+      }
+      state.social.roomMembersCache.delete(message.room?.id);
+      renderSocialUI();
+      return;
+    }
+    if (message.type === "room.message_appended") {
+      const roomId = message.roomId;
+      const entry = state.social.messageCache.get(roomId) || { messages: [], maxSeq: 0 };
+      if (!entry.messages.some((m) => m.id === message.message.id)) {
+        entry.messages.push(message.message);
+        entry.maxSeq = Math.max(entry.maxSeq, Number(message.message.seq) || 0);
+        state.social.messageCache.set(roomId, entry);
+      }
+      renderSocialUI();
+      if (state.social.activeRoomId === roomId) {
+        renderActiveRoomChat();
+      }
       return;
     }
     if (message.type === "events_ready") {
@@ -786,6 +1113,7 @@ async function authenticate(mode) {
     render();
     startBridgePolling();
     startCloudEvents();
+    bootstrapSocial();
   } catch (error) {
     els.loginHint.textContent = error.message;
   } finally {
@@ -980,6 +1308,67 @@ els.utilityView.addEventListener("click", (event) => {
   if (toast) showToast(toast.dataset.toast);
 });
 
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  // social panel: copy username
+  const copyBtn = target.closest("[data-copy]");
+  if (copyBtn && copyBtn.closest("#social-panel")) {
+    navigator.clipboard?.writeText(copyBtn.dataset.copy || "").then(() => showToast("已复制用户名")).catch(() => {});
+    return;
+  }
+  // social panel: toggle add-friend form
+  if (target.closest("#socialAddFriendToggle")) {
+    const form = document.getElementById("socialAddFriendForm");
+    if (form) form.classList.toggle("hidden");
+    return;
+  }
+  // social panel: send friend request
+  if (target.closest("#socialAddFriendSend")) {
+    const input = document.getElementById("socialAddFriendInput");
+    const resultEl = document.getElementById("socialAddFriendResult");
+    const username = String(input?.value || "").trim();
+    if (!username) { if (resultEl) resultEl.textContent = "请输入用户名"; return; }
+    sendFriendRequest(username).then((res) => {
+      if (resultEl) resultEl.textContent = res?.error ? `失败：${res.error}` : "请求已发送";
+      if (!res?.error && input) { input.value = ""; document.getElementById("socialAddFriendForm")?.classList.add("hidden"); }
+    });
+    return;
+  }
+  // social panel: accept friend request
+  const acceptBtn = target.closest(".social-accept-btn");
+  if (acceptBtn) { respondFriendRequest(acceptBtn.dataset.requestId, "accept"); return; }
+  // social panel: reject friend request
+  const rejectBtn = target.closest(".social-reject-btn");
+  if (rejectBtn) { respondFriendRequest(rejectBtn.dataset.requestId, "reject"); return; }
+  // social panel: cancel outgoing request
+  const cancelBtn = target.closest(".social-cancel-btn");
+  if (cancelBtn) { cancelFriendRequest(cancelBtn.dataset.requestId); return; }
+  // social panel: open room
+  const roomBtn = target.closest("[data-social-room-id]");
+  if (roomBtn) {
+    const roomId = roomBtn.dataset.socialRoomId;
+    state.activeView = "social";
+    els.mainView.dataset.pane = "chat";
+    setActiveRoom(roomId);
+    return;
+  }
+  // social chat send
+  if (target.closest("#socialSendBtn")) {
+    const input = document.getElementById("socialChatInput");
+    const text = String(input?.value || "").trim();
+    if (text) { sendMessageInActiveRoom(text); if (input) input.value = ""; }
+    return;
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.id === "socialChatInput" && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    const text = String(event.target.value || "").trim();
+    if (text) { sendMessageInActiveRoom(text); event.target.value = ""; }
+  }
+});
+
 function closeImagePreview() {
   document.querySelector(".image-preview-overlay")?.remove();
 }
@@ -1013,6 +1402,7 @@ async function boot() {
     setSyncState("已同步", true);
     startBridgePolling();
     startCloudEvents();
+    bootstrapSocial();
   } catch (error) {
     clearSession();
     stopBridgePolling();

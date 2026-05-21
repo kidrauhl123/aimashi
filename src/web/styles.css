@@ -206,7 +206,7 @@ p {
 
 .nav-rail {
   display: grid;
-  grid-template-rows: 54px repeat(4, 44px) minmax(0, 1fr) 44px;
+  grid-template-rows: 54px repeat(5, 44px) minmax(0, 1fr) 44px;
   justify-items: center;
   align-items: center;
   gap: 4px;
@@ -1113,6 +1113,230 @@ p {
   box-shadow: var(--shadow);
   transform: translateX(-50%);
   backdrop-filter: blur(18px);
+}
+
+/* Social panel */
+.social-panel {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.social-panel-inner {
+  padding: 8px 0 12px;
+}
+
+.social-my-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.social-my-user strong {
+  color: var(--text);
+}
+
+.social-copy-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.social-copy-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.social-add-friend-row {
+  padding: 4px 10px 4px;
+}
+
+.social-toggle-add-friend {
+  width: auto;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.social-add-friend-form {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 6px;
+}
+
+.social-add-friend-form input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.social-add-friend-form input:focus {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+}
+
+.social-send-btn {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.social-add-friend-result {
+  padding: 2px 14px 4px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.social-section-header {
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.social-subsection-header {
+  padding: 2px 14px 2px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.social-request-list {
+  padding: 0 0 4px;
+}
+
+.social-request-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+}
+
+.social-request-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.social-request-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.social-accept-btn,
+.social-reject-btn,
+.social-cancel-btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.social-accept-btn {
+  background: var(--accent);
+  color: #fff;
+}
+
+.social-reject-btn,
+.social-cancel-btn {
+  background: var(--field);
+  color: var(--muted);
+}
+
+.social-reject-btn:hover,
+.social-cancel-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.social-room-list {
+  padding: 0 0 4px;
+}
+
+.social-empty {
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* Social chat layout */
+.social-chat-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.social-chat-layout .chat {
+  background: var(--surface);
+}
+
+.social-chat-empty {
+  padding: 24px;
+  color: var(--faint);
+  font-size: 14px;
+  text-align: center;
+}
+
+.social-msg-sender {
+  font-size: 11px;
+  color: var(--faint);
+  margin: 0 4px 2px;
+}
+
+.social-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.social-composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 120px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: 0;
+  padding: 8px 12px;
+  resize: none;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+
+.social-composer textarea:focus {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: var(--surface);
 }
 
 @media (max-width: 760px) {
