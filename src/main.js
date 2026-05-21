@@ -204,6 +204,7 @@ function runtimePaths() {
     daemonToken: path.join(home, "aimashi-daemon.key"),
     relaySettings: path.join(home, "aimashi-relay.json"),
     cloudSettings: path.join(home, "aimashi-cloud.json"),
+    cloudWorkspace: path.join(home, "aimashi-cloud-workspace.json"),
     petRemoteSettings: path.join(home, "aimashi-pet-remote.json"),
     appearanceSettings: path.join(home, "aimashi-appearance.json"),
     chatSessions: path.join(home, "aimashi-sessions.json"),
@@ -583,6 +584,68 @@ function writeCloudSettings(settings = {}) {
   fs.mkdirSync(path.dirname(p.cloudSettings), { recursive: true });
   fs.writeFileSync(p.cloudSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
   return next;
+}
+
+function readCloudWorkspace() {
+  return readJson(runtimePaths().cloudWorkspace, null);
+}
+
+function writeCloudWorkspace(workspace) {
+  const p = runtimePaths();
+  fs.mkdirSync(path.dirname(p.cloudWorkspace), { recursive: true });
+  fs.writeFileSync(p.cloudWorkspace, JSON.stringify({
+    workspace: workspace || null,
+    syncedAt: new Date().toISOString()
+  }, null, 2) + "\n", { mode: 0o600 });
+  return readCloudWorkspace();
+}
+
+function mergeCloudWorkspaceIntoChatStore(workspace) {
+  if (!workspace || !Array.isArray(workspace.conversations)) return loadChatStore();
+  const manifest = loadFellowManifest();
+  const fellowKeys = new Set(
+    (Array.isArray(manifest.fellows) ? manifest.fellows : [])
+      .map((fellow) => String(fellow?.key || "").trim())
+      .filter(Boolean)
+  );
+  const defaultPersonaKey = String(manifest.default_fellow || "aimashi");
+  const store = loadChatStore();
+  // Each conversation is merged under the persona it was originally
+  // attached to (carried via `conversation.personaKey` from the
+  // desktop-sync encoder). Conversations whose source persona no longer
+  // exists fall back to the manifest default so they don't disappear.
+  const touchedPersonas = new Set();
+  for (const conversation of workspace.conversations) {
+    const requested = String(conversation?.personaKey || "").trim();
+    const personaKey = requested && fellowKeys.has(requested)
+      ? requested
+      : defaultPersonaKey;
+    if (!store.sessions[personaKey]) store.sessions[personaKey] = [];
+    touchedPersonas.add(personaKey);
+    const incoming = desktopSessionFromCloudConversation(conversation, personaKey);
+    const existing = store.sessions[personaKey].find((session) => session.id === incoming.id);
+    if (!existing) {
+      store.sessions[personaKey].push(incoming);
+      continue;
+    }
+    const messagesByKey = new Map();
+    for (const message of existing.messages || []) {
+      messagesByKey.set(chatMessageMergeKey(message), message);
+    }
+    for (const message of incoming.messages || []) {
+      const key = chatMessageMergeKey(message);
+      const previous = messagesByKey.get(key);
+      messagesByKey.set(key, previous ? mergeChatMessageRecord(previous, message) : message);
+    }
+    existing.title = incoming.title || existing.title;
+    existing.titleGenerated = Boolean(existing.titleGenerated || incoming.titleGenerated);
+    existing.updatedAt = [existing.updatedAt, incoming.updatedAt].filter(Boolean).sort().at(-1) || new Date().toISOString();
+    existing.messages = [...messagesByKey.values()].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  }
+  for (const personaKey of touchedPersonas) {
+    store.sessions[personaKey].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+  return saveChatStore(store);
 }
 
 const CLI_PATH_SEGMENTS = [

@@ -43,6 +43,13 @@ function cloudConversationIdForSession(session = {}) {
 }
 
 function cloudConversationFromDesktopSession(session = {}, fellow = {}) {
+  // Encode the source personaKey on the conversation so the cloud echo
+  // can be merged back under the correct local fellow instead of always
+  // collapsing under default_fellow. Use both an explicit field and the
+  // existing meta string (legacy clients/servers preserve unknown fields).
+  const personaKey = String(
+    session.personaKey || fellow.key || fellow.id || ""
+  ).trim();
   return {
     id: cloudConversationIdForSession(session),
     title: String(session.title || "新对话").trim() || "新对话",
@@ -50,7 +57,8 @@ function cloudConversationFromDesktopSession(session = {}, fellow = {}) {
     avatar: String(fellow.avatarImage || fellow.avatar || "./assets/avatar-08.png"),
     updatedAt: String(session.updatedAt || session.createdAt || new Date().toISOString()),
     unread: 0,
-    messages: []
+    messages: [],
+    personaKey
   };
 }
 
@@ -113,9 +121,12 @@ function desktopMessageFromCloudMessage(message = {}) {
 
 function desktopSessionFromCloudConversation(conversation = {}, personaKey = "aimashi") {
   const updatedAt = String(conversation.updatedAt || new Date().toISOString());
+  // Prefer the conversation's own personaKey if the desktop client encoded
+  // one when uploading. Falls back to the caller's default.
+  const source = String(conversation.personaKey || personaKey || "aimashi").trim();
   return {
     id: desktopSessionIdFromCloudConversation(conversation),
-    personaKey,
+    personaKey: source,
     title: String(conversation.title || "新对话").trim() || "新对话",
     titleGenerated: true,
     createdAt: String(conversation.createdAt || updatedAt),
