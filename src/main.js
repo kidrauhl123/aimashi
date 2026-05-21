@@ -33,6 +33,7 @@ const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
 const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
+const { createSkillsLoader } = require("./main/skills-loader.js");
 const { createTasksStore } = require("./main/tasks-store.js");
 const { createScheduler } = require("./main/scheduler.js");
 const { createFireRunner } = require("./main/scheduler-fire.js");
@@ -98,6 +99,17 @@ let engineState = {
   lastError: "",
   logs: []
 };
+
+const skillsLoader = createSkillsLoader({
+  runtimePaths,
+  readJson,
+  officialLibraryManifestPath,
+  resolveOfficialLibraryRoot,
+  getEngineState: () => engineState,
+  apiKey,
+  appendEngineLog,
+  isChildPath,
+});
 let authProcess = null;
 let codexOAuthCancelled = false;
 let claudeAgentSdkModule = null;
@@ -3386,389 +3398,6 @@ function skillRoots() {
   ];
 }
 
-function cleanYamlScalar(value) {
-  let text = String(value || "").trim();
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1);
-  }
-  return text.replace(/\\"/g, '"').trim();
-}
-
-function parseSkillMarkdown(filePath, rootInfo) {
-  const raw = fs.readFileSync(filePath, "utf8");
-  const rel = path.relative(rootInfo.root, path.dirname(filePath));
-  const parts = rel.split(path.sep).filter(Boolean);
-  const fallbackName = parts[parts.length - 1] || path.basename(path.dirname(filePath));
-  const rawCategory = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-  const category = rawCategory === ".system" ? "system" : (rawCategory || "uncategorized");
-  const meta = {};
-  let body = raw;
-  let frontmatter = "";
-  if (raw.startsWith("---")) {
-    const lines = raw.split(/\r?\n/);
-    const end = lines.findIndex((line, index) => index > 0 && /^---\s*$/.test(line));
-    if (end > 0) {
-      frontmatter = lines.slice(1, end).join("\n");
-      body = lines.slice(end + 1).join("\n");
-      for (const line of lines.slice(1, end)) {
-        const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-        if (match) meta[match[1]] = cleanYamlScalar(match[2]);
-      }
-    }
-  }
-  const tagMatch = frontmatter.match(/tags:\s*\[([^\]]+)\]/);
-  const tags = tagMatch
-    ? tagMatch[1].split(",").map((item) => cleanYamlScalar(item)).filter(Boolean).slice(0, 8)
-    : [];
-  const firstHeading = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-  const paragraphs = body
-    .replace(/^#.+$/gm, "")
-    .split(/\n\s*\n/)
-    .map((item) => item.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const description = meta.description || paragraphs[0] || "";
-  const id = `${rootInfo.idPrefix || rootInfo.source}:${rel}`;
-  return {
-    id,
-    name: meta.name || fallbackName,
-    title: firstHeading || meta.name || fallbackName,
-    description: description.slice(0, 520),
-    version: meta.version || "",
-    category,
-    tags,
-    source: rootInfo.source,
-    sourceLabel: rootInfo.label,
-    relPath: rel,
-    filePath,
-    bodyPreview: body.trim().slice(0, 1200),
-    bodyLength: body.length
-  };
-}
-
-function findSkillFiles(root, maxDepth = 8) {
-  const files = [];
-  function walk(dir, depth) {
-    if (depth > maxDepth) return;
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isFile() && entry.name === "SKILL.md") {
-        files.push(full);
-      } else if (entry.isDirectory() && !["node_modules", ".git", "__pycache__"].includes(entry.name)) {
-        walk(full, depth + 1);
-      }
-    }
-  }
-  walk(root, 0);
-  return files;
-}
-
-function countDirectoryFiles(dir, predicate = () => true, maxDepth = 2) {
-  let count = 0;
-  function walk(current, depth) {
-    if (depth > maxDepth) return;
-    let entries = [];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full, depth + 1);
-      else if (entry.isFile() && predicate(full, entry)) count += 1;
-    }
-  }
-  walk(dir, 0);
-  return count;
-}
-
-function simpleYamlValue(text, key) {
-  const match = String(text || "").match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-  return match ? cleanYamlScalar(match[1]) : "";
-}
-
-function simpleYamlList(text, key) {
-  const lines = String(text || "").split(/\r?\n/);
-  const out = [];
-  let inList = false;
-  for (const line of lines) {
-    if (new RegExp(`^${key}:\\s*$`).test(line)) {
-      inList = true;
-      continue;
-    }
-    if (!inList) continue;
-    if (/^\S/.test(line)) break;
-    const item = line.match(/^\s*-\s+(.+)$/);
-    if (item) out.push(cleanYamlScalar(item[1]));
-  }
-  return out;
-}
-
-function enumerateConnectors() {
-  const connectors = [];
-  const seen = new Set();
-  return connectors
-    .filter((connector) => {
-      const key = connector.id || `${connector.kind}:${connector.path}:${connector.label}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => (
-      String(a.kind || "").localeCompare(String(b.kind || ""))
-      || String(a.sourceLabel || "").localeCompare(String(b.sourceLabel || ""))
-      || String(a.label || "").localeCompare(String(b.label || ""))
-    ));
-}
-
-function extensionCapabilitySummary(extension) {
-  const parts = [];
-  if (extension.skillCount) parts.push(`${extension.skillCount} Skills`);
-  if (extension.commandCount) parts.push(`${extension.commandCount} Commands`);
-  if (extension.agentCount) parts.push(`${extension.agentCount} Agents`);
-  if (extension.toolCount) parts.push(`${extension.toolCount} Tools`);
-  if (extension.hookCount) parts.push(`${extension.hookCount} Hooks`);
-  if (extension.mcpCount) parts.push(`${extension.mcpCount} MCP`);
-  return parts.join(" · ") || extension.status || "已发现";
-}
-
-function enumerateExtensions() {
-  return []
-    .map((extension) => ({ ...extension, capabilitySummary: extensionCapabilitySummary(extension) }))
-    .sort((a, b) => (
-      String(a.installState === "installed" ? "0" : "1").localeCompare(String(b.installState === "installed" ? "0" : "1"))
-      ||
-      String(a.engineLabel || "").localeCompare(String(b.engineLabel || ""))
-      || String(a.label || a.name || "").localeCompare(String(b.label || b.name || ""))
-    ));
-}
-
-function enumeratePlugins() {
-  const out = [];
-  for (const source of readAimashiOfficialSkillSources()) {
-    out.push(source);
-  }
-  return out;
-}
-
-function readAimashiOfficialSkillSources() {
-  const manifestPath = officialLibraryManifestPath();
-  const manifest = readJson(manifestPath, null);
-  if (!manifest || typeof manifest !== "object") return [];
-  const libraryId = String(manifest.id || "aimashi-official").trim() || "aimashi-official";
-  const libraryLabel = String(manifest.label || "Aimashi 官方库").trim() || "Aimashi 官方库";
-  return (Array.isArray(manifest.skillSources) ? manifest.skillSources : [])
-    .map((item) => {
-      const id = String(item?.id || item?.name || "").trim();
-      const root = resolveOfficialLibraryRoot(item?.root);
-      if (!id || !root) return null;
-      return {
-        id: `${libraryId}:${id}`,
-        name: String(item.name || id).trim(),
-        label: String(item.label || item.name || id).trim(),
-        description: String(item.description || manifest.description || "").trim(),
-        source: libraryId,
-        sourceLabel: libraryLabel,
-        kind: "official-skill-source",
-        engine: String(item.engine || "aimashi").trim(),
-        root,
-        idPrefix: String(item.idPrefix || libraryId).trim() || libraryId
-      };
-    })
-    .filter(Boolean);
-}
-
-async function fetchHermesSkillsCatalog(timeoutMs = 1500) {
-  if (!engineState.running || !engineState.baseUrl) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${engineState.baseUrl}/api/skills`, {
-      headers: { Authorization: `Bearer ${apiKey()}` },
-      signal: controller.signal
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.skills)) return data.skills;
-    if (Array.isArray(data?.items)) return data.items;
-    return null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function loadLocalSkills() {
-  const pluginDefs = enumeratePlugins();
-  const extensions = enumerateExtensions();
-  const connectors = enumerateConnectors();
-  const skills = [];
-  const seenByName = new Set();
-  const plugins = [];
-  for (const plugin of pluginDefs) {
-    if (!fs.existsSync(plugin.root)) {
-      plugins.push({
-        id: plugin.id,
-        name: plugin.name,
-        label: plugin.label,
-        description: plugin.description,
-        source: plugin.source,
-        sourceLabel: plugin.sourceLabel || plugin.label,
-        kind: plugin.kind || "skill-source",
-        engine: plugin.engine || "",
-        extensionId: plugin.extensionId || "",
-        root: plugin.root,
-        skillCount: 0
-      });
-      continue;
-    }
-    let pluginSkills = 0;
-    for (const filePath of findSkillFiles(plugin.root)) {
-      try {
-        const skill = parseSkillMarkdown(filePath, plugin);
-        if (plugin.source !== "aimashi" && seenByName.has(skill.name.toLowerCase())) continue;
-        seenByName.add(skill.name.toLowerCase());
-        skill.pluginId = plugin.id;
-        skill.pluginLabel = plugin.label;
-        skill.pluginSource = plugin.source;
-        skill.extensionId = plugin.extensionId || "";
-        skill.sourceKind = plugin.kind || "skill-source";
-        skills.push(skill);
-        pluginSkills += 1;
-      } catch (error) {
-        appendEngineLog(`Skill scan skipped ${filePath}: ${error.message}`);
-      }
-    }
-    plugins.push({
-      id: plugin.id,
-      name: plugin.name,
-      label: plugin.label,
-      description: plugin.description,
-      source: plugin.source,
-      sourceLabel: plugin.sourceLabel || plugin.label,
-      kind: plugin.kind || "skill-source",
-      engine: plugin.engine || "",
-      extensionId: plugin.extensionId || "",
-      root: plugin.root,
-      skillCount: pluginSkills
-    });
-  }
-  const hermes = await fetchHermesSkillsCatalog();
-  if (hermes) {
-    const enabledByName = new Map();
-    for (const item of hermes) {
-      const name = String(item?.name || "").trim();
-      if (!name) continue;
-      enabledByName.set(name, item?.enabled !== false);
-    }
-    for (const skill of skills) {
-      if (enabledByName.has(skill.name)) skill.enabled = enabledByName.get(skill.name);
-      else skill.enabled = true;
-    }
-  } else {
-    for (const skill of skills) skill.enabled = true;
-  }
-  skills.sort((a, b) => (
-    String(a.pluginLabel || "").localeCompare(String(b.pluginLabel || ""))
-    || String(a.category || "").localeCompare(String(b.category || ""))
-    || String(a.name).localeCompare(String(b.name))
-  ));
-  return {
-    plugins,
-    sources: plugins,
-    extensions,
-    connectors,
-    skills,
-    roots: plugins.map((p) => ({ source: p.source, label: p.label, root: p.root, exists: fs.existsSync(p.root) }))
-  };
-}
-
-async function installMarketplacePlugin(extensionId) {
-  void extensionId;
-  throw new Error("Aimashi 插件安装源尚未接入；不会安装 Codex 或 Claude Code 来源的插件。");
-}
-
-function resolveLocalSkill(identifier) {
-  const target = String(identifier || "").trim();
-  if (!target) return null;
-  for (const plugin of enumeratePlugins()) {
-    if (!fs.existsSync(plugin.root)) continue;
-    const inAimashiPrivate = plugin.source === "aimashi" && isChildPath(runtimePaths().home, plugin.root);
-    for (const filePath of findSkillFiles(plugin.root)) {
-      try {
-        const raw = fs.readFileSync(filePath, "utf8");
-        const skill = parseSkillMarkdown(filePath, plugin);
-        skill.pluginId = plugin.id;
-        skill.pluginLabel = plugin.label;
-        skill.pluginSource = plugin.source;
-        const aliases = [
-          skill.id,
-          skill.name,
-          `${plugin.idPrefix || plugin.source}:${skill.relPath}`,
-          path.basename(path.dirname(filePath))
-        ].filter(Boolean);
-        if (aliases.some((alias) => String(alias).trim() === target)) {
-          return { filePath, root: plugin.root, inAimashiPrivate, raw, skill };
-        }
-      } catch {
-        // skip unreadable
-      }
-    }
-  }
-  return null;
-}
-
-function readLocalSkill(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  const stat = fs.statSync(found.filePath);
-  if (stat.size > 2 * 1024 * 1024) throw new Error("Skill file is too large to preview.");
-  return {
-    ...found.skill,
-    body: found.raw,
-    filePath: found.filePath
-  };
-}
-
-function expandLeadingSkillCommand(text, { mode = "inline" } = {}) {
-  const trimmed = String(text || "");
-  const match = trimmed.match(/^\s*\/([A-Za-z0-9_\/-]+)(?:[\s:]+([\s\S]+))?$/);
-  if (!match) return null;
-  const name = match[1];
-  const userRequest = (match[2] || "").trim();
-  const found = resolveLocalSkill(name);
-  if (!found) return null;
-  if (mode === "native") {
-    return [
-      `用户选择了 Aimashi Skill：${name}。`,
-      "请优先使用运行环境里同名的 Skill；如果 Skill 工具需要命名空间，请选择最匹配这个名称的 Skill。",
-      "",
-      userRequest
-        ? `用户请求：\n${userRequest}`
-        : "用户还没有补充具体请求，请基于这个 Skill 询问必要细节或开始执行。"
-    ].join("\n");
-  }
-  return [
-    "请严格按以下 Skill 指南完成任务。",
-    "",
-    `=== Skill: ${name} ===`,
-    found.raw.trim(),
-    "=== End Skill ===",
-    "",
-    userRequest
-      ? `用户请求：\n${userRequest}`
-      : "（用户已选定此 skill，请按 skill 指南询问需要的细节或开始执行。）"
-  ].join("\n");
-}
-
 function isChildPath(parentPath, targetPath) {
   const parent = path.resolve(parentPath);
   const target = path.resolve(targetPath);
@@ -3776,26 +3405,6 @@ function isChildPath(parentPath, targetPath) {
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-async function deleteLocalSkill(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  if (!found.inAimashiPrivate) throw new Error("只能删除 Aimashi 私有 Skill 目录里的 Skill。");
-  const aimashiRoot = path.join(runtimePaths().home, "skills");
-  const skillDir = path.dirname(found.filePath);
-  if (!isChildPath(aimashiRoot, skillDir)) throw new Error("Skill path is outside the Aimashi skills directory.");
-  fs.rmSync(skillDir, { recursive: true, force: true });
-  return loadLocalSkills();
-}
-
-async function openLocalSkillDirectory(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  const skillDir = path.dirname(found.filePath);
-  if (!fs.existsSync(skillDir)) throw new Error("Skill directory not found.");
-  const error = await shell.openPath(skillDir);
-  if (error) throw new Error(error);
-  return { opened: true, path: skillDir };
-}
 
 function isSlashCommandText(messages) {
   const normalized = normalizeRunMessages(messages);
@@ -6945,7 +6554,7 @@ function createActiveClaudeCodeChatAdapter() {
     chatCompletionResponse,
     claudeAgentSdk,
     ensureClaudeBridgePlugin,
-    expandLeadingSkillCommand,
+    expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
     getAgentSessionEntry,
     getSchedulerMcpSpec,
     injectGroupContextForSdk,
@@ -6964,7 +6573,7 @@ function createActiveCodexChatAdapter() {
     chatCompletionResponse,
     codexSdk,
     ensureCodexHome,
-    expandLeadingSkillCommand,
+    expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
     getAgentSessionId,
     injectGroupContextForSdk,
     lastUserPrompt,
@@ -7395,11 +7004,11 @@ ipcMain.handle("chat:title-generate", (_event, payload) => generateSessionTitle(
 ipcMain.handle("model:catalog", () => loadHermesModelCatalog());
 ipcMain.handle("codex:list-models", () => loadCodexModels());
 ipcMain.handle("engine:capabilities", () => loadEngineCapabilities());
-ipcMain.handle("skills:list", () => loadLocalSkills());
-ipcMain.handle("plugins:install", (_event, extensionId) => installMarketplacePlugin(extensionId));
-ipcMain.handle("skills:read", (_event, skillId) => readLocalSkill(skillId));
-ipcMain.handle("skills:delete", (_event, skillId) => deleteLocalSkill(skillId));
-ipcMain.handle("skills:open-directory", (_event, skillId) => openLocalSkillDirectory(skillId));
+ipcMain.handle("skills:list", () => skillsLoader.loadLocalSkills());
+ipcMain.handle("plugins:install", (_event, extensionId) => skillsLoader.installMarketplacePlugin(extensionId));
+ipcMain.handle("skills:read", (_event, skillId) => skillsLoader.readLocalSkill(skillId));
+ipcMain.handle("skills:delete", (_event, skillId) => skillsLoader.deleteLocalSkill(skillId));
+ipcMain.handle("skills:open-directory", (_event, skillId) => skillsLoader.openLocalSkillDirectory(skillId));
 ipcMain.handle("permissions:save", async (_event, settings) => {
   writePermissionSettings(settings);
   return getRuntimeStatus();
