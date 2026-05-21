@@ -494,6 +494,20 @@ function generateInviteCode() {
   return out;
 }
 
+function userIsMemberOfRoom(socialStore, roomId, userId) {
+  if (roomId.startsWith("dm:")) {
+    const parts = roomId.split(":");
+    if (parts.length !== 3) return false;
+    const [, a, b] = parts;
+    if (userId !== a && userId !== b) return false;
+    const other = userId === a ? b : a;
+    return socialStore.areFriends(userId, other);
+  }
+  return socialStore.listRoomMembers(roomId).some(
+    (m) => m.member_kind === "user" && m.member_ref === userId
+  );
+}
+
 function tokenFromRequest(req) {
   const auth = String(req.headers.authorization || "");
   return auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
@@ -725,6 +739,67 @@ async function handleRequest(req, res, context) {
     if (req.method === "DELETE" && unfriendMatch) {
       context.socialStore.removeFriendship(auth.user.id, unfriendMatch[1]);
       return writeJson(res, 200, { ok: true });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/rooms") {
+      const rooms = context.socialStore.listRoomsForUser(auth.user.id);
+      return writeJson(res, 200, { rooms });
+    }
+
+    const roomMsgsMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages$/);
+    const roomDetailMatch = !roomMsgsMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
+
+    if (req.method === "GET" && roomDetailMatch) {
+      const roomId = roomDetailMatch[1];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const room = context.socialStore.getRoom(roomId);
+      if (!room) return writeError(res, 404, "room not found");
+      const members = context.socialStore.listRoomMembers(roomId);
+      return writeJson(res, 200, { room, members });
+    }
+
+    if (req.method === "GET" && roomMsgsMatch) {
+      const roomId = roomMsgsMatch[1];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const sinceSeq = Number(url.searchParams.get("since_seq") || 0);
+      const limit = Number(url.searchParams.get("limit") || 100);
+      const messages = context.messagesStore.listMessagesSince(roomId, sinceSeq, limit);
+      return writeJson(res, 200, { messages });
+    }
+
+    if (req.method === "POST" && roomMsgsMatch) {
+      const roomId = roomMsgsMatch[1];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const body = await readJson(req);
+      // DM rooms are lazy-created on first message (per spec §6)
+      if (roomId.startsWith("dm:") && !context.socialStore.getRoom(roomId)) {
+        const parts = roomId.split(":");
+        const [, a, b] = parts;
+        const other = auth.user.id === a ? b : a;
+        ensureDmRoom(context.socialStore, auth.user.id, other);
+      }
+      const message = context.messagesStore.appendMessage({
+        roomId,
+        senderKind: "user",
+        senderRef: auth.user.id,
+        bodyMd: body.bodyMd || "",
+        attachments: body.attachments || null,
+        mentions: body.mentions || null,
+        turnId: body.turnId || null,
+        status: "complete",
+      });
+      for (const m of context.socialStore.listRoomMembers(roomId)) {
+        if (m.member_kind === "user") {
+          broadcastEvent(context.eventHub, m.member_ref, { type: "room.message_appended", roomId, message });
+        }
+      }
+      return writeJson(res, 201, { message });
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
