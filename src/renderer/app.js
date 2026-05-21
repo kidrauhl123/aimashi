@@ -14,10 +14,6 @@ const fallbackSlashCommands = [
 const SIDEBAR_WIDTH_MIN = 220;
 const SIDEBAR_WIDTH_MAX = 380;
 const SIDEBAR_WIDTH_DEFAULT = 280;
-const scrollbarTimers = new WeakMap();
-let scrollbarOverlayEl = null;
-let scrollbarOverlayTarget = null;
-let scrollbarDrag = null;
 let skillPickerHoverCloseTimer = 0;
 const qrSvgCache = new Map();
 const ICON_PARK_PIN_SVG = '<svg class="icon-park-pin" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M10.6963 17.5042C13.3347 14.8657 16.4701 14.9387 19.8781 16.8076L32.62 9.74509L31.8989 4.78683L43.2126 16.1005L38.2656 15.3907L31.1918 28.1214C32.9752 31.7589 33.1337 34.6647 30.4953 37.3032C30.4953 37.3032 26.235 33.0429 22.7171 29.525L6.44305 41.5564L18.4382 25.2461C14.9202 21.7281 10.6963 17.5042 10.6963 17.5042Z"/></svg>';
@@ -402,157 +398,6 @@ function showNarrowContent() {
 function showNarrowSidebar() {
   state.narrowPane = "sidebar";
   syncNarrowLayout();
-}
-
-function ensureScrollbarOverlay() {
-  if (scrollbarOverlayEl) return scrollbarOverlayEl;
-  scrollbarOverlayEl = document.createElement("div");
-  scrollbarOverlayEl.className = "scrollbar-overlay";
-  scrollbarOverlayEl.addEventListener("pointerdown", startScrollbarOverlayDrag);
-  scrollbarOverlayEl.addEventListener("pointerenter", () => {
-    const target = scrollbarOverlayTarget;
-    if (!target) return;
-    const previous = scrollbarTimers.get(target);
-    if (previous) {
-      window.clearTimeout(previous);
-      scrollbarTimers.delete(target);
-    }
-    target.classList.add("scrollbar-visible", "scrollbar-active");
-    updateScrollbarOverlay(target);
-  });
-  scrollbarOverlayEl.addEventListener("pointerleave", () => {
-    if (scrollbarDrag?.active) return;
-    const target = scrollbarOverlayTarget;
-    if (!target) return;
-    scheduleScrollbarHide(target, 500);
-  });
-  document.body.appendChild(scrollbarOverlayEl);
-  return scrollbarOverlayEl;
-}
-
-function scrollbarOverlayMetrics(target) {
-  if (!(target instanceof Element)) return;
-  const maxScroll = target.scrollHeight - target.clientHeight;
-  if (maxScroll <= 0) return;
-  const rect = target.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return;
-  const trackInset = 3;
-  const trackHeight = Math.max(0, rect.height - trackInset * 2);
-  const thumbHeight = Math.max(28, Math.min(trackHeight, (target.clientHeight / target.scrollHeight) * trackHeight));
-  const travel = Math.max(0, trackHeight - thumbHeight);
-  return { rect, maxScroll, trackInset, trackHeight, thumbHeight, travel };
-}
-
-function updateScrollbarOverlay(target) {
-  const metrics = scrollbarOverlayMetrics(target);
-  if (!metrics) return;
-  const { rect, maxScroll, trackInset, thumbHeight, travel } = metrics;
-  const overlay = ensureScrollbarOverlay();
-  const thumbTop = rect.top + trackInset + (target.scrollTop / maxScroll) * travel;
-  const thumbLeft = rect.right - 10;
-
-  overlay.style.height = `${thumbHeight}px`;
-  overlay.style.transform = `translate3d(${Math.round(thumbLeft)}px, ${Math.round(thumbTop)}px, 0)`;
-  overlay.classList.add("visible");
-  scrollbarOverlayTarget = target;
-}
-
-function hideScrollbarOverlay(target) {
-  if (scrollbarDrag?.active) return;
-  if (target && scrollbarOverlayTarget !== target) return;
-  if (!scrollbarOverlayEl) return;
-  scrollbarOverlayEl.classList.remove("visible");
-  scrollbarOverlayTarget = null;
-}
-
-function scheduleScrollbarHide(target, delay = 850) {
-  if (!(target instanceof Element)) return;
-  const previous = scrollbarTimers.get(target);
-  if (previous) window.clearTimeout(previous);
-  scrollbarTimers.set(target, window.setTimeout(() => {
-    if (scrollbarDrag?.active && scrollbarDrag.target === target) return;
-    if (target.matches(":hover") || scrollbarOverlayEl?.matches(":hover")) return;
-    target.classList.remove("scrollbar-visible");
-    target.classList.remove("scrollbar-active");
-    scrollbarTimers.delete(target);
-    hideScrollbarOverlay(target);
-  }, delay));
-}
-
-function showScrollingScrollbar(target) {
-  if (!(target instanceof Element)) return;
-  if (target === document.documentElement || target === document.body) return;
-  if (target.scrollHeight <= target.clientHeight && target.scrollWidth <= target.clientWidth) return;
-  updateScrollbarOverlay(target);
-  target.classList.add("scrollbar-visible");
-  target.classList.add("scrollbar-active");
-  scheduleScrollbarHide(target);
-}
-
-function scrollableAncestor(node) {
-  let current = node instanceof Element ? node : node?.parentElement;
-  while (current && current !== document.body && current !== document.documentElement) {
-    const style = window.getComputedStyle(current);
-    const canScrollY = current.scrollHeight > current.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY);
-    if (canScrollY) return current;
-    current = current.parentElement;
-  }
-  return null;
-}
-
-function maybeShowScrollbarForPointer(event) {
-  if (scrollbarDrag?.active) return;
-  if (scrollbarOverlayEl?.contains(event.target)) return;
-  const target = scrollableAncestor(event.target);
-  if (!target) return;
-  const rect = target.getBoundingClientRect();
-  const nearRightEdge = event.clientX >= rect.right - 18 && event.clientX <= rect.right + 4;
-  if (!nearRightEdge && scrollbarOverlayTarget !== target) return;
-  showScrollingScrollbar(target);
-}
-
-function startScrollbarOverlayDrag(event) {
-  const target = scrollbarOverlayTarget;
-  const metrics = scrollbarOverlayMetrics(target);
-  if (!target || !metrics || !scrollbarOverlayEl) return;
-  event.preventDefault();
-  event.stopPropagation();
-  const previous = scrollbarTimers.get(target);
-  if (previous) {
-    window.clearTimeout(previous);
-    scrollbarTimers.delete(target);
-  }
-  scrollbarOverlayEl.setPointerCapture?.(event.pointerId);
-  scrollbarOverlayEl.classList.add("dragging");
-  target.classList.add("scrollbar-visible", "scrollbar-active");
-  scrollbarDrag = {
-    active: true,
-    pointerId: event.pointerId,
-    target,
-    startY: event.clientY,
-    startScrollTop: target.scrollTop,
-    maxScroll: metrics.maxScroll,
-    travel: metrics.travel || 1
-  };
-}
-
-function updateScrollbarOverlayDrag(event) {
-  if (!scrollbarDrag?.active) return;
-  event.preventDefault();
-  const { target, startY, startScrollTop, maxScroll, travel } = scrollbarDrag;
-  const deltaY = event.clientY - startY;
-  target.scrollTop = Math.max(0, Math.min(maxScroll, startScrollTop + (deltaY / travel) * maxScroll));
-  updateScrollbarOverlay(target);
-}
-
-function stopScrollbarOverlayDrag(event) {
-  if (!scrollbarDrag?.active) return;
-  const { target, pointerId } = scrollbarDrag;
-  scrollbarOverlayEl?.releasePointerCapture?.(pointerId);
-  scrollbarOverlayEl?.classList.remove("dragging");
-  scrollbarDrag = null;
-  updateScrollbarOverlay(target);
-  scheduleScrollbarHide(target, 650);
 }
 
 applySidebarWidth(state.sidebarWidth);
@@ -5061,32 +4906,29 @@ function stopSidebarResize(event) {
 document.addEventListener("pointerup", stopSidebarResize);
 document.addEventListener("pointercancel", stopSidebarResize);
 document.addEventListener("scroll", (event) => {
-  showScrollingScrollbar(event.target);
+  window.aimashiScrollbarOverlay.showScrollingScrollbar(event.target);
 }, { capture: true, passive: true });
 document.addEventListener("pointermove", (event) => {
-  updateScrollbarOverlayDrag(event);
-  maybeShowScrollbarForPointer(event);
+  window.aimashiScrollbarOverlay.updateScrollbarOverlayDrag(event);
+  window.aimashiScrollbarOverlay.maybeShowScrollbarForPointer(event);
 }, { capture: true });
-document.addEventListener("pointerup", stopScrollbarOverlayDrag, { capture: true });
-document.addEventListener("pointercancel", stopScrollbarOverlayDrag, { capture: true });
+document.addEventListener("pointerup", (event) => window.aimashiScrollbarOverlay.stopScrollbarOverlayDrag(event), { capture: true });
+document.addEventListener("pointercancel", (event) => window.aimashiScrollbarOverlay.stopScrollbarOverlayDrag(event), { capture: true });
 document.addEventListener("mouseover", (event) => {
   const target = event.target?.closest?.(".scrollbar-active");
   if (!target) return;
-  const previous = scrollbarTimers.get(target);
-  if (previous) {
-    window.clearTimeout(previous);
-    scrollbarTimers.delete(target);
-  }
-  updateScrollbarOverlay(target);
+  window.aimashiScrollbarOverlay.cancelScrollbarHide(target);
+  window.aimashiScrollbarOverlay.updateScrollbarOverlay(target);
   target.classList.add("scrollbar-visible");
 }, { capture: true, passive: true });
 document.addEventListener("mouseout", (event) => {
   const target = event.target?.closest?.(".scrollbar-active");
   if (!target || target.contains(event.relatedTarget)) return;
-  scheduleScrollbarHide(target, 500);
+  window.aimashiScrollbarOverlay.scheduleScrollbarHide(target, 500);
 }, { capture: true, passive: true });
 window.addEventListener("resize", () => {
-  if (scrollbarOverlayTarget) updateScrollbarOverlay(scrollbarOverlayTarget);
+  const overlayTarget = window.aimashiScrollbarOverlay.getScrollbarOverlayTarget();
+  if (overlayTarget) window.aimashiScrollbarOverlay.updateScrollbarOverlay(overlayTarget);
   const isNarrow = window.innerWidth <= 720;
   if (!state.isNarrowWindow && isNarrow) {
     state.narrowPane = "content";
