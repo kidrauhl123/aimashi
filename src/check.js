@@ -73,6 +73,7 @@ const required = [
   "src/renderer/skill-helpers.js",
   "src/renderer/settings-remote.js",
   "src/renderer/scrollbar-overlay.js",
+  "src/renderer/format-helpers.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",

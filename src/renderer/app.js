@@ -413,32 +413,6 @@ function renderSendButton() {
   els.sendChat.disabled = !state.isGenerating && !canSend;
 }
 
-function formatBytes(value) {
-  const size = Number(value) || 0;
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
-}
-
-function attachmentKind(file = {}) {
-  const type = String(file.type || file.mime || "").toLowerCase();
-  if (type.startsWith("image/")) return "image";
-  if (type.startsWith("video/")) return "video";
-  if (type.startsWith("audio/")) return "audio";
-  if (type.includes("pdf")) return "pdf";
-  if (type.startsWith("text/")) return "text";
-  return "file";
-}
-
-function attachmentGlyph(attachment = {}) {
-  const kind = attachment.kind || attachmentKind(attachment);
-  if (kind === "image") return "IMG";
-  if (kind === "video") return "VID";
-  if (kind === "audio") return "AUD";
-  if (kind === "pdf") return "PDF";
-  if (kind === "text") return "TXT";
-  return "FILE";
-}
 
 const providerPresets = {
   "openai-codex": {
@@ -1530,12 +1504,12 @@ function renderAttachmentChips(attachments = []) {
 
 function renderAttachmentThumb(attachment = {}, className = "attachment-thumb") {
   const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || "").trim();
-  if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(attachmentGlyph(attachment))}</span>`;
+  if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(window.aimashiFormat.attachmentGlyph(attachment))}</span>`;
   return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
 }
 
 function renderAttachmentChip(attachment = {}) {
-  const image = (attachment.kind || attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || attachment.url);
+  const image = (attachment.kind || window.aimashiFormat.attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || attachment.url);
   const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
   const tag = href ? "a" : "span";
   const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
@@ -1550,7 +1524,7 @@ function renderAttachmentChip(attachment = {}) {
     <${tag} class="message-attachment"${download} title="${escapeHtml(attachment.path || attachment.name || "")}">
       ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
       <strong>${escapeHtml(attachment.name || "附件")}</strong>
-      <em>${escapeHtml(formatBytes(attachment.size))}</em>
+      <em>${escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</em>
     </${tag}>
   `;
 }
@@ -1618,7 +1592,7 @@ function hydrateAttachmentPreview(attachment = {}) {
   const filePath = String(attachment.path || "").trim();
   const cloudUrl = String(attachment.url || "").trim();
   if ((!filePath && !cloudUrl) || attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return attachment;
-  const kind = String(attachment.kind || attachmentKind(attachment));
+  const kind = String(attachment.kind || window.aimashiFormat.attachmentKind(attachment));
   if (kind !== "image") return attachment;
   if (cloudUrl) {
     const entry = state.generatedFiles.get(cloudUrl);
@@ -1641,7 +1615,7 @@ function attachmentPreviewPaths(messages = []) {
       const cloudUrl = String(attachment.url || "").trim();
       if (!filePath && !cloudUrl) return false;
       if (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl) return false;
-      return String(attachment.kind || attachmentKind(attachment)) === "image";
+      return String(attachment.kind || window.aimashiFormat.attachmentKind(attachment)) === "image";
     })
     .map((attachment) => String(attachment.path || attachment.url).trim());
 }
@@ -4153,7 +4127,7 @@ function appendChat(role, content, options = {}) {
       path: String(attachment.path || ""),
       mime: String(attachment.mime || attachment.type || ""),
       size: Number(attachment.size) || 0,
-      kind: String(attachment.kind || attachmentKind(attachment)),
+      kind: String(attachment.kind || window.aimashiFormat.attachmentKind(attachment)),
       thumbnailDataUrl: String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || ""),
       dataUrl: String(attachment.dataUrl || "")
     }));
@@ -4291,7 +4265,7 @@ function renderComposerAttachments() {
     <div class="composer-attachment${attachment.thumbnailDataUrl ? " image" : ""}" title="${escapeHtml(attachment.path || attachment.name)}">
       <span class="composer-attachment-kind">${renderAttachmentThumb(attachment, "composer-attachment-thumb")}</span>
       <span class="composer-attachment-name">${escapeHtml(attachment.name || "附件")}</span>
-      <span class="composer-attachment-size">${escapeHtml(formatBytes(attachment.size))}</span>
+      <span class="composer-attachment-size">${escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</span>
       <button type="button" data-attachment-remove="${escapeHtml(attachment.id)}" title="移除附件" aria-label="移除附件">×</button>
     </div>
   `).join("");
@@ -4457,7 +4431,7 @@ async function addComposerFiles(fileList) {
       path: filePath || "",
       mime: saved?.mime || file.type || "",
       size: saved?.size || file.size || 0,
-      kind: saved?.kind || attachmentKind(file),
+      kind: saved?.kind || window.aimashiFormat.attachmentKind(file),
       thumbnailDataUrl: saved?.thumbnailDataUrl || thumbnailDataUrl || ""
     });
   }
