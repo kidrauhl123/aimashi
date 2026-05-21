@@ -515,6 +515,11 @@ function createCloudStore(options = {}) {
     return rowToBridgeRun(db.prepare("SELECT * FROM bridge_runs WHERE id = ? AND user_id = ?").get(runId, userId));
   }
 
+  function getUserPublic(userId) {
+    const row = getUserById(userId);
+    return row ? publicUser(row) : null;
+  }
+
   return {
     registerUser,
     loginUser,
@@ -536,6 +541,8 @@ function createCloudStore(options = {}) {
     cancelBridgeRun,
     listBridgeRuns,
     getBridgeRun,
+    getUserPublic,
+    getDb: () => db,
     close: () => db.close()
   };
 }
@@ -613,11 +620,73 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
     CREATE INDEX IF NOT EXISTS idx_bridge_devices_user ON bridge_devices(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_bridge_runs_user ON bridge_runs(user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS friendships (
+      user_a       TEXT NOT NULL,
+      user_b       TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      PRIMARY KEY (user_a, user_b)
+    );
+
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id           TEXT PRIMARY KEY,
+      from_user    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      to_user      TEXT,
+      code         TEXT UNIQUE,
+      status       TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      resolved_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS rooms (
+      id                TEXT PRIMARY KEY,
+      name              TEXT,
+      avatar            TEXT,
+      host_member_json  TEXT,
+      decorations_json  TEXT,
+      context_card_json TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS room_members (
+      room_id       TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      member_kind   TEXT NOT NULL,
+      member_ref    TEXT NOT NULL,
+      owner_id      TEXT,
+      ai_perms_json TEXT,
+      joined_at     TEXT NOT NULL,
+      PRIMARY KEY (room_id, member_kind, member_ref)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id              TEXT PRIMARY KEY,
+      room_id         TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      seq             INTEGER NOT NULL,
+      turn_id         TEXT,
+      sender_kind     TEXT NOT NULL,
+      sender_ref      TEXT NOT NULL,
+      sender_owner_id TEXT,
+      body_md         TEXT NOT NULL DEFAULT '',
+      attachments_json TEXT,
+      mentions_json   TEXT,
+      status          TEXT NOT NULL,
+      error_json      TEXT,
+      created_at      TEXT NOT NULL,
+      UNIQUE (room_id, seq)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user, status);
+    CREATE INDEX IF NOT EXISTS idx_friend_requests_code ON friend_requests(code, status);
+    CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(member_kind, member_ref);
+    CREATE INDEX IF NOT EXISTS idx_messages_room_seq ON messages(room_id, seq);
   `);
   if (!hasColumn(db, "bridge_runs", "request_attachments_json")) {
     db.exec("ALTER TABLE bridge_runs ADD COLUMN request_attachments_json TEXT NOT NULL DEFAULT '[]'");
   }
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)")
+    .run(nowIso());
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, ?)")
     .run(nowIso());
 }
 
