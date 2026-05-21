@@ -5205,12 +5205,22 @@ els.chatForm.addEventListener("submit", async (event) => {
       : { reasoning: "", tools: [] };
     state.streaming = null;
     appendChat("assistant", answer, { reasoning: traceSnapshot.reasoning, tools: traceSnapshot.tools, attachments: responseAttachments });
-    await persistSessionQuietly(session);
-    const assistantMessage = session.messages[session.messages.length - 1];
+    // The `session` captured at the top of this handler is now orphan:
+    // persistSessionQuietly(session) at the start of the try block reassigned
+    // state.chatStore via IPC (saveChatSession returns a freshly normalized
+    // store), so the original session object no longer lives inside it.
+    // appendChat above pushed the assistant message into the LIVE session
+    // (state.chatStore.sessions[...]), not into the orphan ref. Persisting
+    // the orphan here would save its stale messages and clobber the assistant
+    // we just appended — that's the "回复被吞" regression introduced by
+    // 0eb1458. Re-resolve to the live session before persist + cloud push.
+    const liveSession = activeSession();
+    await persistSessionQuietly(liveSession);
+    const assistantMessage = liveSession.messages[liveSession.messages.length - 1];
     // Wait for the earlier user push to land first so /api/messages
     // receives user → assistant in order (Codex review P2).
     try { await userCloudPush; } catch { /* user push errors are non-fatal */ }
-    await pushCloudMessageQuietly(session, assistantMessage);
+    await pushCloudMessageQuietly(liveSession, assistantMessage);
     window.aimashiSessionReadState.persistReadStateQuietly();
     if (shouldGenerateTitle) {
       const current = activeSession();
@@ -5227,11 +5237,17 @@ els.chatForm.addEventListener("submit", async (event) => {
     }
     await refreshRuntime();
   } catch (error) {
+    // Re-resolve session — see comment on `liveSession` above for why the
+    // captured `session` is orphan once persistSessionQuietly has reassigned
+    // state.chatStore. The "生成已停止" branch persists whatever's in memory
+    // (typically just the user message); the error branch first appends an
+    // assistant-side error message via appendChat (which targets the live
+    // session via activeSession()), then persists.
     if (String(error.message || "").includes("生成已停止")) {
-      await persistSessionQuietly(session);
+      await persistSessionQuietly(activeSession());
     } else {
       appendChat("assistant", `Request failed: ${error.message}`);
-      await persistSessionQuietly(session);
+      await persistSessionQuietly(activeSession());
     }
     await refreshRuntime();
   } finally {
