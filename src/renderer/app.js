@@ -6463,6 +6463,32 @@ if (window.aimashi.onEnginesChanged) {
   window.aimashi.onEnginesChanged(() => { refreshRuntime().catch(() => {}); });
 }
 
+if (window.aimashi.onCloudEvent) {
+  let cloudEventRefreshTimer = 0;
+  window.aimashi.onCloudEvent((envelope = {}) => {
+    if (envelope.cloud && state.runtime) {
+      state.runtime = {
+        ...state.runtime,
+        cloud: envelope.cloud
+      };
+      renderCloudAccount(envelope.cloud);
+    }
+    // Refresh runtime metadata (cloud connection / device list) only.
+    // We intentionally do NOT reload chatStore here — that races with
+    // unpersisted in-memory messages the user just sent, causing them to
+    // disappear/reappear. Cross-device chat sync needs incremental
+    // application of cloud message events; until that exists the local
+    // device sees its own messages immediately and remote-device messages
+    // on the next manual reload.
+    clearTimeout(cloudEventRefreshTimer);
+    cloudEventRefreshTimer = setTimeout(() => {
+      refreshRuntime().catch((error) => {
+        console.error("Failed to refresh runtime after Cloud event", error);
+      });
+    }, envelope.type === "events_ready" ? 500 : 120);
+  });
+}
+
 els.installEngine.addEventListener("click", async () => {
   els.installEngine.disabled = true;
   els.installEngine.textContent = "Installing...";
