@@ -44,6 +44,8 @@ const { createFireRunner } = require("./main/scheduler-fire.js");
 const { createTasksEventBus } = require("./main/tasks-events.js");
 const { createTasksRoutes } = require("./main/tasks-routes.js");
 const { createSchedulerMcp } = require("./main/scheduler-mcp.js");
+const { createSocialApi } = require("./main/social/social-api.js");
+const { registerSocialIpc } = require("./main/social/social-ipc.js");
 const {
   cloudConversationFromDesktopSession,
   cloudMessageFromDesktopMessage,
@@ -4655,6 +4657,14 @@ function handleCloudEventsMessage(raw) {
     broadcastRendererEvent("cloud:event", { type: "events_ready", cloud: cloudStatus(false) });
     return;
   }
+  if (message.type && message.type.startsWith("social.")) {
+    broadcastRendererEvent("cloud:event", { type: message.type, payload: message });
+    return;
+  }
+  if (message.type === "room.message_appended") {
+    broadcastRendererEvent("cloud:event", { type: "room.message_appended", payload: message });
+    return;
+  }
   if (message.type === "workspace_updated" || message.type === "message_created") {
     handleCloudWorkspaceEvent(message);
     return;
@@ -6326,6 +6336,17 @@ ipcMain.handle("cloud:push-message", async (_event, payload) => {
 ipcMain.handle("cloud:logout", async () => {
   await logoutAimashiCloud();
   return getRuntimeStatus();
+});
+const socialApi = createSocialApi({
+  getSettings: () => settingsStore.cloudSettings(),
+  normalizeUrl: settingsStore.normalizeCloudUrl
+});
+registerSocialIpc({ ipcMain, socialApi });
+ipcMain.handle("social:my-username", () => {
+  // cloudSettings().user shape: { id, username, account, ... } or null
+  const settings = settingsStore.cloudSettings();
+  const user = settings && settings.user;
+  return { username: user?.username || user?.account || "", id: user?.id || "" };
 });
 ipcMain.handle("engine:install", () => installEngine());
 ipcMain.handle("engine:start", () => startEngine());

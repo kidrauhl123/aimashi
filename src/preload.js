@@ -115,6 +115,19 @@ contextBridge.exposeInMainWorld("aimashi", {
     saveContextCard: (id, card) => ipcRenderer.invoke("group:save-context-card", { id, card }),
     loadPrompts: () => ipcRenderer.invoke("group:load-prompts"),
   },
+  social: {
+    sendFriendRequest: (toUsername) => ipcRenderer.invoke("social:send-friend-request", toUsername),
+    respondFriendRequest: (requestId, action) => ipcRenderer.invoke("social:respond-friend-request", requestId, action),
+    cancelFriendRequest: (requestId) => ipcRenderer.invoke("social:cancel-friend-request", requestId),
+    listFriendRequests: (direction) => ipcRenderer.invoke("social:list-friend-requests", direction),
+    listFriends: () => ipcRenderer.invoke("social:list-friends"),
+    removeFriend: (userId) => ipcRenderer.invoke("social:remove-friend", userId),
+    listRooms: () => ipcRenderer.invoke("social:list-rooms"),
+    getRoom: (roomId) => ipcRenderer.invoke("social:get-room", roomId),
+    listRoomMessages: (roomId, sinceSeq, limit) => ipcRenderer.invoke("social:list-room-messages", roomId, sinceSeq, limit),
+    postRoomMessage: (roomId, body) => ipcRenderer.invoke("social:post-room-message", roomId, body),
+    myUsername: () => ipcRenderer.invoke("social:my-username")
+  },
   platform: process.platform,
   window: {
     close: () => ipcRenderer.invoke("window:close"),

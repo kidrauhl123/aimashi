@@ -1,0 +1,82 @@
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const http = require("node:http");
+const { createSocialApi } = require("../src/main/social/social-api.js");
+
+function spawnFakeCloud(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      resolve({ server, baseUrl: `http://127.0.0.1:${port}` });
+    });
+  });
+}
+
+async function teardown(ctx) {
+  await new Promise((r) => ctx.server.close(r));
+}
+
+test("sendFriendRequest posts toUsername and parses response", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud(async (req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, body });
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end(JSON.stringify({ request: { id: "fr_1", from_user: "u_a", to_user: "u_b", status: "pending" } }));
+    });
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.sendFriendRequest("bob");
+    assert.equal(result.request.id, "fr_1");
+    assert.equal(seen[0].method, "POST");
+    assert.equal(seen[0].url, "/api/social/friend-requests");
+    assert.deepEqual(JSON.parse(seen[0].body), { toUsername: "bob" });
+  } finally { await teardown(ctx); }
+});
+
+test("listRoomMessages encodes sinceSeq and limit as query params", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud((req, res) => {
+    seen.push(req.url);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ messages: [{ seq: 3, body_md: "hi" }] }));
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.listRoomMessages("dm:x:y", 2, 50);
+    assert.equal(result.messages[0].seq, 3);
+    assert.equal(seen[0], "/api/rooms/dm%3Ax%3Ay/messages?since_seq=2&limit=50");
+  } finally { await teardown(ctx); }
+});
+
+test("non-2xx responses throw with parsed error message", async () => {
+  const ctx = await spawnFakeCloud((req, res) => {
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "user not found" }));
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    await assert.rejects(() => api.sendFriendRequest("ghost"), /user not found/);
+  } finally { await teardown(ctx); }
+});
+
+test("throws if cloud not logged in", async () => {
+  const api = createSocialApi({
+    getSettings: () => ({ enabled: false, token: "", url: "" }),
+    normalizeUrl: (u) => u
+  });
+  await assert.rejects(() => api.sendFriendRequest("bob"), /Cloud not logged in/);
+});
