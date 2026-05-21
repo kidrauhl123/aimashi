@@ -33,6 +33,7 @@ const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
 const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
+const { createFellowManifest } = require("./main/fellow-manifest.js");
 const { createRuntimePaths } = require("./main/runtime-paths.js");
 const { createSettingsStore } = require("./main/settings-store.js");
 const { createSkillsLoader } = require("./main/skills-loader.js");
@@ -127,6 +128,31 @@ const settingsStore = createSettingsStore({
   AIMASHI_DAEMON_DEFAULT_PORT,
   AIMASHI_CLOUD_DEFAULT_URL,
 });
+
+const fellowManifestModule = createFellowManifest({
+  runtimePaths,
+  readJson,
+  normalizeAgentEngine,
+  settingsStore,
+});
+const {
+  defaultFellowManifest,
+  normalizeFellowAgentEngine,
+  normalizeFellowEngineConfig,
+  mergeFellowEngineConfig,
+  normalizeFellowCapabilities,
+  defaultManifest,
+  normalizeFellow,
+  normalizeAvatarCrop,
+  normalizeFellowManifest,
+  loadFellowManifest,
+  saveFellowManifest,
+  fellowPersonaBody,
+  fellowMetadata,
+  fellowPersonaPath,
+  readFellowPersona,
+  fellowKeyFromName,
+} = fellowManifestModule;
 
 const skillsLoader = createSkillsLoader({
   runtimePaths,
@@ -870,156 +896,6 @@ function appearanceSettings() {
   return { ...settingsStore.defaultAppearanceSettings(), ...saved };
 }
 
-function defaultFellowManifest() {
-  // Empty by design — first launch goes through an onboarding flow that asks
-  // the user to create their initial fellow. No pre-baked placeholder.
-  return {
-    schema_version: 1,
-    product: "aimashi",
-    default_fellow: "",
-    fellows: []
-  };
-}
-
-function normalizeFellowAgentEngine(value) {
-  return normalizeAgentEngine(value);
-}
-
-function normalizeFellowEngineConfig(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  const next = {};
-  const model = String(value.model || "").trim();
-  const permissionMode = String(value.permissionMode || value.permission_mode || "").trim();
-  const effortLevel = String(value.effortLevel || value.effort_level || value.reasoningEffort || value.reasoning_effort || "").trim();
-  if (model) next.model = model;
-  if (permissionMode) next.permissionMode = permissionMode;
-  if (effortLevel) next.effortLevel = settingsStore.normalizeStoredEffortLevel(effortLevel);
-  return next;
-}
-
-function mergeFellowEngineConfig(current = {}, update = {}) {
-  const next = normalizeFellowEngineConfig(current);
-  if (Object.prototype.hasOwnProperty.call(update || {}, "model")) {
-    const model = String(update.model || "").trim();
-    if (model) next.model = model;
-    else delete next.model;
-  }
-  if (Object.prototype.hasOwnProperty.call(update || {}, "permissionMode")
-    || Object.prototype.hasOwnProperty.call(update || {}, "permission_mode")) {
-    const permissionMode = String(update.permissionMode || update.permission_mode || "").trim();
-    if (permissionMode) next.permissionMode = permissionMode;
-    else delete next.permissionMode;
-  }
-  if (Object.prototype.hasOwnProperty.call(update || {}, "effortLevel")
-    || Object.prototype.hasOwnProperty.call(update || {}, "effort_level")
-    || Object.prototype.hasOwnProperty.call(update || {}, "reasoningEffort")
-    || Object.prototype.hasOwnProperty.call(update || {}, "reasoning_effort")) {
-    const effortLevel = String(update.effortLevel || update.effort_level || update.reasoningEffort || update.reasoning_effort || "").trim();
-    if (effortLevel) next.effortLevel = settingsStore.normalizeStoredEffortLevel(effortLevel);
-    else delete next.effortLevel;
-  }
-  return next;
-}
-
-function normalizeCapabilityIds(input) {
-  return Array.isArray(input)
-    ? [...new Set(input.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 500)
-    : [];
-}
-
-function normalizeFellowCapabilities(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  return {
-    inheritEngineDefaults: value.inheritEngineDefaults !== false && value.inherit_engine_defaults !== false,
-    enabledPlugins: normalizeCapabilityIds(value.enabledPlugins || value.enabled_plugins),
-    disabledPlugins: normalizeCapabilityIds(value.disabledPlugins || value.disabled_plugins),
-    enabledSkills: normalizeCapabilityIds(value.enabledSkills || value.enabled_skills),
-    disabledSkills: normalizeCapabilityIds(value.disabledSkills || value.disabled_skills),
-    enabledConnectors: normalizeCapabilityIds(value.enabledConnectors || value.enabled_connectors)
-  };
-}
-
-function defaultManifest() {
-  const manifest = defaultFellowManifest();
-  return {
-    schema_version: manifest.schema_version,
-    product: manifest.product,
-    default_persona: manifest.default_fellow,
-    personas: manifest.fellows
-  };
-}
-
-function normalizeFellow(item) {
-  const key = String(item?.key || item?.account_id || "").trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_");
-  const name = String(item?.name || item?.display_name || key || "Aimashi").trim();
-  if (!key || !name) return null;
-  const pinnedAt = String(item?.pinnedAt || item?.pinned_at || "").trim();
-  return {
-    key,
-    name,
-    account_id: String(item?.account_id || key).trim() || key,
-    route_profile: String(item?.route_profile || item?.account_id || key).trim() || key,
-    agentEngine: normalizeFellowAgentEngine(item?.agentEngine || item?.agent_engine || item?.engine),
-    engineConfig: normalizeFellowEngineConfig(item?.engineConfig || item?.engine_config),
-    platform: String(item?.platform || "api_server").trim() || "api_server",
-    color: String(item?.color || item?.accent_color || "#0f766e").trim() || "#0f766e",
-    avatarImage: String(item?.avatarImage || item?.avatar_image || "").trim(),
-    avatarCrop: normalizeAvatarCrop(item?.avatarCrop || item?.avatar_crop),
-    pinned: Boolean(item?.pinned || item?.is_pinned || pinnedAt),
-    pinnedAt,
-    bio: String(item?.bio || item?.description || "").trim(),
-    capabilities: normalizeFellowCapabilities(item?.capabilities)
-  };
-}
-
-function normalizeAvatarCrop(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  const num = (raw, fallback, min, max) => {
-    const next = Number(raw);
-    if (!Number.isFinite(next)) return fallback;
-    return Math.max(min, Math.min(max, next));
-  };
-  return {
-    x: num(value.x, 50, 0, 100),
-    y: num(value.y, 50, 0, 100),
-    zoom: num(value.zoom, 1, 1, 2.4)
-  };
-}
-
-function normalizeFellowManifest(input) {
-  const source = input && typeof input === "object" ? input : defaultFellowManifest();
-  const rawFellows = Array.isArray(source.fellows)
-    ? source.fellows
-    : Array.isArray(source.personas)
-      ? source.personas
-      : defaultFellowManifest().fellows;
-  const fellows = rawFellows.map(normalizeFellow).filter(Boolean);
-  return {
-    schema_version: 1,
-    product: "aimashi",
-    default_fellow: String(source.default_fellow || source.default_persona || fellows[0]?.key || ""),
-    fellows
-  };
-}
-
-function loadFellowManifest() {
-  const p = runtimePaths();
-  if (fs.existsSync(p.fellowManifest)) {
-    return normalizeFellowManifest(readJson(p.fellowManifest, defaultFellowManifest()));
-  }
-  if (fs.existsSync(p.legacyPersonaManifest)) {
-    return normalizeFellowManifest(readJson(p.legacyPersonaManifest, defaultManifest()));
-  }
-  return defaultFellowManifest();
-}
-
-function saveFellowManifest(manifest) {
-  const p = runtimePaths();
-  const normalized = normalizeFellowManifest(manifest);
-  fs.mkdirSync(path.dirname(p.fellowManifest), { recursive: true });
-  fs.writeFileSync(p.fellowManifest, JSON.stringify(normalized, null, 2) + "\n");
-  return normalized;
-}
 
 function defaultChatStore() {
   return {
@@ -1180,57 +1056,6 @@ function ensurePersonaSession(store, personaKey) {
   return store.sessions[personaKey][0];
 }
 
-function fellowPersonaBody(name, description = "") {
-  return [
-    `# ${name}`,
-    "",
-    `你是${name}，Aimashi App 里的本地伙伴。`,
-    description ? String(description).trim() : "请保持清楚、可靠、可执行的沟通风格。",
-    ""
-  ].join("\n");
-}
-
-function fellowMetadata(fellow) {
-  return {
-    account_id: fellow.key,
-    display_name: fellow.name,
-    agent_engine: normalizeFellowAgentEngine(fellow.agentEngine || fellow.agent_engine),
-    engine_config: normalizeFellowEngineConfig(fellow.engineConfig || fellow.engine_config),
-    accent_color: fellow.color || "#0f766e",
-    avatar_image: fellow.avatarImage || "",
-    avatar_crop: fellow.avatarCrop || { x: 50, y: 50, zoom: 1 },
-    pinned: Boolean(fellow.pinned),
-    pinned_at: fellow.pinnedAt || "",
-    bio: fellow.bio || "",
-    capabilities: normalizeFellowCapabilities(fellow.capabilities),
-    created_at: new Date().toISOString()
-  };
-}
-
-function fellowPersonaPath(key) {
-  return path.join(runtimePaths().fellowDir, `${String(key || "").trim()}.md`);
-}
-
-function readFellowPersona(key, fallbackName = "Aimashi", fallbackBio = "") {
-  const personaPath = fellowPersonaPath(key);
-  try {
-    return fs.readFileSync(personaPath, "utf8");
-  } catch {
-    return fellowPersonaBody(fallbackName, fallbackBio);
-  }
-}
-
-function fellowKeyFromName(name) {
-  const slug = String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 40);
-  if (slug) return slug;
-  const hash = crypto.createHash("sha1").update(String(name || "fellow")).digest("hex").slice(0, 10);
-  return `fellow_${hash}`;
-}
 
 function fellowPetId(key) {
   const cleaned = String(key || "")

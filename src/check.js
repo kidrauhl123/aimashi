@@ -13,6 +13,7 @@ const required = [
   "src/main/codex-chat-adapter.js",
   "src/main/fellow-registry.js",
   "src/main/hermes-chat-adapter.js",
+  "src/main/fellow-manifest.js",
   "src/main/runtime-paths.js",
   "src/main/settings-store.js",
   "src/main/skills-loader.js",
