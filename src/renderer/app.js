@@ -477,155 +477,6 @@ const providerLabels = {
   lmstudio: "LM Studio"
 };
 
-function fallbackCatalogFromPresets() {
-  return Object.values(providerPresets).map((preset) => ({
-    id: `${preset.provider}::${preset.model || ""}`,
-    provider: preset.provider,
-    providerLabel: providerLabels[preset.provider] || preset.provider,
-    model: preset.model || "",
-    label: preset.model || "Local Model",
-    authType: preset.provider === "openai-codex" ? "oauth_external" : "api_key",
-    apiKeyEnv: preset.apiKeyEnv,
-    baseUrl: preset.baseUrl,
-    apiMode: preset.apiMode || "chat_completions"
-  }));
-}
-
-function modelKey(model = {}) {
-  return `${String(model.provider || "").trim()}::${String(model.model || "").trim()}`;
-}
-
-function catalogEntries() {
-  const base = state.modelCatalog.length ? state.modelCatalog : fallbackCatalogFromPresets();
-  const current = state.runtime?.model || {};
-  const currentId = modelKey(current);
-  if (!current.provider || base.some((entry) => entry.id === currentId)) return base;
-  return [
-    {
-      id: currentId,
-      provider: current.provider,
-      providerLabel: providerLabels[current.provider] || current.provider,
-      model: current.model || "",
-      label: current.model || "Custom Model",
-      authType: current.provider === "openai-codex" ? "oauth_external" : "api_key",
-      apiKeyEnv: current.apiKeyEnv || "",
-      baseUrl: current.baseUrl || "",
-      apiMode: current.apiMode || "chat_completions"
-    },
-    ...base
-  ];
-}
-
-function catalogEntryForModel(model = {}) {
-  const key = modelKey(model);
-  return catalogEntries().find((entry) => entry.id === key)
-    || catalogEntries().find((entry) => entry.provider === model.provider && entry.model === model.model)
-    || null;
-}
-
-function providerEntries() {
-  const providers = new Map();
-  for (const entry of catalogEntries()) {
-    if (!entry.provider || providers.has(entry.provider)) continue;
-    providers.set(entry.provider, {
-      ...entry,
-      id: entry.provider,
-      model: "",
-      label: entry.providerLabel || providerLabels[entry.provider] || entry.provider
-    });
-  }
-  return [...providers.values()];
-}
-
-function modelsForProvider(provider) {
-  return catalogEntries().filter((entry) => entry.provider === provider);
-}
-
-function defaultModelForProvider(provider, runtime = state.runtime) {
-  const current = runtime?.model || {};
-  if (current.provider === provider) {
-    const currentEntry = catalogEntryForModel(current);
-    if (currentEntry) return currentEntry;
-  }
-  return modelsForProvider(provider).find((entry) => entry.model) || modelsForProvider(provider)[0] || null;
-}
-
-function providerEntryForProvider(provider) {
-  return providerEntries().find((entry) => entry.provider === provider) || null;
-}
-
-function providerIconSrc(provider = "") {
-  const id = String(provider || "").trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-");
-  if (!id || id === "custom") return "";
-  return `./assets/provider-icons/${id}.svg`;
-}
-
-function modelIconSrc(model = {}) {
-  const id = String(model.model || model.id || model.name || "").toLowerCase();
-  const provider = String(model.provider || "").toLowerCase();
-  const rules = [
-    [/codex|openai-codex/, "chatgpt.jpeg"],
-    [/gpt-5\.1-chat/, "gpt-5.1-chat.png"],
-    [/gpt-5\.1/, "gpt-5.1.png"],
-    [/gpt-5.*mini/, "gpt-5-mini.png"],
-    [/gpt-5.*nano/, "gpt-5-nano.png"],
-    [/gpt-5/, "gpt-5.png"],
-    [/gpt-4/, "gpt_4.png"],
-    [/gpt-3/, "gpt_3.5.png"],
-    [/claude|anthropic/, "claude.png"],
-    [/deepseek/, "deepseek.png"],
-    [/grok|xai/, "grok.png"],
-    [/qwen|qwq|qvq|wan-/, "qwen.png"],
-    [/gemini/, "gemini.png"],
-    [/gemma/, "gemma.png"],
-    [/llama/, "llama.png"],
-    [/mistral|mixtral|codestral|ministral|magistral/, "mixtral.png"],
-    [/kimi|moonshot/, "moonshot.webp"],
-    [/minimax|abab|m2-her/, "minimax.png"],
-    [/mimo/, "mimo.svg"],
-    [/nvidia|nemotron/, "nvidia.png"],
-    [/copilot/, "copilot.png"],
-    [/hermes|nous/, "nousresearch.png"],
-    [/hugging/, "huggingface.png"],
-    [/glm|zai|zhipu/, "zhipu.png"],
-    [/step/, "step.png"]
-  ];
-  const haystack = `${id} ${provider}`;
-  const match = rules.find(([regex]) => regex.test(haystack));
-  if (match) return `./assets/model-icons/${match[1]}`;
-  return providerIconSrc(provider);
-}
-
-function providerLabel(provider = "") {
-  return providerEntryForProvider(provider)?.providerLabel
-    || providerLabels[provider]
-    || (state.runtime?.connectedProviders || []).find((entry) => entry.provider === provider)?.providerLabel
-    || provider
-    || "Provider";
-}
-
-function selectedProviderEntry() {
-  const provider = els.modelSelect?.value || "";
-  return provider ? providerEntryForProvider(provider) : null;
-}
-
-function selectedModelEntry() {
-  const providerEntry = selectedProviderEntry();
-  return providerEntry ? defaultModelForProvider(providerEntry.provider, state.runtime) : null;
-}
-
-function presetKeyForModel(model = {}) {
-  return catalogEntryForModel(model)?.id || "custom";
-}
-
-function modelDisplayName(model = {}) {
-  const provider = String(model.provider || "").trim();
-  const entry = catalogEntryForModel(model);
-  const name = entry?.label || String(model.model || "").trim() || (provider === "lmstudio" ? "Local Model" : "未选择模型");
-  const label = providerLabel(provider) || "Custom";
-  return `${name} | ${label}`;
-}
-
 function activeAgentEngine() {
   const persona = activePersona();
   return persona?.agentEngine || persona?.agent_engine || "hermes";
@@ -906,8 +757,8 @@ function providerIsConnected(provider, runtime = state.runtime) {
 
 function connectedModelEntries(runtime = state.runtime) {
   const connectedProviders = (runtime?.connectedProviders || []).map((entry) => entry.provider);
-  const entries = connectedProviders.flatMap((provider) => modelsForProvider(provider));
-  const current = catalogEntryForModel(runtime.model);
+  const entries = connectedProviders.flatMap((provider) => window.aimashiModelHelpers.modelsForProvider(provider));
+  const current = window.aimashiModelHelpers.catalogEntryForModel(runtime.model);
   if (current && providerIsConnected(current.provider, runtime) && !entries.some((entry) => entry.id === current.id)) return [current, ...entries];
   return entries;
 }
@@ -919,11 +770,11 @@ function renderModelSelectors(runtime = state.runtime) {
     const entries = externalModelEntries(engine);
     setSelectOptions(els.quickModelSelect, entries, config.model || "default");
     if (els.quickModelSelect) els.quickModelSelect.disabled = !entries.length;
-    setProviderOptions(els.modelSelect, providerEntries().filter((entry) => !providerIsConnected(entry.provider, runtime)), "");
+    setProviderOptions(els.modelSelect, window.aimashiModelHelpers.providerEntries().filter((entry) => !providerIsConnected(entry.provider, runtime)), "");
     return;
   }
-  const providers = providerEntries().filter((entry) => !providerIsConnected(entry.provider, runtime));
-  const currentId = catalogEntryForModel(runtime?.model || {})?.id || modelKey(runtime?.model || {});
+  const providers = window.aimashiModelHelpers.providerEntries().filter((entry) => !providerIsConnected(entry.provider, runtime));
+  const currentId = window.aimashiModelHelpers.catalogEntryForModel(runtime?.model || {})?.id || window.aimashiModelHelpers.modelKey(runtime?.model || {});
   setProviderOptions(els.modelSelect, providers, "");
   const connectedEntries = connectedModelEntries(runtime);
   setSelectOptions(els.quickModelSelect, connectedEntries, currentId);
@@ -976,7 +827,7 @@ function renderConnectedProviders(runtime = state.runtime) {
     const row = document.createElement("div");
     row.className = "connected-provider";
     row.innerHTML = `
-      <span class="provider-logo-wrap"><img class="provider-logo" src="${escapeHtml(modelIconSrc({ provider: provider.provider }))}" alt="" onerror="this.style.display='none'"></span>
+      <span class="provider-logo-wrap"><img class="provider-logo" src="${escapeHtml(window.aimashiModelHelpers.modelIconSrc({ provider: provider.provider }))}" alt="" onerror="this.style.display='none'"></span>
       <span class="provider-main">
         <strong>${escapeHtml(provider.providerLabel || provider.provider)}</strong>
       </span>
@@ -1774,10 +1625,10 @@ async function loadChatSessions(options = {}) {
 async function loadModelCatalog() {
   try {
     const rows = await window.aimashi.loadModelCatalog();
-    state.modelCatalog = Array.isArray(rows) && rows.length ? rows : fallbackCatalogFromPresets();
+    state.modelCatalog = Array.isArray(rows) && rows.length ? rows : window.aimashiModelHelpers.fallbackCatalogFromPresets();
   } catch (error) {
     console.error("Failed to load Hermes model catalog", error);
-    state.modelCatalog = fallbackCatalogFromPresets();
+    state.modelCatalog = window.aimashiModelHelpers.fallbackCatalogFromPresets();
   }
 }
 
@@ -1910,8 +1761,8 @@ function selectedAuthMethod(runtime) {
 }
 
 function updateModelFieldVisibility(runtime = state.runtime) {
-  const providerEntry = selectedProviderEntry();
-  const entry = selectedModelEntry();
+  const providerEntry = window.aimashiModelHelpers.selectedProviderEntry();
+  const entry = window.aimashiModelHelpers.selectedModelEntry();
   const authType = String(entry?.authType || "api_key");
   const isConnected = providerIsConnected(entry?.provider, runtime);
   const isCodex = entry ? entry.provider === "openai-codex" : false;
@@ -2001,9 +1852,9 @@ function render() {
   if (!editingModel && !editingModelSelect) renderModelSelectors(runtime);
   renderConnectedProviders(runtime);
   updateModelFieldVisibility(runtime);
-  const selectedEntry = selectedModelEntry();
+  const selectedEntry = window.aimashiModelHelpers.selectedModelEntry();
   const selectedProvider = selectedEntry?.provider || auth.oauthProvider || "openai-codex";
-  const selectedProviderLabel = providerLabel(selectedProvider);
+  const selectedProviderLabel = window.aimashiModelHelpers.providerLabel(selectedProvider);
   const selectedConnected = providerIsConnected(selectedProvider, runtime);
   els.codexStatus.textContent = auth.codexStarting
     ? `等待 ${auth.oauthProviderLabel || selectedProviderLabel} 授权`
@@ -2031,7 +1882,7 @@ function render() {
     const engine = activeAgentEngine();
     const currentModelId = engine === "claude-code" || engine === "codex"
       ? (engineConfigForPersona().model || "default")
-      : presetKeyForModel(runtime.model);
+      : window.aimashiModelHelpers.presetKeyForModel(runtime.model);
     if ([...els.quickModelSelect.options].some((option) => option.value === currentModelId)) {
       els.quickModelSelect.value = currentModelId;
     }
@@ -2055,15 +1906,15 @@ function render() {
     els.quickModelSelect.title = engine === "claude-code" || engine === "codex"
       ? `当前模型：${els.quickModelSelect.selectedOptions?.[0]?.textContent || "默认"}`
       : connectedEntries.length
-        ? `当前模型：${modelDisplayName(runtime.model)}`
+        ? `当前模型：${window.aimashiModelHelpers.modelDisplayName(runtime.model)}`
         : "未配置模型";
   }
   const activeIcon = engine === "claude-code"
-    ? modelIconSrc({ provider: "anthropic", model: "claude" })
+    ? window.aimashiModelHelpers.modelIconSrc({ provider: "anthropic", model: "claude" })
     : engine === "codex"
-      ? modelIconSrc({ provider: "openai-codex", model: "codex" })
+      ? window.aimashiModelHelpers.modelIconSrc({ provider: "openai-codex", model: "codex" })
       : connectedEntries.length
-        ? modelIconSrc(runtime.model || {})
+        ? window.aimashiModelHelpers.modelIconSrc(runtime.model || {})
         : "";
   const modelAvatar = document.querySelector(".model-avatar");
   if (modelAvatar) {
@@ -4613,6 +4464,14 @@ async function initializeRuntime() {
   if (window.aimashiSkillHelpers && window.aimashiSkillHelpers.initSkillHelpers) {
     window.aimashiSkillHelpers.initSkillHelpers({ escapeHtml });
   }
+  if (window.aimashiModelHelpers && window.aimashiModelHelpers.initModelHelpers) {
+    window.aimashiModelHelpers.initModelHelpers({
+      state,
+      els,
+      providerLabels,
+      providerPresets,
+    });
+  }
   if (window.aimashiTasksPanel && window.aimashiTasksPanel.initTasksPanel) {
     window.aimashiTasksPanel.initTasksPanel({
       state,
@@ -5170,7 +5029,7 @@ els.stopEngine.addEventListener("click", async () => {
 els.codexLogin.addEventListener("click", async () => {
   els.codexLogin.disabled = true;
   try {
-    const entry = selectedModelEntry();
+    const entry = window.aimashiModelHelpers.selectedModelEntry();
     if (entry) {
       applyModelEntryToFields(entry);
       if (entry.provider === "openai-codex") state.runtime = await window.aimashi.saveModel({
@@ -5185,7 +5044,7 @@ els.codexLogin.addEventListener("click", async () => {
     }
     state.runtime = await window.aimashi.startProviderOAuth({
       provider: entry?.provider || "openai-codex",
-      providerLabel: entry?.providerLabel || providerLabel(entry?.provider || "openai-codex"),
+      providerLabel: entry?.providerLabel || window.aimashiModelHelpers.providerLabel(entry?.provider || "openai-codex"),
       authType: entry?.authType || "oauth_external",
       baseUrl: entry?.baseUrl || "",
       apiMode: entry?.apiMode || ""
@@ -5374,7 +5233,7 @@ els.permissionMode?.addEventListener("change", async () => {
 });
 
 els.modelSelect?.addEventListener("change", () => {
-  const entry = selectedModelEntry();
+  const entry = window.aimashiModelHelpers.selectedModelEntry();
   applyModelEntryToFields(entry);
   updateModelFieldVisibility();
 });
@@ -5913,7 +5772,7 @@ els.fellowForm?.addEventListener("submit", async (event) => {
 
 els.modelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const entry = selectedModelEntry();
+  const entry = window.aimashiModelHelpers.selectedModelEntry();
   if (!entry || providerIsConnected(entry.provider)) return;
   const needsApiKey = entry.provider !== "openai-codex" && entry.provider !== "lmstudio" && !String(entry.authType || "").startsWith("oauth");
   if (needsApiKey && !els.modelApiKey.value.trim()) {
