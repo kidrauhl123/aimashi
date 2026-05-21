@@ -537,3 +537,155 @@ test("end-to-end: two users meet, friend up, exchange DM messages with seq", asy
     assert.deepEqual(partial.body.messages.map((m) => m.seq), [2, 3]);
   } finally { await stopServer(ctx); }
 });
+
+// ── Phase 4.1: Group rooms + fellow members + cross-user invocation ──
+
+async function setupGroupScenario(port) {
+  const alice = await register(port, "alice");
+  const bob = await register(port, "bob");
+  const created = await api(port, "POST", "/api/social/friend-requests", { token: alice.token, body: { toUsername: "bob" } });
+  await api(port, "POST", "/api/social/friend-requests/" + created.body.request.id + "/respond", { token: bob.token, body: { action: "accept" } });
+  return { alice, bob };
+}
+
+test("POST /api/rooms creates group with creator + fellow + friend members", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const r = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: {
+        name: "Test Squad",
+        memberFellows: [{ fellowId: "codex" }],
+        memberFriendUserIds: [bob.user.id]
+      }
+    });
+    assert.equal(r.status, 201);
+    assert.ok(r.body.room.id.startsWith("g_"));
+    assert.equal(r.body.room.name, "Test Squad");
+    const members = r.body.members;
+    assert.equal(members.length, 3); // alice + codex + bob
+    const userMembers = members.filter((m) => m.member_kind === "user").map((m) => m.member_ref).sort();
+    assert.deepEqual(userMembers, [alice.user.id, bob.user.id].sort());
+    const fellowMembers = members.filter((m) => m.member_kind === "fellow");
+    assert.equal(fellowMembers.length, 1);
+    assert.equal(fellowMembers[0].member_ref, "codex");
+    assert.equal(fellowMembers[0].owner_id, alice.user.id);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/rooms refuses non-friend in memberFriendUserIds", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const stranger = await register(ctx.port, "stranger");
+    const r = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "x", memberFellows: [], memberFriendUserIds: [stranger.user.id] }
+    });
+    assert.equal(r.status, 403);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/rooms/:id/members adds friend after group exists", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const charlie = await register(ctx.port, "charlie");
+    // alice friends charlie
+    const fr = await api(ctx.port, "POST", "/api/social/friend-requests", { token: alice.token, body: { toUsername: "charlie" } });
+    await api(ctx.port, "POST", "/api/social/friend-requests/" + fr.body.request.id + "/respond", { token: charlie.token, body: { action: "accept" } });
+    // create group with bob
+    const grp = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "G", memberFellows: [], memberFriendUserIds: [bob.user.id] }
+    });
+    // add charlie later
+    const add = await api(ctx.port, "POST", "/api/rooms/" + grp.body.room.id + "/members", {
+      token: alice.token,
+      body: { memberKind: "user", memberRef: charlie.user.id }
+    });
+    assert.equal(add.status, 201);
+    const detail = await api(ctx.port, "GET", "/api/rooms/" + grp.body.room.id, { token: alice.token });
+    assert.equal(detail.body.members.length, 3);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/rooms/:id/members rejects pulling someone else's fellow", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const grp = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "G", memberFellows: [], memberFriendUserIds: [bob.user.id] }
+    });
+    // bob tries to pull alice's fellow (owner_id=alice.user.id) — should fail
+    const add = await api(ctx.port, "POST", "/api/rooms/" + grp.body.room.id + "/members", {
+      token: bob.token,
+      body: { memberKind: "fellow", memberRef: "codex", ownerId: alice.user.id }
+    });
+    assert.equal(add.status, 403);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /messages/as-fellow allows owner to post on behalf of own fellow", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const grp = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "G", memberFellows: [{ fellowId: "codex" }], memberFriendUserIds: [bob.user.id] }
+    });
+    const r = await api(ctx.port, "POST", "/api/rooms/" + grp.body.room.id + "/messages/as-fellow", {
+      token: alice.token,
+      body: { fellowId: "codex", bodyMd: "Hello from Codex" }
+    });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.message.sender_kind, "fellow");
+    assert.equal(r.body.message.sender_ref, "codex");
+    assert.equal(r.body.message.sender_owner_id, alice.user.id);
+    assert.equal(r.body.message.body_md, "Hello from Codex");
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /messages/as-fellow rejects non-owner", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const grp = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "G", memberFellows: [{ fellowId: "codex" }], memberFriendUserIds: [bob.user.id] }
+    });
+    // bob tries to post as alice's codex
+    const r = await api(ctx.port, "POST", "/api/rooms/" + grp.body.room.id + "/messages/as-fellow", {
+      token: bob.token,
+      body: { fellowId: "codex", bodyMd: "fake" }
+    });
+    assert.equal(r.status, 403);
+  } finally { await stopServer(ctx); }
+});
+
+test("fellow mention in group message triggers room.fellow_invocation_requested to owner", async () => {
+  const ctx = await startServer();
+  try {
+    const { alice, bob } = await setupGroupScenario(ctx.port);
+    const grp = await api(ctx.port, "POST", "/api/rooms", {
+      token: alice.token,
+      body: { name: "G", memberFellows: [{ fellowId: "codex" }], memberFriendUserIds: [bob.user.id] }
+    });
+    const aliceWs = await openEventsWs(ctx.port, alice.token);
+    try {
+      await api(ctx.port, "POST", "/api/rooms/" + grp.body.room.id + "/messages", {
+        token: bob.token,
+        body: { bodyMd: "@codex help me", mentions: [{ kind: "fellow", fellowId: "codex" }] }
+      });
+      const inv = await waitForEvent(aliceWs.events, (e) => e.type === "room.fellow_invocation_requested");
+      assert.equal(inv.fellowId, "codex");
+      assert.equal(inv.invokedBy.id, bob.user.id);
+      assert.ok(Array.isArray(inv.recentMessages));
+      assert.ok(inv.triggeringMessage.body_md.includes("help me"));
+    } finally {
+      aliceWs.ws.close();
+    }
+  } finally { await stopServer(ctx); }
+});

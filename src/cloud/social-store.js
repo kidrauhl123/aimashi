@@ -155,6 +155,9 @@ function createSocialStore(db) {
   const selectMembers = db.prepare(
     "SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at"
   );
+  const selectMember = db.prepare(
+    "SELECT * FROM room_members WHERE room_id = ? AND member_kind = ? AND member_ref = ?"
+  );
   const selectRoomsByUser = db.prepare(`
     SELECT r.* FROM rooms r
     INNER JOIN room_members m ON m.room_id = r.id
@@ -236,6 +239,10 @@ function createSocialStore(db) {
     return selectMembers.all(String(roomId));
   }
 
+  function getRoomMember(roomId, memberKind, memberRef) {
+    return selectMember.get(String(roomId), String(memberKind), String(memberRef)) || null;
+  }
+
   function listRoomsForUser(userId) {
     return selectRoomsByUser.all(String(userId)).map(parseRoomRow);
   }
@@ -269,6 +276,7 @@ function createSocialStore(db) {
     listRoomMembers,
     listRoomsForUser,
     updateRoomMemberPerms,
+    getRoomMember,
   };
 }
 

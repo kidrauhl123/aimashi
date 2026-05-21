@@ -784,8 +784,109 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { rooms });
     }
 
-    const roomMsgsMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages$/);
-    const roomDetailMatch = !roomMsgsMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
+    // POST /api/rooms — create a group room
+    if (req.method === "POST" && url.pathname === "/api/rooms") {
+      const body = await readJson(req);
+      const name = String(body.name || "").trim();
+      if (!name || name.length > 80) return writeError(res, 400, "name is required and must be 1..80 chars");
+      const memberFellows = Array.isArray(body.memberFellows) ? body.memberFellows : [];
+      const memberFriendUserIds = Array.isArray(body.memberFriendUserIds) ? body.memberFriendUserIds : [];
+      // Validate friend membership before creating anything
+      for (const friendId of memberFriendUserIds) {
+        if (!context.socialStore.areFriends(auth.user.id, String(friendId))) {
+          return writeError(res, 403, "user is not your friend: " + friendId);
+        }
+      }
+      const roomId = "g_" + require("node:crypto").randomBytes(8).toString("hex");
+      context.socialStore.createRoom({ id: roomId, name });
+      context.socialStore.addRoomMember({ roomId, memberKind: "user", memberRef: auth.user.id });
+      for (const fellow of memberFellows) {
+        const fellowId = String(fellow.fellowId || "").trim();
+        if (!fellowId) continue;
+        context.socialStore.addRoomMember({ roomId, memberKind: "fellow", memberRef: fellowId, ownerId: auth.user.id });
+      }
+      for (const friendId of memberFriendUserIds) {
+        context.socialStore.addRoomMember({ roomId, memberKind: "user", memberRef: String(friendId) });
+      }
+      const room = context.socialStore.getRoom(roomId);
+      const members = context.socialStore.listRoomMembers(roomId);
+      const creatorPublic = context.cloudStore.getUserPublic(auth.user.id);
+      // Broadcast social.room_invited to all user-members except creator
+      for (const m of members) {
+        if (m.member_kind === "user" && m.member_ref !== auth.user.id) {
+          broadcastEvent(context.eventHub, m.member_ref, { type: "social.room_invited", room, invitedBy: creatorPublic });
+        }
+      }
+      return writeJson(res, 201, { room, members });
+    }
+
+    const roomAsFellowMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages\/as-fellow$/);
+    const roomMembersMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/members$/);
+    const roomMsgsMatch = !roomAsFellowMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages$/);
+    const roomDetailMatch = !roomAsFellowMatch && !roomMembersMatch && !roomMsgsMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
+
+    // POST /api/rooms/:id/members — add member to existing group
+    if (req.method === "POST" && roomMembersMatch) {
+      const roomId = roomMembersMatch[1];
+      if (roomId.startsWith("dm:")) return writeError(res, 400, "DM rooms cannot be modified");
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const body = await readJson(req);
+      const memberKind = String(body.memberKind || "");
+      const memberRef = String(body.memberRef || "").trim();
+      if (!memberKind || !memberRef) return writeError(res, 400, "memberKind and memberRef are required");
+      if (memberKind !== "user" && memberKind !== "fellow") return writeError(res, 400, "memberKind must be 'user' or 'fellow'");
+      if (memberKind === "user") {
+        if (!context.socialStore.areFriends(auth.user.id, memberRef)) {
+          return writeError(res, 403, "user is not your friend: " + memberRef);
+        }
+        context.socialStore.addRoomMember({ roomId, memberKind: "user", memberRef });
+        const member = context.socialStore.getRoomMember(roomId, "user", memberRef);
+        const room = context.socialStore.getRoom(roomId);
+        const inviterPublic = context.cloudStore.getUserPublic(auth.user.id);
+        broadcastEvent(context.eventHub, memberRef, { type: "social.room_invited", room, invitedBy: inviterPublic });
+        return writeJson(res, 201, { ok: true, member });
+      }
+      // memberKind === 'fellow'
+      const ownerId = String(body.ownerId || "").trim();
+      if (ownerId !== auth.user.id) {
+        return writeError(res, 403, "you can only add your own fellows");
+      }
+      context.socialStore.addRoomMember({ roomId, memberKind: "fellow", memberRef, ownerId: auth.user.id });
+      const member = context.socialStore.getRoomMember(roomId, "fellow", memberRef);
+      return writeJson(res, 201, { ok: true, member });
+    }
+
+    // POST /api/rooms/:id/messages/as-fellow — post AS a fellow
+    if (req.method === "POST" && roomAsFellowMatch) {
+      const roomId = roomAsFellowMatch[1];
+      const body = await readJson(req);
+      const fellowId = String(body.fellowId || "").trim();
+      if (!fellowId) return writeError(res, 400, "fellowId is required");
+      const fellowMember = context.socialStore.getRoomMember(roomId, "fellow", fellowId);
+      if (!fellowMember || fellowMember.owner_id !== auth.user.id) {
+        return writeError(res, 403, "you are not the owner of this fellow in this room");
+      }
+      const message = context.messagesStore.appendMessage({
+        roomId,
+        senderKind: "fellow",
+        senderRef: fellowId,
+        senderOwnerId: auth.user.id,
+        bodyMd: body.bodyMd || "",
+        attachments: body.attachments || null,
+        mentions: body.mentions || null,
+        turnId: body.turnId || null,
+        status: "complete",
+        errorJson: body.errorJson || null,
+      });
+      for (const m of context.socialStore.listRoomMembers(roomId)) {
+        if (m.member_kind === "user") {
+          broadcastEvent(context.eventHub, m.member_ref, { type: "room.message_appended", roomId, message });
+        }
+      }
+      return writeJson(res, 201, { message });
+    }
 
     if (req.method === "GET" && roomDetailMatch) {
       const roomId = roomDetailMatch[1];
@@ -832,10 +933,32 @@ async function handleRequest(req, res, context) {
         turnId: body.turnId || null,
         status: "complete",
       });
-      for (const m of context.socialStore.listRoomMembers(roomId)) {
+      // 1. Broadcast room.message_appended to all user-members
+      const allMembers = context.socialStore.listRoomMembers(roomId);
+      for (const m of allMembers) {
         if (m.member_kind === "user") {
           broadcastEvent(context.eventHub, m.member_ref, { type: "room.message_appended", roomId, message });
         }
+      }
+      // 2. Handle fellow mentions — dispatch invocation request to fellow owner (cross-user)
+      const mentions = Array.isArray(body.mentions) ? body.mentions : [];
+      for (const mention of mentions) {
+        if (!mention || mention.kind !== "fellow") continue;
+        const fellowId = String(mention.fellowId || "").trim();
+        if (!fellowId) continue;
+        const fellowMember = context.socialStore.getRoomMember(roomId, "fellow", fellowId);
+        if (!fellowMember) continue;
+        // Only dispatch cross-user invocations (owner is not the sender)
+        if (fellowMember.owner_id === auth.user.id) continue;
+        const recentMessages = context.messagesStore.listMessagesSince(roomId, Math.max(0, message.seq - 6), 6);
+        broadcastEvent(context.eventHub, fellowMember.owner_id, {
+          type: "room.fellow_invocation_requested",
+          roomId,
+          fellowId,
+          invokedBy: context.cloudStore.getUserPublic(auth.user.id),
+          triggeringMessage: message,
+          recentMessages,
+        });
       }
       return writeJson(res, 201, { message });
     }
