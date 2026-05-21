@@ -71,6 +71,7 @@ const required = [
   "src/renderer/settings-appearance.js",
   "src/renderer/session-read-state.js",
   "src/renderer/skill-helpers.js",
+  "src/renderer/settings-remote.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",
