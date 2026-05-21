@@ -33,6 +33,11 @@ const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
 const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
+const { createChatStore } = require("./main/chat-store.js");
+const { createFellowManifest } = require("./main/fellow-manifest.js");
+const { createRuntimePaths } = require("./main/runtime-paths.js");
+const { createSettingsStore } = require("./main/settings-store.js");
+const { createSkillsLoader } = require("./main/skills-loader.js");
 const { createTasksStore } = require("./main/tasks-store.js");
 const { createScheduler } = require("./main/scheduler.js");
 const { createFireRunner } = require("./main/scheduler-fire.js");
@@ -98,6 +103,88 @@ let engineState = {
   lastError: "",
   logs: []
 };
+
+const runtimePathsModule = createRuntimePaths({
+  app,
+  runtimeResources,
+  AIMASHI_GATEWAY_SERVICE_LABEL,
+  AIMASHI_DAEMON_SERVICE_LABEL,
+});
+const {
+  runtimePaths,
+  venvPythonPath,
+  bundledHermesRuntimeDir,
+  bundledPython,
+  bundledSitePackages,
+  buildPythonPath,
+  engineMarkerPath,
+} = runtimePathsModule;
+
+const settingsStore = createSettingsStore({
+  runtimePaths,
+  readJson,
+  writeRuntimeConfig,
+  readConfiguredPort,
+  getEngineState: () => engineState,
+  AIMASHI_DAEMON_DEFAULT_PORT,
+  AIMASHI_CLOUD_DEFAULT_URL,
+});
+
+const fellowManifestModule = createFellowManifest({
+  runtimePaths,
+  readJson,
+  normalizeAgentEngine,
+  settingsStore,
+});
+const {
+  defaultFellowManifest,
+  normalizeFellowAgentEngine,
+  normalizeFellowEngineConfig,
+  mergeFellowEngineConfig,
+  normalizeFellowCapabilities,
+  defaultManifest,
+  normalizeFellow,
+  normalizeAvatarCrop,
+  normalizeFellowManifest,
+  loadFellowManifest,
+  saveFellowManifest,
+  fellowPersonaBody,
+  fellowMetadata,
+  fellowPersonaPath,
+  readFellowPersona,
+  fellowKeyFromName,
+} = fellowManifestModule;
+
+const chatStoreModule = createChatStore({
+  runtimePaths,
+  readJson,
+  normalizeAttachments,
+});
+const {
+  defaultChatStore,
+  cleanSessionTitle,
+  fallbackSessionTitle,
+  normalizeMessageReply,
+  normalizeMessageTranslation,
+  chatMessageMergeKey,
+  mergeChatMessageRecord,
+  normalizeChatStore,
+  loadChatStore,
+  saveChatStore,
+  createChatSession,
+  ensurePersonaSession,
+} = chatStoreModule;
+
+const skillsLoader = createSkillsLoader({
+  runtimePaths,
+  readJson,
+  officialLibraryManifestPath,
+  resolveOfficialLibraryRoot,
+  getEngineState: () => engineState,
+  apiKey,
+  appendEngineLog,
+  isChildPath,
+});
 let authProcess = null;
 let codexOAuthCancelled = false;
 let claudeAgentSdkModule = null;
@@ -174,101 +261,7 @@ function ensureGroupStore() {
   return _groupStore;
 }
 
-function defaultModelSettings() {
-  return {
-    provider: "",
-    model: "",
-    apiKeyEnv: "",
-    apiKey: "",
-    baseUrl: "",
-    apiMode: ""
-  };
-}
 
-function runtimePaths() {
-  const root = app.getPath("userData");
-  const runtime = path.join(root, "runtime");
-  const engine = path.join(runtime, "hermes-engine");
-  const home = path.join(runtime, "engine-home");
-  const pluginsDir = path.join(runtime, "aimashi-plugins");
-  return {
-    root,
-    runtime,
-    engine,
-    home,
-    pluginsDir,
-    config: path.join(home, "config.yaml"),
-    soul: path.join(home, "SOUL.md"),
-    fellowManifest: path.join(home, "fellows", "manifest.json"),
-    fellowDir: path.join(home, "fellows"),
-    legacyPersonaManifest: path.join(home, "personas", "manifest.json"),
-    legacyPersonaDir: path.join(home, "personas", "accounts"),
-    personaManifest: path.join(home, "fellows", "manifest.json"),
-    personaDir: path.join(home, "fellows"),
-    apiKey: path.join(home, "api-server.key"),
-    authJson: path.join(home, "auth.json"),
-    userProfile: path.join(home, "aimashi-user.json"),
-    modelSettings: path.join(home, "aimashi-model.json"),
-    providerConnections: path.join(home, "aimashi-providers.json"),
-    permissionSettings: path.join(home, "aimashi-permissions.json"),
-    effortSettings: path.join(home, "aimashi-effort.json"),
-    agentSessions: path.join(home, "aimashi-agent-sessions.json"),
-    daemonSettings: path.join(home, "aimashi-daemon.json"),
-    daemonToken: path.join(home, "aimashi-daemon.key"),
-    relaySettings: path.join(home, "aimashi-relay.json"),
-    cloudSettings: path.join(home, "aimashi-cloud.json"),
-    cloudWorkspace: path.join(home, "aimashi-cloud-workspace.json"),
-    petRemoteSettings: path.join(home, "aimashi-pet-remote.json"),
-    appearanceSettings: path.join(home, "aimashi-appearance.json"),
-    chatSessions: path.join(home, "aimashi-sessions.json"),
-    tasks: path.join(home, "aimashi-tasks.json"),
-    attachmentsDir: path.join(home, "attachments"),
-    groupsDir: path.join(home, "groups"),
-    petDir: path.join(home, "pets"),
-    petJobsDir: path.join(home, "pet-jobs"),
-    logsDir: path.join(home, "logs"),
-    launchAgent: path.join(app.getPath("home"), "Library", "LaunchAgents", `${AIMASHI_GATEWAY_SERVICE_LABEL}.plist`),
-    daemonLaunchAgent: path.join(app.getPath("home"), "Library", "LaunchAgents", `${AIMASHI_DAEMON_SERVICE_LABEL}.plist`)
-  };
-}
-
-function venvPythonPath() {
-  return path.join(runtimePaths().engine, ".venv", "bin", "python");
-}
-
-// Bundled runtime: vendor/hermes-runtime/<target>/ → app.asar.unpacked/resources/hermes-runtime
-function bundledHermesRuntimeDir() {
-  return runtimeResources.bundledHermesRuntimeDir({
-    resourcesPath: process.resourcesPath,
-    appPath: app.getAppPath(),
-    cwd: process.cwd(),
-    platform: process.platform,
-    arch: process.arch
-  });
-}
-
-function bundledPython() {
-  const root = bundledHermesRuntimeDir();
-  return runtimeResources.bundledPython(root, { platform: process.platform });
-}
-
-function bundledSitePackages() {
-  const root = bundledHermesRuntimeDir();
-  return runtimeResources.bundledSitePackages(root);
-}
-
-function buildPythonPath() {
-  const p = runtimePaths();
-  const parts = [p.pluginsDir];
-  const sitePackages = bundledSitePackages();
-  if (sitePackages) parts.push(sitePackages);
-  if (process.env.PYTHONPATH) parts.push(process.env.PYTHONPATH);
-  return parts.join(":");
-}
-
-function engineMarkerPath() {
-  return path.join(runtimePaths().engine, "aimashi-runtime.json");
-}
 
 function officialEngineUrl() {
   if (String(OFFICIAL_ENGINE_URL || "").trim()) return OFFICIAL_ENGINE_URL.trim();
@@ -330,169 +323,6 @@ function isEngineInstalled() {
   return false;
 }
 
-function defaultUserProfile() {
-  return {
-    displayName: "Boss",
-    avatarText: "B",
-    avatarColor: "#111827",
-    avatarImage: "",
-    avatarCrop: { x: 50, y: 50, zoom: 1 }
-  };
-}
-
-function defaultAppearanceSettings() {
-  return {
-    theme: "light",
-    fontPreset: "pingfang",
-    accentColor: "#0162db",
-    userBubbleColor: "#0162db",
-    showHoverBackground: false,
-    showUserAvatar: true,
-    showAssistantAvatar: true,
-    listStyle: "flush",
-    selectionStyle: "solid"
-  };
-}
-
-function defaultPermissionSettings() {
-  return {
-    mode: "ask"
-  };
-}
-
-function defaultDaemonSettings() {
-  const port = Number.isInteger(AIMASHI_DAEMON_DEFAULT_PORT) && AIMASHI_DAEMON_DEFAULT_PORT > 0
-    ? AIMASHI_DAEMON_DEFAULT_PORT
-    : 27861;
-  return {
-    enabled: true,
-    host: process.env.AIMASHI_DAEMON_HOST || "127.0.0.1",
-    port
-  };
-}
-
-function defaultRelaySettings() {
-  return {
-    enabled: false,
-    url: process.env.AIMASHI_RELAY_URL || "wss://agi.buytb01.com/relay",
-    deviceId: `aimashi-${crypto.randomUUID()}`,
-    secret: crypto.randomBytes(32).toString("hex")
-  };
-}
-
-function defaultEffortSettings() {
-  return {
-    level: "medium"
-  };
-}
-
-function normalizeEffortLevel(value, engine = "hermes") {
-  const raw = String(value || "").trim().toLowerCase();
-  const normalized = raw === "extra-high" || raw === "extra_high" ? "xhigh" : raw;
-  const valid = engine === "claude-code"
-    ? ["low", "medium", "high", "xhigh", "max"]
-    : engine === "codex"
-      ? ["minimal", "low", "medium", "high", "xhigh"]
-      : ["none", "minimal", "low", "medium", "high", "xhigh"];
-  return valid.includes(normalized) ? normalized : "medium";
-}
-
-function normalizeStoredEffortLevel(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  const normalized = raw === "extra-high" || raw === "extra_high" ? "xhigh" : raw;
-  return ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(normalized) ? normalized : "medium";
-}
-
-function effortSettings() {
-  const p = runtimePaths();
-  const saved = readJson(p.effortSettings, {});
-  return {
-    ...defaultEffortSettings(),
-    ...saved,
-    level: normalizeEffortLevel(saved.level || defaultEffortSettings().level, "hermes")
-  };
-}
-
-function effortStatus() {
-  return { level: effortSettings().level };
-}
-
-function writeEffortSettings(settings = {}) {
-  const p = runtimePaths();
-  const next = {
-    level: normalizeEffortLevel(settings.level || settings.effortLevel, "hermes")
-  };
-  fs.mkdirSync(path.dirname(p.effortSettings), { recursive: true });
-  fs.writeFileSync(p.effortSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  writeRuntimeConfig(engineState.port || readConfiguredPort());
-  return next;
-}
-
-function permissionSettings() {
-  const p = runtimePaths();
-  const saved = readJson(p.permissionSettings, {});
-  return {
-    ...defaultPermissionSettings(),
-    ...saved,
-    mode: normalizePermissionMode(saved.mode || defaultPermissionSettings().mode)
-  };
-}
-
-function permissionStatus() {
-  const settings = permissionSettings();
-  return {
-    mode: settings.mode,
-    label: permissionModeLabel(settings.mode)
-  };
-}
-
-function writePermissionSettings(settings = {}) {
-  const p = runtimePaths();
-  const next = {
-    mode: normalizePermissionMode(settings.mode)
-  };
-  fs.mkdirSync(path.dirname(p.permissionSettings), { recursive: true });
-  fs.writeFileSync(p.permissionSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  writeRuntimeConfig(engineState.port || readConfiguredPort());
-  return next;
-}
-
-function normalizeDaemonHost(value) {
-  const host = String(value || "").trim();
-  if (host === "0.0.0.0" || host === "::" || host === "127.0.0.1" || host === "localhost") return host;
-  return "127.0.0.1";
-}
-
-function normalizeDaemonPort(value) {
-  const port = Number(value);
-  if (Number.isInteger(port) && port > 0 && port < 65536) return port;
-  return defaultDaemonSettings().port;
-}
-
-function daemonSettings() {
-  const saved = readJson(runtimePaths().daemonSettings, {});
-  return {
-    ...defaultDaemonSettings(),
-    ...saved,
-    enabled: saved.enabled !== false,
-    host: normalizeDaemonHost(saved.host || defaultDaemonSettings().host),
-    port: normalizeDaemonPort(saved.port || defaultDaemonSettings().port)
-  };
-}
-
-function writeDaemonSettings(settings = {}) {
-  const p = runtimePaths();
-  const current = daemonSettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    host: normalizeDaemonHost(settings.host || current.host),
-    port: normalizeDaemonPort(settings.port || current.port)
-  };
-  fs.mkdirSync(path.dirname(p.daemonSettings), { recursive: true });
-  fs.writeFileSync(p.daemonSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
 function daemonToken() {
   const p = runtimePaths();
   if (!fs.existsSync(p.daemonToken)) {
@@ -500,117 +330,6 @@ function daemonToken() {
     fs.writeFileSync(p.daemonToken, `${crypto.randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
   }
   return fs.readFileSync(p.daemonToken, "utf8").trim();
-}
-
-function normalizeRelayUrl(value) {
-  const raw = String(value || "").trim();
-  try {
-    const url = new URL(raw || defaultRelaySettings().url);
-    if (url.protocol !== "ws:" && url.protocol !== "wss:") return defaultRelaySettings().url;
-    if (!url.pathname || url.pathname === "/") url.pathname = "/relay";
-    return url.toString();
-  } catch {
-    return defaultRelaySettings().url;
-  }
-}
-
-function relaySettings() {
-  const p = runtimePaths();
-  let saved = readJson(p.relaySettings, null);
-  if (!saved || typeof saved !== "object" || !saved.deviceId || !saved.secret) {
-    saved = { ...defaultRelaySettings(), ...(saved && typeof saved === "object" ? saved : {}) };
-    fs.mkdirSync(path.dirname(p.relaySettings), { recursive: true });
-    fs.writeFileSync(p.relaySettings, JSON.stringify(saved, null, 2) + "\n", { mode: 0o600 });
-  }
-  return {
-    ...defaultRelaySettings(),
-    ...saved,
-    enabled: Boolean(saved.enabled),
-    url: normalizeRelayUrl(saved.url),
-    deviceId: String(saved.deviceId || defaultRelaySettings().deviceId).trim(),
-    secret: String(saved.secret || defaultRelaySettings().secret).trim()
-  };
-}
-
-function writeRelaySettings(settings = {}) {
-  const p = runtimePaths();
-  const current = relaySettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    url: normalizeRelayUrl(settings.url || current.url),
-    deviceId: String(settings.deviceId || current.deviceId).trim(),
-    secret: String(settings.secret || current.secret).trim()
-  };
-  fs.mkdirSync(path.dirname(p.relaySettings), { recursive: true });
-  fs.writeFileSync(p.relaySettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
-function defaultCloudSettings() {
-  return {
-    enabled: false,
-    url: AIMASHI_CLOUD_DEFAULT_URL,
-    token: "",
-    user: null
-  };
-}
-
-function normalizeCloudUrl(value) {
-  const raw = String(value || "").trim();
-  try {
-    const url = new URL(raw || AIMASHI_CLOUD_DEFAULT_URL);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return AIMASHI_CLOUD_DEFAULT_URL;
-    url.hash = "";
-    url.search = "";
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return AIMASHI_CLOUD_DEFAULT_URL;
-  }
-}
-
-function cloudSettings() {
-  const saved = readJson(runtimePaths().cloudSettings, {});
-  return {
-    ...defaultCloudSettings(),
-    ...saved,
-    enabled: Boolean(saved.enabled && saved.token),
-    url: normalizeCloudUrl(saved.url),
-    token: String(saved.token || ""),
-    user: saved.user && typeof saved.user === "object" ? saved.user : null
-  };
-}
-
-function writeCloudSettings(settings = {}) {
-  const p = runtimePaths();
-  const current = cloudSettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    url: normalizeCloudUrl(settings.url || current.url),
-    token: String(settings.token !== undefined ? settings.token : current.token || ""),
-    user: settings.user !== undefined ? settings.user : current.user
-  };
-  if (!next.token) {
-    next.enabled = false;
-    next.user = null;
-  }
-  fs.mkdirSync(path.dirname(p.cloudSettings), { recursive: true });
-  fs.writeFileSync(p.cloudSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
-function readCloudWorkspace() {
-  return readJson(runtimePaths().cloudWorkspace, null);
-}
-
-function writeCloudWorkspace(workspace) {
-  const p = runtimePaths();
-  fs.mkdirSync(path.dirname(p.cloudWorkspace), { recursive: true });
-  fs.writeFileSync(p.cloudWorkspace, JSON.stringify({
-    workspace: workspace || null,
-    syncedAt: new Date().toISOString()
-  }, null, 2) + "\n", { mode: 0o600 });
-  return readCloudWorkspace();
 }
 
 function mergeCloudWorkspaceIntoChatStore(workspace) {
@@ -1064,7 +783,7 @@ function writeSchedulerMcpContext({ fellowId = "", sessionId = "", originMessage
 // reach the daemon over the network.
 function resolveDaemonBaseUrl() {
   if (controlServerState.baseUrl) return controlServerState.baseUrl;
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   if (settings?.host && settings?.port) {
     return `http://${settings.host}:${settings.port}`;
   }
@@ -1195,370 +914,11 @@ function ensureCodexHome() {
 function appearanceSettings() {
   const p = runtimePaths();
   const saved = readJson(p.appearanceSettings, {});
-  return { ...defaultAppearanceSettings(), ...saved };
+  return { ...settingsStore.defaultAppearanceSettings(), ...saved };
 }
 
-function defaultFellowManifest() {
-  // Empty by design — first launch goes through an onboarding flow that asks
-  // the user to create their initial fellow. No pre-baked placeholder.
-  return {
-    schema_version: 1,
-    product: "aimashi",
-    default_fellow: "",
-    fellows: []
-  };
-}
 
-function normalizeFellowAgentEngine(value) {
-  return normalizeAgentEngine(value);
-}
 
-function normalizeFellowEngineConfig(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  const next = {};
-  const model = String(value.model || "").trim();
-  const permissionMode = String(value.permissionMode || value.permission_mode || "").trim();
-  const effortLevel = String(value.effortLevel || value.effort_level || value.reasoningEffort || value.reasoning_effort || "").trim();
-  if (model) next.model = model;
-  if (permissionMode) next.permissionMode = permissionMode;
-  if (effortLevel) next.effortLevel = normalizeStoredEffortLevel(effortLevel);
-  return next;
-}
-
-function mergeFellowEngineConfig(current = {}, update = {}) {
-  const next = normalizeFellowEngineConfig(current);
-  if (Object.prototype.hasOwnProperty.call(update || {}, "model")) {
-    const model = String(update.model || "").trim();
-    if (model) next.model = model;
-    else delete next.model;
-  }
-  if (Object.prototype.hasOwnProperty.call(update || {}, "permissionMode")
-    || Object.prototype.hasOwnProperty.call(update || {}, "permission_mode")) {
-    const permissionMode = String(update.permissionMode || update.permission_mode || "").trim();
-    if (permissionMode) next.permissionMode = permissionMode;
-    else delete next.permissionMode;
-  }
-  if (Object.prototype.hasOwnProperty.call(update || {}, "effortLevel")
-    || Object.prototype.hasOwnProperty.call(update || {}, "effort_level")
-    || Object.prototype.hasOwnProperty.call(update || {}, "reasoningEffort")
-    || Object.prototype.hasOwnProperty.call(update || {}, "reasoning_effort")) {
-    const effortLevel = String(update.effortLevel || update.effort_level || update.reasoningEffort || update.reasoning_effort || "").trim();
-    if (effortLevel) next.effortLevel = normalizeStoredEffortLevel(effortLevel);
-    else delete next.effortLevel;
-  }
-  return next;
-}
-
-function normalizeCapabilityIds(input) {
-  return Array.isArray(input)
-    ? [...new Set(input.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 500)
-    : [];
-}
-
-function normalizeFellowCapabilities(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  return {
-    inheritEngineDefaults: value.inheritEngineDefaults !== false && value.inherit_engine_defaults !== false,
-    enabledPlugins: normalizeCapabilityIds(value.enabledPlugins || value.enabled_plugins),
-    disabledPlugins: normalizeCapabilityIds(value.disabledPlugins || value.disabled_plugins),
-    enabledSkills: normalizeCapabilityIds(value.enabledSkills || value.enabled_skills),
-    disabledSkills: normalizeCapabilityIds(value.disabledSkills || value.disabled_skills),
-    enabledConnectors: normalizeCapabilityIds(value.enabledConnectors || value.enabled_connectors)
-  };
-}
-
-function defaultManifest() {
-  const manifest = defaultFellowManifest();
-  return {
-    schema_version: manifest.schema_version,
-    product: manifest.product,
-    default_persona: manifest.default_fellow,
-    personas: manifest.fellows
-  };
-}
-
-function normalizeFellow(item) {
-  const key = String(item?.key || item?.account_id || "").trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_");
-  const name = String(item?.name || item?.display_name || key || "Aimashi").trim();
-  if (!key || !name) return null;
-  const pinnedAt = String(item?.pinnedAt || item?.pinned_at || "").trim();
-  return {
-    key,
-    name,
-    account_id: String(item?.account_id || key).trim() || key,
-    route_profile: String(item?.route_profile || item?.account_id || key).trim() || key,
-    agentEngine: normalizeFellowAgentEngine(item?.agentEngine || item?.agent_engine || item?.engine),
-    engineConfig: normalizeFellowEngineConfig(item?.engineConfig || item?.engine_config),
-    platform: String(item?.platform || "api_server").trim() || "api_server",
-    color: String(item?.color || item?.accent_color || "#0f766e").trim() || "#0f766e",
-    avatarImage: String(item?.avatarImage || item?.avatar_image || "").trim(),
-    avatarCrop: normalizeAvatarCrop(item?.avatarCrop || item?.avatar_crop),
-    pinned: Boolean(item?.pinned || item?.is_pinned || pinnedAt),
-    pinnedAt,
-    bio: String(item?.bio || item?.description || "").trim(),
-    capabilities: normalizeFellowCapabilities(item?.capabilities)
-  };
-}
-
-function normalizeAvatarCrop(input = {}) {
-  const value = input && typeof input === "object" ? input : {};
-  const num = (raw, fallback, min, max) => {
-    const next = Number(raw);
-    if (!Number.isFinite(next)) return fallback;
-    return Math.max(min, Math.min(max, next));
-  };
-  return {
-    x: num(value.x, 50, 0, 100),
-    y: num(value.y, 50, 0, 100),
-    zoom: num(value.zoom, 1, 1, 2.4)
-  };
-}
-
-function normalizeFellowManifest(input) {
-  const source = input && typeof input === "object" ? input : defaultFellowManifest();
-  const rawFellows = Array.isArray(source.fellows)
-    ? source.fellows
-    : Array.isArray(source.personas)
-      ? source.personas
-      : defaultFellowManifest().fellows;
-  const fellows = rawFellows.map(normalizeFellow).filter(Boolean);
-  return {
-    schema_version: 1,
-    product: "aimashi",
-    default_fellow: String(source.default_fellow || source.default_persona || fellows[0]?.key || ""),
-    fellows
-  };
-}
-
-function loadFellowManifest() {
-  const p = runtimePaths();
-  if (fs.existsSync(p.fellowManifest)) {
-    return normalizeFellowManifest(readJson(p.fellowManifest, defaultFellowManifest()));
-  }
-  if (fs.existsSync(p.legacyPersonaManifest)) {
-    return normalizeFellowManifest(readJson(p.legacyPersonaManifest, defaultManifest()));
-  }
-  return defaultFellowManifest();
-}
-
-function saveFellowManifest(manifest) {
-  const p = runtimePaths();
-  const normalized = normalizeFellowManifest(manifest);
-  fs.mkdirSync(path.dirname(p.fellowManifest), { recursive: true });
-  fs.writeFileSync(p.fellowManifest, JSON.stringify(normalized, null, 2) + "\n");
-  return normalized;
-}
-
-function defaultChatStore() {
-  return {
-    schema_version: 1,
-    readAt: {},
-    sessions: {}
-  };
-}
-
-function cleanSessionTitle(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^["'“”‘’]+|["'“”‘’。.!！?？:：]+$/g, "")
-    .replace(/\s+/g, " ")
-    .slice(0, 32);
-}
-
-function fallbackSessionTitle(messages = []) {
-  const firstUser = messages.find((message) => message.role === "user" && String(message.content || "").trim());
-  return cleanSessionTitle(firstUser?.content || "新对话") || "新对话";
-}
-
-function normalizeMessageReply(replyTo) {
-  if (!replyTo || typeof replyTo !== "object" || !String(replyTo.content || "").trim()) return null;
-  return {
-    role: ["user", "assistant", "system"].includes(replyTo.role) ? replyTo.role : "",
-    author: String(replyTo.author || "").slice(0, 80),
-    content: String(replyTo.content || "").trim().slice(0, 500),
-    createdAt: String(replyTo.createdAt || ""),
-    messageIndex: Number.isInteger(replyTo.messageIndex) ? replyTo.messageIndex : -1
-  };
-}
-
-function normalizeMessageTranslation(translation) {
-  if (!translation || typeof translation !== "object") return null;
-  const status = ["loading", "done", "error"].includes(translation.status) ? translation.status : "";
-  const text = String(translation.text || "").trim();
-  const error = String(translation.error || "").trim();
-  if (!status && !text && !error) return null;
-  return {
-    status: status || (text ? "done" : "error"),
-    text,
-    error,
-    sourceText: String(translation.sourceText || "").trim().slice(0, 1000),
-    translatedAt: String(translation.translatedAt || "")
-  };
-}
-
-function chatMessageMergeKey(message) {
-  return `${message.role}\n${message.createdAt}\n${message.content}`;
-}
-
-function mergeChatMessageRecord(existing, next) {
-  return {
-    ...existing,
-    ...next,
-    attachments: next.attachments || existing.attachments,
-    reasoning: next.reasoning || existing.reasoning,
-    tools: next.tools || existing.tools,
-    replyTo: next.replyTo || existing.replyTo,
-    translation: next.translation || existing.translation,
-    pinned: Boolean(existing.pinned || next.pinned),
-    pinnedAt: next.pinnedAt || existing.pinnedAt
-  };
-}
-
-function normalizeChatStore(input) {
-  const store = input && typeof input === "object" ? input : defaultChatStore();
-  const sessions = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
-  const readAt = store.readAt && typeof store.readAt === "object" ? store.readAt : {};
-  const normalized = { schema_version: 1, readAt: {}, sessions: {} };
-  for (const [personaKey, value] of Object.entries(readAt)) {
-    if (typeof value === "string" && value.trim()) {
-      normalized.readAt[String(personaKey)] = value;
-    }
-  }
-  for (const [personaKey, list] of Object.entries(sessions)) {
-    if (!Array.isArray(list)) continue;
-    normalized.sessions[personaKey] = list
-      .filter((session) => session && typeof session === "object" && session.id)
-      .map((session) => ({
-        id: String(session.id),
-        personaKey: String(session.personaKey || personaKey),
-        title: cleanSessionTitle(session.title) || "新对话",
-        titleGenerated: Boolean(session.titleGenerated),
-        createdAt: session.createdAt || new Date().toISOString(),
-        updatedAt: session.updatedAt || session.createdAt || new Date().toISOString(),
-        messages: Array.isArray(session.messages)
-          ? session.messages
-            .filter((message) => message && ["user", "assistant", "system"].includes(message.role))
-            .map((message) => {
-              const out = {
-                role: message.role,
-                content: String(message.content || ""),
-                createdAt: message.createdAt || session.updatedAt || new Date().toISOString()
-              };
-              if (message.pinned) {
-                out.pinned = true;
-                out.pinnedAt = String(message.pinnedAt || message.pinned_at || session.updatedAt || "");
-              }
-              const replyTo = normalizeMessageReply(message.replyTo);
-              if (replyTo) out.replyTo = replyTo;
-              const translation = normalizeMessageTranslation(message.translation);
-              if (translation && translation.status !== "loading") out.translation = translation;
-              const attachments = normalizeAttachments(message.attachments);
-              if (attachments.length) out.attachments = attachments;
-              if (message.reasoning) out.reasoning = String(message.reasoning);
-              if (Array.isArray(message.tools) && message.tools.length) {
-                out.tools = message.tools.map((tool) => ({
-                  id: String(tool.id || ""),
-                  name: String(tool.name || ""),
-                  preview: String(tool.preview || ""),
-                  status: ["running", "completed", "error"].includes(tool.status) ? tool.status : "completed",
-                  duration: typeof tool.duration === "number" ? tool.duration : null,
-                  error: Boolean(tool.error)
-                }));
-              }
-              return out;
-            })
-          : []
-      }))
-      .filter((session) => session.id);
-  }
-  return normalized;
-}
-
-function loadChatStore() {
-  return normalizeChatStore(readJson(runtimePaths().chatSessions, defaultChatStore()));
-}
-
-function saveChatStore(store) {
-  const p = runtimePaths();
-  fs.mkdirSync(path.dirname(p.chatSessions), { recursive: true });
-  const normalized = normalizeChatStore(store);
-  fs.writeFileSync(p.chatSessions, JSON.stringify(normalized, null, 2) + "\n", { mode: 0o600 });
-  return normalized;
-}
-
-function createChatSession(personaKey) {
-  const now = new Date().toISOString();
-  return {
-    id: crypto.randomUUID(),
-    personaKey,
-    title: "新对话",
-    titleGenerated: false,
-    createdAt: now,
-    updatedAt: now,
-    messages: []
-  };
-}
-
-function ensurePersonaSession(store, personaKey) {
-  if (!store.sessions[personaKey]) store.sessions[personaKey] = [];
-  if (!store.sessions[personaKey].length) {
-    store.sessions[personaKey].push(createChatSession(personaKey));
-  }
-  store.sessions[personaKey].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  return store.sessions[personaKey][0];
-}
-
-function fellowPersonaBody(name, description = "") {
-  return [
-    `# ${name}`,
-    "",
-    `你是${name}，Aimashi App 里的本地伙伴。`,
-    description ? String(description).trim() : "请保持清楚、可靠、可执行的沟通风格。",
-    ""
-  ].join("\n");
-}
-
-function fellowMetadata(fellow) {
-  return {
-    account_id: fellow.key,
-    display_name: fellow.name,
-    agent_engine: normalizeFellowAgentEngine(fellow.agentEngine || fellow.agent_engine),
-    engine_config: normalizeFellowEngineConfig(fellow.engineConfig || fellow.engine_config),
-    accent_color: fellow.color || "#0f766e",
-    avatar_image: fellow.avatarImage || "",
-    avatar_crop: fellow.avatarCrop || { x: 50, y: 50, zoom: 1 },
-    pinned: Boolean(fellow.pinned),
-    pinned_at: fellow.pinnedAt || "",
-    bio: fellow.bio || "",
-    capabilities: normalizeFellowCapabilities(fellow.capabilities),
-    created_at: new Date().toISOString()
-  };
-}
-
-function fellowPersonaPath(key) {
-  return path.join(runtimePaths().fellowDir, `${String(key || "").trim()}.md`);
-}
-
-function readFellowPersona(key, fallbackName = "Aimashi", fallbackBio = "") {
-  const personaPath = fellowPersonaPath(key);
-  try {
-    return fs.readFileSync(personaPath, "utf8");
-  } catch {
-    return fellowPersonaBody(fallbackName, fallbackBio);
-  }
-}
-
-function fellowKeyFromName(name) {
-  const slug = String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 40);
-  if (slug) return slug;
-  const hash = crypto.createHash("sha1").update(String(name || "fellow")).digest("hex").slice(0, 10);
-  return `fellow_${hash}`;
-}
 
 function fellowPetId(key) {
   const cleaned = String(key || "")
@@ -1901,9 +1261,9 @@ function safeReadLocalFileAttachment(input = {}) {
 async function fetchCloudFileAttachment(input = {}) {
   const urlPath = String(input.url || input.path || "").trim();
   if (!/^\/api\/files\/[a-zA-Z0-9_-]+$/.test(urlPath)) throw new Error("Cloud file URL is invalid.");
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) throw new Error("请先登录 Aimashi Cloud。");
-  const response = await fetch(`${normalizeCloudUrl(settings.url)}${urlPath}`, {
+  const response = await fetch(`${settingsStore.normalizeCloudUrl(settings.url)}${urlPath}`, {
     headers: { Authorization: `Bearer ${settings.token}` },
     signal: AbortSignal.timeout(15000)
   });
@@ -2446,7 +1806,7 @@ function initializeRuntimeCore() {
   }
 
   if (writeFileIfMissing(p.modelSettings, JSON.stringify({
-    ...defaultModelSettings()
+    ...settingsStore.defaultModelSettings()
   }, null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-model.json");
   }
@@ -2457,15 +1817,15 @@ function initializeRuntimeCore() {
 
   importFromSystemHermes();
 
-  if (writeFileIfMissing(p.permissionSettings, JSON.stringify(defaultPermissionSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.permissionSettings, JSON.stringify(settingsStore.defaultPermissionSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-permissions.json");
   }
 
-  if (writeFileIfMissing(p.effortSettings, JSON.stringify(defaultEffortSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.effortSettings, JSON.stringify(settingsStore.defaultEffortSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-effort.json");
   }
 
-  if (writeFileIfMissing(p.daemonSettings, JSON.stringify(defaultDaemonSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.daemonSettings, JSON.stringify(settingsStore.defaultDaemonSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-daemon.json");
   }
 
@@ -2473,15 +1833,15 @@ function initializeRuntimeCore() {
     created.push("runtime/engine-home/aimashi-daemon.key");
   }
 
-  if (writeFileIfMissing(p.relaySettings, JSON.stringify(defaultRelaySettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.relaySettings, JSON.stringify(settingsStore.defaultRelaySettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-relay.json");
   }
 
-  if (writeFileIfMissing(p.userProfile, JSON.stringify(defaultUserProfile(), null, 2) + "\n")) {
+  if (writeFileIfMissing(p.userProfile, JSON.stringify(settingsStore.defaultUserProfile(), null, 2) + "\n")) {
     created.push("runtime/engine-home/aimashi-user.json");
   }
 
-  if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(defaultAppearanceSettings(), null, 2) + "\n")) {
+  if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(settingsStore.defaultAppearanceSettings(), null, 2) + "\n")) {
     created.push("runtime/engine-home/aimashi-appearance.json");
   }
 
@@ -2551,8 +1911,8 @@ function apiKey() {
 function modelSettings() {
   const p = runtimePaths();
   const saved = readJson(p.modelSettings, {});
-  if (!saved.provider && !saved.model && !saved.apiKey) return defaultModelSettings();
-  return { ...defaultModelSettings(), ...saved };
+  if (!saved.provider && !saved.model && !saved.apiKey) return settingsStore.defaultModelSettings();
+  return { ...settingsStore.defaultModelSettings(), ...saved };
 }
 
 function defaultProviderStore() {
@@ -2689,8 +2049,8 @@ function writeRuntimeConfig(port) {
   const model = String(settings.model || "").trim();
   const baseUrl = String(settings.baseUrl || "").trim();
   const apiMode = String(settings.apiMode || "").trim();
-  const approvalsMode = permissionSettings().mode;
-  const reasoningEffort = effortSettings().level;
+  const approvalsMode = settingsStore.permissionSettings().mode;
+  const reasoningEffort = settingsStore.effortSettings().level;
   const source = engineSource();
   const configPath = path.join(effectiveHermesHome(), "config.yaml");
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -2743,9 +2103,9 @@ function writeRuntimeConfig(port) {
   atomicWriteFile(configPath, lines.join("\n"), 0o600);
 }
 
-function daemonConnectUrls(settings = daemonSettings()) {
-  const port = normalizeDaemonPort(settings.port);
-  const host = normalizeDaemonHost(settings.host);
+function daemonConnectUrls(settings = settingsStore.daemonSettings()) {
+  const port = settingsStore.normalizeDaemonPort(settings.port);
+  const host = settingsStore.normalizeDaemonHost(settings.host);
   if (host !== "0.0.0.0" && host !== "::") {
     return [`http://${host}:${port}`];
   }
@@ -2761,10 +2121,10 @@ function daemonConnectUrls(settings = daemonSettings()) {
   return urls.length ? urls : [`http://127.0.0.1:${port}`];
 }
 
-function daemonPingUrls(settings = daemonSettings()) {
+function daemonPingUrls(settings = settingsStore.daemonSettings()) {
   const urls = daemonConnectUrls(settings);
-  const port = normalizeDaemonPort(settings.port);
-  const host = normalizeDaemonHost(settings.host);
+  const port = settingsStore.normalizeDaemonPort(settings.port);
+  const host = settingsStore.normalizeDaemonHost(settings.host);
   const localUrl = `http://127.0.0.1:${port}`;
   const candidates = host === "0.0.0.0" || host === "::" || host === "localhost"
     ? [localUrl, ...urls]
@@ -2773,7 +2133,7 @@ function daemonPingUrls(settings = daemonSettings()) {
 }
 
 function getDaemonStatus() {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   return {
     processMode: IS_DAEMON_PROCESS ? "daemon" : "desktop",
     serviceLabel: AIMASHI_DAEMON_SERVICE_LABEL,
@@ -2804,7 +2164,7 @@ function getDaemonPairingInfo() {
 async function getObservedDaemonStatus(timeoutMs = 500) {
   const status = getDaemonStatus();
   if (controlServerState.running) return status;
-  const ping = await pingDaemon(daemonSettings(), timeoutMs);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), timeoutMs);
   return {
     ...status,
     running: ping.ok,
@@ -2825,7 +2185,7 @@ function relayHttpOrigin(wsUrl) {
   }
 }
 
-function relayPairingLink(settings = relaySettings()) {
+function relayPairingLink(settings = settingsStore.relaySettings()) {
   const origin = relayHttpOrigin(settings.url);
   if (!origin) return "";
   const params = new URLSearchParams({
@@ -2838,7 +2198,7 @@ function relayPairingLink(settings = relaySettings()) {
 }
 
 function relayStatus(includeSecret = false) {
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   return {
     enabled: settings.enabled,
     connected: Boolean(relayState.connected),
@@ -2883,11 +2243,11 @@ function getRuntimeStatus(created = []) {
     relay: relayStatus(false),
     cloud: cloudStatus(false),
     auth: codexAuth,
-    user: { ...defaultUserProfile(), ...readJson(p.userProfile, {}) },
+    user: { ...settingsStore.defaultUserProfile(), ...readJson(p.userProfile, {}) },
     appearance: appearanceSettings(),
     agentEngines: localAgentEngines(),
-    permissions: permissionStatus(),
-    effort: effortStatus(),
+    permissions: settingsStore.permissionStatus(),
+    effort: settingsStore.effortStatus(),
     model: {
       provider: settings.provider,
       model: settings.model,
@@ -3386,389 +2746,6 @@ function skillRoots() {
   ];
 }
 
-function cleanYamlScalar(value) {
-  let text = String(value || "").trim();
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
-    text = text.slice(1, -1);
-  }
-  return text.replace(/\\"/g, '"').trim();
-}
-
-function parseSkillMarkdown(filePath, rootInfo) {
-  const raw = fs.readFileSync(filePath, "utf8");
-  const rel = path.relative(rootInfo.root, path.dirname(filePath));
-  const parts = rel.split(path.sep).filter(Boolean);
-  const fallbackName = parts[parts.length - 1] || path.basename(path.dirname(filePath));
-  const rawCategory = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
-  const category = rawCategory === ".system" ? "system" : (rawCategory || "uncategorized");
-  const meta = {};
-  let body = raw;
-  let frontmatter = "";
-  if (raw.startsWith("---")) {
-    const lines = raw.split(/\r?\n/);
-    const end = lines.findIndex((line, index) => index > 0 && /^---\s*$/.test(line));
-    if (end > 0) {
-      frontmatter = lines.slice(1, end).join("\n");
-      body = lines.slice(end + 1).join("\n");
-      for (const line of lines.slice(1, end)) {
-        const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-        if (match) meta[match[1]] = cleanYamlScalar(match[2]);
-      }
-    }
-  }
-  const tagMatch = frontmatter.match(/tags:\s*\[([^\]]+)\]/);
-  const tags = tagMatch
-    ? tagMatch[1].split(",").map((item) => cleanYamlScalar(item)).filter(Boolean).slice(0, 8)
-    : [];
-  const firstHeading = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-  const paragraphs = body
-    .replace(/^#.+$/gm, "")
-    .split(/\n\s*\n/)
-    .map((item) => item.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  const description = meta.description || paragraphs[0] || "";
-  const id = `${rootInfo.idPrefix || rootInfo.source}:${rel}`;
-  return {
-    id,
-    name: meta.name || fallbackName,
-    title: firstHeading || meta.name || fallbackName,
-    description: description.slice(0, 520),
-    version: meta.version || "",
-    category,
-    tags,
-    source: rootInfo.source,
-    sourceLabel: rootInfo.label,
-    relPath: rel,
-    filePath,
-    bodyPreview: body.trim().slice(0, 1200),
-    bodyLength: body.length
-  };
-}
-
-function findSkillFiles(root, maxDepth = 8) {
-  const files = [];
-  function walk(dir, depth) {
-    if (depth > maxDepth) return;
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isFile() && entry.name === "SKILL.md") {
-        files.push(full);
-      } else if (entry.isDirectory() && !["node_modules", ".git", "__pycache__"].includes(entry.name)) {
-        walk(full, depth + 1);
-      }
-    }
-  }
-  walk(root, 0);
-  return files;
-}
-
-function countDirectoryFiles(dir, predicate = () => true, maxDepth = 2) {
-  let count = 0;
-  function walk(current, depth) {
-    if (depth > maxDepth) return;
-    let entries = [];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) walk(full, depth + 1);
-      else if (entry.isFile() && predicate(full, entry)) count += 1;
-    }
-  }
-  walk(dir, 0);
-  return count;
-}
-
-function simpleYamlValue(text, key) {
-  const match = String(text || "").match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-  return match ? cleanYamlScalar(match[1]) : "";
-}
-
-function simpleYamlList(text, key) {
-  const lines = String(text || "").split(/\r?\n/);
-  const out = [];
-  let inList = false;
-  for (const line of lines) {
-    if (new RegExp(`^${key}:\\s*$`).test(line)) {
-      inList = true;
-      continue;
-    }
-    if (!inList) continue;
-    if (/^\S/.test(line)) break;
-    const item = line.match(/^\s*-\s+(.+)$/);
-    if (item) out.push(cleanYamlScalar(item[1]));
-  }
-  return out;
-}
-
-function enumerateConnectors() {
-  const connectors = [];
-  const seen = new Set();
-  return connectors
-    .filter((connector) => {
-      const key = connector.id || `${connector.kind}:${connector.path}:${connector.label}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => (
-      String(a.kind || "").localeCompare(String(b.kind || ""))
-      || String(a.sourceLabel || "").localeCompare(String(b.sourceLabel || ""))
-      || String(a.label || "").localeCompare(String(b.label || ""))
-    ));
-}
-
-function extensionCapabilitySummary(extension) {
-  const parts = [];
-  if (extension.skillCount) parts.push(`${extension.skillCount} Skills`);
-  if (extension.commandCount) parts.push(`${extension.commandCount} Commands`);
-  if (extension.agentCount) parts.push(`${extension.agentCount} Agents`);
-  if (extension.toolCount) parts.push(`${extension.toolCount} Tools`);
-  if (extension.hookCount) parts.push(`${extension.hookCount} Hooks`);
-  if (extension.mcpCount) parts.push(`${extension.mcpCount} MCP`);
-  return parts.join(" · ") || extension.status || "已发现";
-}
-
-function enumerateExtensions() {
-  return []
-    .map((extension) => ({ ...extension, capabilitySummary: extensionCapabilitySummary(extension) }))
-    .sort((a, b) => (
-      String(a.installState === "installed" ? "0" : "1").localeCompare(String(b.installState === "installed" ? "0" : "1"))
-      ||
-      String(a.engineLabel || "").localeCompare(String(b.engineLabel || ""))
-      || String(a.label || a.name || "").localeCompare(String(b.label || b.name || ""))
-    ));
-}
-
-function enumeratePlugins() {
-  const out = [];
-  for (const source of readAimashiOfficialSkillSources()) {
-    out.push(source);
-  }
-  return out;
-}
-
-function readAimashiOfficialSkillSources() {
-  const manifestPath = officialLibraryManifestPath();
-  const manifest = readJson(manifestPath, null);
-  if (!manifest || typeof manifest !== "object") return [];
-  const libraryId = String(manifest.id || "aimashi-official").trim() || "aimashi-official";
-  const libraryLabel = String(manifest.label || "Aimashi 官方库").trim() || "Aimashi 官方库";
-  return (Array.isArray(manifest.skillSources) ? manifest.skillSources : [])
-    .map((item) => {
-      const id = String(item?.id || item?.name || "").trim();
-      const root = resolveOfficialLibraryRoot(item?.root);
-      if (!id || !root) return null;
-      return {
-        id: `${libraryId}:${id}`,
-        name: String(item.name || id).trim(),
-        label: String(item.label || item.name || id).trim(),
-        description: String(item.description || manifest.description || "").trim(),
-        source: libraryId,
-        sourceLabel: libraryLabel,
-        kind: "official-skill-source",
-        engine: String(item.engine || "aimashi").trim(),
-        root,
-        idPrefix: String(item.idPrefix || libraryId).trim() || libraryId
-      };
-    })
-    .filter(Boolean);
-}
-
-async function fetchHermesSkillsCatalog(timeoutMs = 1500) {
-  if (!engineState.running || !engineState.baseUrl) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${engineState.baseUrl}/api/skills`, {
-      headers: { Authorization: `Bearer ${apiKey()}` },
-      signal: controller.signal
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.skills)) return data.skills;
-    if (Array.isArray(data?.items)) return data.items;
-    return null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function loadLocalSkills() {
-  const pluginDefs = enumeratePlugins();
-  const extensions = enumerateExtensions();
-  const connectors = enumerateConnectors();
-  const skills = [];
-  const seenByName = new Set();
-  const plugins = [];
-  for (const plugin of pluginDefs) {
-    if (!fs.existsSync(plugin.root)) {
-      plugins.push({
-        id: plugin.id,
-        name: plugin.name,
-        label: plugin.label,
-        description: plugin.description,
-        source: plugin.source,
-        sourceLabel: plugin.sourceLabel || plugin.label,
-        kind: plugin.kind || "skill-source",
-        engine: plugin.engine || "",
-        extensionId: plugin.extensionId || "",
-        root: plugin.root,
-        skillCount: 0
-      });
-      continue;
-    }
-    let pluginSkills = 0;
-    for (const filePath of findSkillFiles(plugin.root)) {
-      try {
-        const skill = parseSkillMarkdown(filePath, plugin);
-        if (plugin.source !== "aimashi" && seenByName.has(skill.name.toLowerCase())) continue;
-        seenByName.add(skill.name.toLowerCase());
-        skill.pluginId = plugin.id;
-        skill.pluginLabel = plugin.label;
-        skill.pluginSource = plugin.source;
-        skill.extensionId = plugin.extensionId || "";
-        skill.sourceKind = plugin.kind || "skill-source";
-        skills.push(skill);
-        pluginSkills += 1;
-      } catch (error) {
-        appendEngineLog(`Skill scan skipped ${filePath}: ${error.message}`);
-      }
-    }
-    plugins.push({
-      id: plugin.id,
-      name: plugin.name,
-      label: plugin.label,
-      description: plugin.description,
-      source: plugin.source,
-      sourceLabel: plugin.sourceLabel || plugin.label,
-      kind: plugin.kind || "skill-source",
-      engine: plugin.engine || "",
-      extensionId: plugin.extensionId || "",
-      root: plugin.root,
-      skillCount: pluginSkills
-    });
-  }
-  const hermes = await fetchHermesSkillsCatalog();
-  if (hermes) {
-    const enabledByName = new Map();
-    for (const item of hermes) {
-      const name = String(item?.name || "").trim();
-      if (!name) continue;
-      enabledByName.set(name, item?.enabled !== false);
-    }
-    for (const skill of skills) {
-      if (enabledByName.has(skill.name)) skill.enabled = enabledByName.get(skill.name);
-      else skill.enabled = true;
-    }
-  } else {
-    for (const skill of skills) skill.enabled = true;
-  }
-  skills.sort((a, b) => (
-    String(a.pluginLabel || "").localeCompare(String(b.pluginLabel || ""))
-    || String(a.category || "").localeCompare(String(b.category || ""))
-    || String(a.name).localeCompare(String(b.name))
-  ));
-  return {
-    plugins,
-    sources: plugins,
-    extensions,
-    connectors,
-    skills,
-    roots: plugins.map((p) => ({ source: p.source, label: p.label, root: p.root, exists: fs.existsSync(p.root) }))
-  };
-}
-
-async function installMarketplacePlugin(extensionId) {
-  void extensionId;
-  throw new Error("Aimashi 插件安装源尚未接入；不会安装 Codex 或 Claude Code 来源的插件。");
-}
-
-function resolveLocalSkill(identifier) {
-  const target = String(identifier || "").trim();
-  if (!target) return null;
-  for (const plugin of enumeratePlugins()) {
-    if (!fs.existsSync(plugin.root)) continue;
-    const inAimashiPrivate = plugin.source === "aimashi" && isChildPath(runtimePaths().home, plugin.root);
-    for (const filePath of findSkillFiles(plugin.root)) {
-      try {
-        const raw = fs.readFileSync(filePath, "utf8");
-        const skill = parseSkillMarkdown(filePath, plugin);
-        skill.pluginId = plugin.id;
-        skill.pluginLabel = plugin.label;
-        skill.pluginSource = plugin.source;
-        const aliases = [
-          skill.id,
-          skill.name,
-          `${plugin.idPrefix || plugin.source}:${skill.relPath}`,
-          path.basename(path.dirname(filePath))
-        ].filter(Boolean);
-        if (aliases.some((alias) => String(alias).trim() === target)) {
-          return { filePath, root: plugin.root, inAimashiPrivate, raw, skill };
-        }
-      } catch {
-        // skip unreadable
-      }
-    }
-  }
-  return null;
-}
-
-function readLocalSkill(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  const stat = fs.statSync(found.filePath);
-  if (stat.size > 2 * 1024 * 1024) throw new Error("Skill file is too large to preview.");
-  return {
-    ...found.skill,
-    body: found.raw,
-    filePath: found.filePath
-  };
-}
-
-function expandLeadingSkillCommand(text, { mode = "inline" } = {}) {
-  const trimmed = String(text || "");
-  const match = trimmed.match(/^\s*\/([A-Za-z0-9_\/-]+)(?:[\s:]+([\s\S]+))?$/);
-  if (!match) return null;
-  const name = match[1];
-  const userRequest = (match[2] || "").trim();
-  const found = resolveLocalSkill(name);
-  if (!found) return null;
-  if (mode === "native") {
-    return [
-      `用户选择了 Aimashi Skill：${name}。`,
-      "请优先使用运行环境里同名的 Skill；如果 Skill 工具需要命名空间，请选择最匹配这个名称的 Skill。",
-      "",
-      userRequest
-        ? `用户请求：\n${userRequest}`
-        : "用户还没有补充具体请求，请基于这个 Skill 询问必要细节或开始执行。"
-    ].join("\n");
-  }
-  return [
-    "请严格按以下 Skill 指南完成任务。",
-    "",
-    `=== Skill: ${name} ===`,
-    found.raw.trim(),
-    "=== End Skill ===",
-    "",
-    userRequest
-      ? `用户请求：\n${userRequest}`
-      : "（用户已选定此 skill，请按 skill 指南询问需要的细节或开始执行。）"
-  ].join("\n");
-}
-
 function isChildPath(parentPath, targetPath) {
   const parent = path.resolve(parentPath);
   const target = path.resolve(targetPath);
@@ -3776,26 +2753,6 @@ function isChildPath(parentPath, targetPath) {
   return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-async function deleteLocalSkill(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  if (!found.inAimashiPrivate) throw new Error("只能删除 Aimashi 私有 Skill 目录里的 Skill。");
-  const aimashiRoot = path.join(runtimePaths().home, "skills");
-  const skillDir = path.dirname(found.filePath);
-  if (!isChildPath(aimashiRoot, skillDir)) throw new Error("Skill path is outside the Aimashi skills directory.");
-  fs.rmSync(skillDir, { recursive: true, force: true });
-  return loadLocalSkills();
-}
-
-async function openLocalSkillDirectory(skillId) {
-  const found = resolveLocalSkill(skillId);
-  if (!found) throw new Error("Skill not found.");
-  const skillDir = path.dirname(found.filePath);
-  if (!fs.existsSync(skillDir)) throw new Error("Skill directory not found.");
-  const error = await shell.openPath(skillDir);
-  if (error) throw new Error(error);
-  return { opened: true, path: skillDir };
-}
 
 function isSlashCommandText(messages) {
   const normalized = normalizeRunMessages(messages);
@@ -3812,7 +2769,7 @@ function externalAgentStatus({ fellow, engine, sessionId }) {
   const config = normalizeFellowEngineConfig(fellow.engineConfig);
   const model = config.model || (engine === "claude-code" ? "Claude Code 默认模型" : "Codex 默认模型");
   const permission = config.permissionMode || "default";
-  const effort = normalizeEffortLevel(config.effortLevel || "medium", engine);
+  const effort = settingsStore.normalizeEffortLevel(config.effortLevel || "medium", engine);
   const externalSessionId = getAgentSessionId(engine, fellow.key, sessionId) || "尚未创建";
   const label = engine === "claude-code" ? "Claude Code" : "Codex";
   return [
@@ -3897,7 +2854,7 @@ function runHermesSlashCommand({ text, fellow, sessionId }) {
     text,
     sessionKey,
     chatName: fellow.name || "Aimashi",
-    userName: readJson(p.userProfile, defaultUserProfile()).displayName || "Aimashi"
+    userName: readJson(p.userProfile, settingsStore.defaultUserProfile()).displayName || "Aimashi"
   });
   const script = `
 import asyncio, json, sys
@@ -5193,13 +4150,13 @@ async function handleControlRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/relay/start") {
       const body = await readControlBody(req);
-      writeRelaySettings({ ...body, enabled: true });
+      settingsStore.writeRelaySettings({ ...body, enabled: true });
       await startRelayClient();
       writeControlJson(res, 200, relayStatus(false));
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/relay/stop") {
-      writeRelaySettings({ enabled: false });
+      settingsStore.writeRelaySettings({ enabled: false });
       writeControlJson(res, 200, stopRelayClient());
       return;
     }
@@ -5252,13 +4209,13 @@ async function handleControlRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/effort/save") {
       const body = await readControlBody(req);
-      writeEffortSettings(body);
+      settingsStore.writeEffortSettings(body);
       writeControlJson(res, 200, getRuntimeStatus());
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/permissions/save") {
       const body = await readControlBody(req);
-      writePermissionSettings(body);
+      settingsStore.writePermissionSettings(body);
       writeControlJson(res, 200, getRuntimeStatus());
       return;
     }
@@ -5392,9 +4349,9 @@ function sweepExpiredOneshotTasks(store) {
 async function startControlServer(options = {}) {
   initializeRuntime();
   if (controlServer && controlServerState.running) return getDaemonStatus();
-  const settings = { ...daemonSettings(), ...options };
-  const host = normalizeDaemonHost(settings.host);
-  const preferredPort = normalizeDaemonPort(settings.port);
+  const settings = { ...settingsStore.daemonSettings(), ...options };
+  const host = settingsStore.normalizeDaemonHost(settings.host);
+  const preferredPort = settingsStore.normalizeDaemonPort(settings.port);
   const port = await choosePort(preferredPort, 20);
   if (!port) throw new Error("No available local port for Aimashi daemon.");
   controlServerState = {
@@ -5418,9 +4375,9 @@ async function startControlServer(options = {}) {
   initSchedulerSubsystem();
   controlServerState.running = true;
   controlServerState.starting = false;
-  writeDaemonSettings({ ...settings, host, port });
+  settingsStore.writeDaemonSettings({ ...settings, host, port });
   appendDaemonLog(`Aimashi daemon listening at ${controlServerState.baseUrl}`);
-  if (relaySettings().enabled) {
+  if (settingsStore.relaySettings().enabled) {
     startRelayClient().catch((error) => {
       relayState.lastError = String(error?.message || error);
       appendRelayLog(`Relay auto-start failed: ${relayState.lastError}`);
@@ -5444,7 +4401,7 @@ function stopControlServer() {
   return getDaemonStatus();
 }
 
-async function pingDaemon(settings = daemonSettings(), timeoutMs = 1200) {
+async function pingDaemon(settings = settingsStore.daemonSettings(), timeoutMs = 1200) {
   const urls = daemonPingUrls(settings);
   for (const baseUrl of urls) {
     try {
@@ -5458,7 +4415,7 @@ async function pingDaemon(settings = daemonSettings(), timeoutMs = 1200) {
 }
 
 async function notifyDaemonRelay(action, body = {}) {
-  const ping = await pingDaemon(daemonSettings(), 500);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), 500);
   if (!ping.ok || !ping.baseUrl) return null;
   const response = await fetch(`${ping.baseUrl}/api/relay/${action}`, {
     method: "POST",
@@ -5474,7 +4431,7 @@ async function notifyDaemonRelay(action, body = {}) {
 }
 
 async function fetchDaemonRelayStatus() {
-  const ping = await pingDaemon(daemonSettings(), 500);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), 500);
   if (!ping.ok || !ping.baseUrl) return null;
   const response = await fetch(`${ping.baseUrl}/api/relay/status`, {
     headers: { Authorization: `Bearer ${daemonToken()}` },
@@ -5489,7 +4446,7 @@ async function startDaemonService() {
     return { ...getDaemonStatus(), running: false, disabled: true };
   }
   initializeRuntime();
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   if (IS_DAEMON_PROCESS) return startControlServer(settings);
   const existing = await pingDaemon(settings, 500);
   if (existing.ok) return { ...getDaemonStatus(), running: true, baseUrl: existing.baseUrl };
@@ -5513,7 +4470,7 @@ function stopDaemonService() {
 }
 
 function appendCloudLog(line) {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   const token = String(settings.token || "");
   const clean = String(line || "").replace(token ? new RegExp(token, "g") : /$a/, "[REDACTED]");
   cloudBridgeState.logs.push(clean);
@@ -5521,8 +4478,8 @@ function appendCloudLog(line) {
 }
 
 function cloudStatus(includeToken = false) {
-  const settings = cloudSettings();
-  const cloudWorkspace = readCloudWorkspace();
+  const settings = settingsStore.cloudSettings();
+  const cloudWorkspace = settingsStore.readCloudWorkspace();
   const workspace = cloudWorkspace?.workspace || null;
   return {
     enabled: Boolean(settings.enabled && settings.token),
@@ -5541,8 +4498,8 @@ function cloudStatus(includeToken = false) {
 }
 
 async function cloudApi(pathSegment, { method = "GET", body = null, token = "" } = {}) {
-  const settings = cloudSettings();
-  const baseUrl = normalizeCloudUrl(settings.url);
+  const settings = settingsStore.cloudSettings();
+  const baseUrl = settingsStore.normalizeCloudUrl(settings.url);
   const headers = { "Content-Type": "application/json" };
   const bearer = token || settings.token;
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
@@ -5558,17 +4515,17 @@ async function cloudApi(pathSegment, { method = "GET", body = null, token = "" }
 }
 
 async function syncAimashiCloudWorkspace() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   const data = await cloudApi("/api/me");
-  writeCloudSettings({ user: data.user || settings.user });
-  writeCloudWorkspace(data.workspace || null);
+  settingsStore.writeCloudSettings({ user: data.user || settings.user });
+  settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
   return cloudStatus(false);
 }
 
 async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = {}) {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token || !session?.id || !message) return cloudStatus(false);
   const fellow = loadFellowManifest().fellows.find((item) => item.key === fellowKey || item.id === fellowKey) || {};
   const conversation = cloudConversationFromDesktopSession(session, fellow);
@@ -5583,22 +4540,22 @@ async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = 
       ...cloudMessageFromDesktopMessage(message)
     }
   });
-  writeCloudWorkspace(pushed.workspace || null);
+  settingsStore.writeCloudWorkspace(pushed.workspace || null);
   mergeCloudWorkspaceIntoChatStore(pushed.workspace || null);
   return cloudStatus(false);
 }
 
 async function loginAimashiCloud({ username, password, mode = "login", url = "" } = {}) {
-  const nextUrl = normalizeCloudUrl(url || cloudSettings().url);
-  writeCloudSettings({ url: nextUrl, enabled: false, token: "", user: null });
+  const nextUrl = settingsStore.normalizeCloudUrl(url || settingsStore.cloudSettings().url);
+  settingsStore.writeCloudSettings({ url: nextUrl, enabled: false, token: "", user: null });
   const pathSegment = mode === "register" ? "/api/auth/register" : "/api/auth/login";
   const data = await cloudApi(pathSegment, {
     method: "POST",
     body: { username: String(username || "").trim(), password: String(password || "") },
     token: ""
   });
-  writeCloudSettings({ url: nextUrl, enabled: true, token: data.token, user: data.user || null });
-  writeCloudWorkspace(data.workspace || null);
+  settingsStore.writeCloudSettings({ url: nextUrl, enabled: true, token: data.token, user: data.user || null });
+  settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
   startCloudEvents();
   startCloudBridge();
@@ -5607,17 +4564,17 @@ async function loginAimashiCloud({ username, password, mode = "login", url = "" 
 
 async function logoutAimashiCloud() {
   try {
-    if (cloudSettings().token) await cloudApi("/api/auth/logout", { method: "POST", body: {} });
+    if (settingsStore.cloudSettings().token) await cloudApi("/api/auth/logout", { method: "POST", body: {} });
   } catch {
     // Local logout should still clear the desktop token.
   }
-  writeCloudSettings({ enabled: false, token: "", user: null });
+  settingsStore.writeCloudSettings({ enabled: false, token: "", user: null });
   stopCloudEvents();
   stopCloudBridge();
   return cloudStatus(false);
 }
 
-function cloudWebSocketUrl(pathname, settings = cloudSettings()) {
+function cloudWebSocketUrl(pathname, settings = settingsStore.cloudSettings()) {
   const url = new URL(settings.url);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = pathname;
@@ -5625,15 +4582,15 @@ function cloudWebSocketUrl(pathname, settings = cloudSettings()) {
   return url;
 }
 
-function cloudWebSocketProtocols(settings = cloudSettings()) {
+function cloudWebSocketProtocols(settings = settingsStore.cloudSettings()) {
   return [`aimashi-token.${settings.token}`];
 }
 
-function cloudEventsUrl(settings = cloudSettings()) {
+function cloudEventsUrl(settings = settingsStore.cloudSettings()) {
   return cloudWebSocketUrl("/api/events", settings).toString();
 }
 
-function cloudBridgeUrl(settings = cloudSettings()) {
+function cloudBridgeUrl(settings = settingsStore.cloudSettings()) {
   const url = cloudWebSocketUrl("/api/bridge", settings);
   url.searchParams.set("deviceName", `${os.hostname()} Aimashi Desktop`);
   url.searchParams.set("engine", "codex");
@@ -5666,7 +4623,7 @@ function stopCloudEvents() {
 
 function scheduleCloudEventsReconnect() {
   if (cloudEventsReconnectTimer) return;
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return;
   cloudEventsReconnectTimer = setTimeout(() => {
     cloudEventsReconnectTimer = null;
@@ -5677,7 +4634,7 @@ function scheduleCloudEventsReconnect() {
 function handleCloudWorkspaceEvent(message = {}) {
   const workspace = message.workspace || null;
   if (!workspace) return;
-  writeCloudWorkspace(workspace);
+  settingsStore.writeCloudWorkspace(workspace);
   mergeCloudWorkspaceIntoChatStore(workspace);
   broadcastRendererEvent("cloud:event", {
     type: String(message.type || "workspace_updated"),
@@ -5711,7 +4668,7 @@ function handleCloudEventsMessage(raw) {
 }
 
 function startCloudEvents() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   if (cloudEventsClient && [WebSocket.CONNECTING, WebSocket.OPEN].includes(cloudEventsClient.readyState)) {
     return cloudStatus(false);
@@ -5754,7 +4711,7 @@ function stopCloudBridge() {
 
 function scheduleCloudBridgeReconnect() {
   if (cloudBridgeReconnectTimer) return;
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return;
   cloudBridgeReconnectTimer = setTimeout(() => {
     cloudBridgeReconnectTimer = null;
@@ -5854,7 +4811,7 @@ function handleCloudBridgeMessage(ws, raw) {
 }
 
 function startCloudBridge() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   if (cloudBridgeClient && [WebSocket.CONNECTING, WebSocket.OPEN].includes(cloudBridgeClient.readyState)) {
     return cloudStatus(false);
@@ -5884,7 +4841,7 @@ function startCloudBridge() {
 }
 
 function appendRelayLog(line) {
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   const clean = String(line || "")
     .replace(new RegExp(settings.secret, "g"), "[REDACTED]")
     .replace(new RegExp(daemonToken(), "g"), "[REDACTED]");
@@ -5900,7 +4857,7 @@ function relaySend(payload) {
 
 function scheduleRelayReconnect() {
   if (relayReconnectTimer) return;
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   if (!settings.enabled) return;
   relayReconnectTimer = setTimeout(() => {
     relayReconnectTimer = null;
@@ -5922,7 +4879,7 @@ function stopRelayClient() {
   if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, "remote disabled");
   relayState = {
     ...relayState,
-    enabled: relaySettings().enabled,
+    enabled: settingsStore.relaySettings().enabled,
     connected: false,
     connecting: false,
     mobilePeers: 0
@@ -6040,12 +4997,12 @@ async function handleRelayRpc(message = {}) {
       return;
     }
     if (method === "POST" && requestPath === "/api/effort/save") {
-      writeEffortSettings(body);
+      settingsStore.writeEffortSettings(body);
       relayRpcResult(clientId, id, true, getRuntimeStatus());
       return;
     }
     if (method === "POST" && requestPath === "/api/permissions/save") {
-      writePermissionSettings(body);
+      settingsStore.writePermissionSettings(body);
       relayRpcResult(clientId, id, true, getRuntimeStatus());
       return;
     }
@@ -6121,7 +5078,7 @@ function handleRelayMessage(raw) {
 
 async function startRelayClient() {
   initializeRuntime();
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   relayState = {
     ...relayState,
     enabled: settings.enabled,
@@ -6945,12 +5902,12 @@ function createActiveClaudeCodeChatAdapter() {
     chatCompletionResponse,
     claudeAgentSdk,
     ensureClaudeBridgePlugin,
-    expandLeadingSkillCommand,
+    expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
     getAgentSessionEntry,
     getSchedulerMcpSpec,
     injectGroupContextForSdk,
     lastUserPrompt,
-    normalizeEffortLevel,
+    normalizeEffortLevel: settingsStore.normalizeEffortLevel,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionEntry,
@@ -6964,11 +5921,11 @@ function createActiveCodexChatAdapter() {
     chatCompletionResponse,
     codexSdk,
     ensureCodexHome,
-    expandLeadingSkillCommand,
+    expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
     getAgentSessionId,
     injectGroupContextForSdk,
     lastUserPrompt,
-    normalizeEffortLevel,
+    normalizeEffortLevel: settingsStore.normalizeEffortLevel,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionId,
@@ -7299,14 +6256,14 @@ ipcMain.handle("daemon:status", async () => {
   return getObservedDaemonStatus(500);
 });
 ipcMain.handle("daemon:pairing", async () => {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   const ping = await pingDaemon(settings, 500);
   return { ...getDaemonPairingInfo(), running: controlServerState.running || ping.ok, baseUrl: ping.baseUrl || getDaemonStatus().baseUrl };
 });
 ipcMain.handle("daemon:start", () => startDaemonService());
 ipcMain.handle("daemon:stop", () => stopDaemonService());
 ipcMain.handle("daemon:settings-save", (_event, settings) => {
-  writeDaemonSettings(settings);
+  settingsStore.writeDaemonSettings(settings);
   return getDaemonStatus();
 });
 ipcMain.handle("util:qr-svg", (_event, text) => {
@@ -7330,7 +6287,7 @@ ipcMain.handle("relay:status", async () => {
   return relayStatus(true);
 });
 ipcMain.handle("relay:start", async () => {
-  writeRelaySettings({ enabled: true });
+  settingsStore.writeRelaySettings({ enabled: true });
   if (!IS_DAEMON_PROCESS) {
     const daemonRelay = await notifyDaemonRelay("start");
     if (daemonRelay) return { ...relayStatus(true), ...daemonRelay };
@@ -7338,14 +6295,14 @@ ipcMain.handle("relay:start", async () => {
   return startRelayClient();
 });
 ipcMain.handle("relay:stop", () => {
-  writeRelaySettings({ enabled: false });
+  settingsStore.writeRelaySettings({ enabled: false });
   if (!IS_DAEMON_PROCESS) {
     notifyDaemonRelay("stop").catch(() => {});
   }
   return stopRelayClient();
 });
 ipcMain.handle("relay:settings-save", async (_event, settings) => {
-  const next = writeRelaySettings(settings);
+  const next = settingsStore.writeRelaySettings(settings);
   if (!IS_DAEMON_PROCESS) {
     const daemonRelay = await notifyDaemonRelay(next.enabled ? "start" : "stop", next);
     if (daemonRelay) return { ...relayStatus(true), ...daemonRelay };
@@ -7395,17 +6352,17 @@ ipcMain.handle("chat:title-generate", (_event, payload) => generateSessionTitle(
 ipcMain.handle("model:catalog", () => loadHermesModelCatalog());
 ipcMain.handle("codex:list-models", () => loadCodexModels());
 ipcMain.handle("engine:capabilities", () => loadEngineCapabilities());
-ipcMain.handle("skills:list", () => loadLocalSkills());
-ipcMain.handle("plugins:install", (_event, extensionId) => installMarketplacePlugin(extensionId));
-ipcMain.handle("skills:read", (_event, skillId) => readLocalSkill(skillId));
-ipcMain.handle("skills:delete", (_event, skillId) => deleteLocalSkill(skillId));
-ipcMain.handle("skills:open-directory", (_event, skillId) => openLocalSkillDirectory(skillId));
+ipcMain.handle("skills:list", () => skillsLoader.loadLocalSkills());
+ipcMain.handle("plugins:install", (_event, extensionId) => skillsLoader.installMarketplacePlugin(extensionId));
+ipcMain.handle("skills:read", (_event, skillId) => skillsLoader.readLocalSkill(skillId));
+ipcMain.handle("skills:delete", (_event, skillId) => skillsLoader.deleteLocalSkill(skillId));
+ipcMain.handle("skills:open-directory", (_event, skillId) => skillsLoader.openLocalSkillDirectory(skillId));
 ipcMain.handle("permissions:save", async (_event, settings) => {
-  writePermissionSettings(settings);
+  settingsStore.writePermissionSettings(settings);
   return getRuntimeStatus();
 });
 ipcMain.handle("effort:save", async (_event, settings) => {
-  writeEffortSettings(settings);
+  settingsStore.writeEffortSettings(settings);
   return getRuntimeStatus();
 });
 ipcMain.handle("model:save", (_event, settings) => {
@@ -7471,7 +6428,7 @@ ipcMain.handle("appearance:save", (_event, settings) => {
 
 ipcMain.handle("profile:save", (_event, profile) => {
   const p = runtimePaths();
-  const current = { ...defaultUserProfile(), ...readJson(p.userProfile, {}) };
+  const current = { ...settingsStore.defaultUserProfile(), ...readJson(p.userProfile, {}) };
   const next = {
     displayName: String(profile.displayName || current.displayName || "Boss").trim() || "Boss",
     avatarText: String(profile.avatarText || current.avatarText || "B").trim().slice(0, 2).toUpperCase() || "B",
@@ -7651,7 +6608,7 @@ ipcMain.handle("pet:place", (_event, key) => placeFellowPet(key));
 ipcMain.handle("pet:recall", (_event, key) => recallFellowPet(key));
 
 async function callDaemonTasks(pathSegment, opts = {}) {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   const baseUrl = controlServerState.baseUrl || `http://${settings.host}:${settings.port}`;
   const response = await fetch(`${baseUrl}${pathSegment}`, {
     ...opts,
@@ -7682,7 +6639,7 @@ function subscribeDaemonTaskEvents() {
   let reconnectDelay = 1000;
 
   function connect() {
-    const settings = daemonSettings();
+    const settings = settingsStore.daemonSettings();
     const baseUrl = controlServerState.baseUrl || `http://${settings.host}:${settings.port}`;
     const token = daemonToken();
     let pathname = "/api/tasks/events";
