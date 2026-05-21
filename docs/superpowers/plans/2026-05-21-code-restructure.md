@@ -1023,3 +1023,45 @@ registerIpcHandlers(ipcModules, { /* 注入上下文 */ });
 每个 commit 之前**必跑** `node src/check.js && npm test`。
 
 每个 Phase 完成 commit 后**停下来汇报**给用户，等"go"再进下一 Phase。
+
+---
+
+## 执行进度（2026-05-21 实施日志）
+
+分支：`refactor/code-restructure`，从 main 切出，所有 commit 都在该分支。
+
+### 已完成
+
+| Task | Commit | app.js 行数 | 说明 |
+|---|---|---|---|
+| baseline | c387613 | 8055 | plan 文档 commit |
+| A1 Tasks panel | f731a1b | 7604 | `src/renderer/tasks-panel.js` (494 行) |
+| A2 Pet dialog | 8fbaf88 | 7511 | `src/renderer/pet-dialog.js` (147 行) |
+| A4 Message menu | 375289c | 7317 | `src/renderer/message-menu.js` (283 行) |
+| B1 Settings Appearance | b2d6fa3 | 7133 | `src/renderer/settings-appearance.js` (244 行) + **critical init-order fix** |
+
+**累计：app.js 从 8055 行降到 7133 行（-922 / -11.4%）**。每个 commit 都跑过 `node src/check.js` + `npm test (241/241)` + electron 启动无 stderr 错误。
+
+### 关键发现 & 修复
+
+**init-order bug**（在 B1 修复，bundle 进 b2d6fa3）：原本 `window.aimashi*.init*` 全部放在 `initializeRuntime()` 的第一次 `render()` 之后。这意味着首次 render 时模块的注入依赖还是 undefined，每次 `window.aimashi*.renderXxx()` 都在抛 TypeError。但渲染器异常不冒到 stderr，smoke 检测没抓到。第二次 render（用户交互触发）时 init 已完成，所以肉眼看不出。
+
+修复：所有模块 init 移到 `render()` 之前。
+
+教训：写新模块时，对外暴露的 render 函数应该有 `if (!state || !els) return;` 防御，避免靠 init 顺序保证安全。后续 Task（B2+）的新模块都应加这个 guard。
+
+### Deferred Sub-Tasks
+
+- **A3 Skills library → 推迟成 A3a/A3b**：原计划一次抽 30+ 函数 643 行，跨度太大且 `syncTopbarClickCapture` 是和非-skill 代码共用的。需要：
+  - A3a：纯数据/render helper（skillTone, skillDisplayName, skillSummaryZh, visibleSkills, skillCategories, skillMatchesFilters, renderSkillInlineMarkdown, renderSkillMarkdownSource 等）
+  - A3b：UI 渲染层（renderSkillLibrary, renderSkillPreview, renderConnectorCard, renderPluginCard, renderExtensionDetail + context menu）
+  - **注意保留** `syncTopbarClickCapture` 在 app.js（跨域使用）
+- **B4 Session manager → 推迟成 B4a/B4b**：sessionsForPersona / activeSession / persistSession 是聊天主流程高频依赖，碰这块要格外小心。建议：
+  - B4a：只抽未读相关的轻量 helper（latestAssistantMessageTime, unreadCountForPersona, totalUnreadCount, markPersonaRead, persistReadStateQuietly, initializeReadStateForPersonas, ensureReadState）
+  - B4b：sessionsForPersona + activeSession + persistSession 系列（要逐函数验证 chat 主流程不破）
+
+### 下一步
+
+继续 Phase B 时建议顺序：B4a（未读 helper，最小 + 隔离） → B3（跨设备 settings，独立 UI） → B2（model settings，依赖较多 OAuth UI） → A3a → A3b → B5（fellow manager，最大单刀，最后做） → B4b。
+
+或者按用户实际改动热点决定。
