@@ -296,6 +296,27 @@ test("sqlite store rate limits repeated failed logins per account and ip", () =>
   }
 });
 
+test("schema v2 creates social tables and indexes", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimashi-schema-test-"));
+  const store = createCloudStore({ dataDir: tmpDir });
+  try {
+    const db = store.getDb();
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all().map((r) => r.name);
+    for (const t of ["friendships", "friend_requests", "rooms", "room_members", "messages"]) {
+      assert.ok(tables.includes(t), `missing table: ${t}`);
+    }
+    const idx = db.prepare(`SELECT name FROM sqlite_master WHERE type='index' ORDER BY name`).all().map((r) => r.name);
+    for (const i of ["idx_friend_requests_to", "idx_friend_requests_code", "idx_room_members_user", "idx_messages_room_seq"]) {
+      assert.ok(idx.includes(i), `missing index: ${i}`);
+    }
+    const version = db.prepare("SELECT MAX(version) AS v FROM schema_migrations").get().v;
+    assert.ok(version >= 2, `schema_migrations max version should be >= 2, got ${version}`);
+  } finally {
+    store.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite store imports existing legacy cloud json on first open", () => {
   const paths = tempStore();
   const legacyJsonPath = path.join(paths.dataDir, "cloud.json");
