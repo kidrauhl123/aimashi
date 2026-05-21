@@ -5049,10 +5049,11 @@ async function initializeRuntime() {
   const runtime = await trackStartupTask("初始化 runtime", () => window.aimashi.initializeRuntime());
   state.firstRun = Array.isArray(runtime?.created) && runtime.created.length > 0;
   state.runtime = runtime;
-  await trackStartupTask("加载会话", loadChatSessions);
-  // Initialize extracted renderer modules BEFORE the first render(), so that
-  // render() can safely call into window.aimashi*.renderXxx without hitting
-  // TypeError on undefined state/els references inside the modules.
+  // Initialize extracted renderer modules BEFORE any subsequent trackStartupTask
+  // call, because trackStartupTask itself triggers render() at start and finish;
+  // once state.runtime is set, render() no longer early-returns and will call
+  // into window.aimashi*.{applyAppearance,renderXxx} — which need fontPresets /
+  // state / els / etc. to already be injected.
   if (window.aimashiGroup && window.aimashiGroup.initGroupModule) {
     try {
       await window.aimashiGroup.initGroupModule({
@@ -5161,6 +5162,7 @@ async function initializeRuntime() {
       closeGroupContextMenu,
     });
   }
+  await trackStartupTask("加载会话", loadChatSessions);
   render();
   setTimeout(() => {
     Promise.allSettled([
