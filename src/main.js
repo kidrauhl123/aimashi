@@ -4976,22 +4976,22 @@ async function runRemoteChatRequest(body, eventSink = null) {
       error: Boolean(tool.error)
     }));
   }
-  // Reload to incorporate any concurrent writes that happened during the await,
-  // then APPEND rather than overwrite to avoid losing messages.
-  const freshStore = loadChatStore();
-  if (!freshStore.sessions[fellow.key]) freshStore.sessions[fellow.key] = [];
-  const freshSession = freshStore.sessions[fellow.key].find((s) => s.id === session.id) || session;
-  freshSession.messages = [
-    ...(freshSession.messages || []),
+  // Append to the in-memory session we resolved at the top. The store is the
+  // one resolveRemoteChatSession returned; mutating session.messages on it and
+  // saving it preserves any new-session we just created via ensurePersonaSession.
+  // (Concurrent writes to the same session can still race — tracked in
+  // docs/superpowers/known-issues/2026-05-20-aimashi-task-rail-deferrals.md.)
+  session.messages = [
+    ...(Array.isArray(session.messages) ? session.messages : []),
     savedUser,
     savedAssistant
   ];
-  freshSession.updatedAt = new Date().toISOString();
-  if (!freshSession.titleGenerated) {
-    freshSession.title = fallbackSessionTitle(freshSession.messages);
+  session.updatedAt = new Date().toISOString();
+  if (!session.titleGenerated) {
+    session.title = fallbackSessionTitle(session.messages);
   }
-  saveChatStore(freshStore);
-  return { fellow, session: freshSession, response, userMessageId, assistantMessageId };
+  saveChatStore(store);
+  return { fellow, session, response, userMessageId, assistantMessageId };
 }
 
 async function handleControlRequest(req, res) {
