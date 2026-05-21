@@ -1,0 +1,110 @@
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { createCloudStore } = require("../src/cloud/sqlite-store.js");
+const { createSocialStore } = require("../src/cloud/social-store.js");
+const { createMessagesStore } = require("../src/cloud/messages-store.js");
+
+function setup() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimashi-msg-test-"));
+  const cloudStore = createCloudStore({ dataDir: tmpDir });
+  const db = cloudStore.getDb();
+  const social = createSocialStore(db);
+  const messages = createMessagesStore(db);
+  const alice = cloudStore.registerUser({ username: "alice", password: "Pa55word!" }).user;
+  const bob = cloudStore.registerUser({ username: "bob", password: "Pa55word!" }).user;
+  social.createRoom({ id: "r-msg", name: null, avatar: null, hostMember: null, decorations: null, contextCard: null });
+  social.addRoomMember({ roomId: "r-msg", memberKind: "user", memberRef: alice.id, ownerId: null });
+  social.addRoomMember({ roomId: "r-msg", memberKind: "user", memberRef: bob.id, ownerId: null });
+  return { cloudStore, social, messages, alice, bob, tmpDir };
+}
+
+function teardown(ctx) {
+  ctx.cloudStore.close();
+  fs.rmSync(ctx.tmpDir, { recursive: true, force: true });
+}
+
+test("appendMessage assigns ascending per-room seq starting at 1", () => {
+  const ctx = setup();
+  try {
+    const m1 = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "hi" });
+    const m2 = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.bob.id, bodyMd: "yo" });
+    const m3 = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "k" });
+    assert.equal(m1.seq, 1);
+    assert.equal(m2.seq, 2);
+    assert.equal(m3.seq, 3);
+    assert.notEqual(m1.id, m2.id);
+  } finally { teardown(ctx); }
+});
+
+test("appendMessage seq is per-room not global", () => {
+  const ctx = setup();
+  try {
+    ctx.social.createRoom({ id: "r-other", name: null, avatar: null, hostMember: null, decorations: null, contextCard: null });
+    ctx.social.addRoomMember({ roomId: "r-other", memberKind: "user", memberRef: ctx.alice.id, ownerId: null });
+    ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "1" });
+    const otherFirst = ctx.messages.appendMessage({ roomId: "r-other", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "1" });
+    assert.equal(otherFirst.seq, 1);
+  } finally { teardown(ctx); }
+});
+
+test("listMessagesSince returns only seq > sinceSeq, ascending", () => {
+  const ctx = setup();
+  try {
+    for (let i = 1; i <= 5; i++) {
+      ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "m" + i });
+    }
+    const after2 = ctx.messages.listMessagesSince("r-msg", 2);
+    assert.equal(after2.length, 3);
+    assert.deepEqual(after2.map((m) => m.seq), [3, 4, 5]);
+    assert.equal(after2[0].body_md, "m3");
+    const after5 = ctx.messages.listMessagesSince("r-msg", 5);
+    assert.equal(after5.length, 0);
+    const all = ctx.messages.listMessagesSince("r-msg", 0);
+    assert.equal(all.length, 5);
+  } finally { teardown(ctx); }
+});
+
+test("listMessagesSince respects limit", () => {
+  const ctx = setup();
+  try {
+    for (let i = 1; i <= 10; i++) {
+      ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "m" + i });
+    }
+    const page = ctx.messages.listMessagesSince("r-msg", 0, 3);
+    assert.equal(page.length, 3);
+    assert.deepEqual(page.map((m) => m.seq), [1, 2, 3]);
+  } finally { teardown(ctx); }
+});
+
+test("appendMessage persists attachments + mentions + turn_id", () => {
+  const ctx = setup();
+  try {
+    const m = ctx.messages.appendMessage({
+      roomId: "r-msg",
+      senderKind: "user",
+      senderRef: ctx.alice.id,
+      bodyMd: "@bob look",
+      attachments: [{ kind: "image", path: "/x.png" }],
+      mentions: [{ kind: "user", userId: ctx.bob.id }],
+      turnId: "t-1",
+    });
+    assert.equal(m.turn_id, "t-1");
+    const parsed = JSON.parse(m.attachments_json);
+    assert.equal(parsed[0].kind, "image");
+    const ments = JSON.parse(m.mentions_json);
+    assert.equal(ments[0].userId, ctx.bob.id);
+  } finally { teardown(ctx); }
+});
+
+test("updateMessageStatus transitions streaming -> complete", () => {
+  const ctx = setup();
+  try {
+    const m = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "fellow", senderRef: "codex", senderOwnerId: ctx.alice.id, bodyMd: "...", status: "streaming" });
+    ctx.messages.updateMessageStatus(m.id, "complete");
+    const fetched = ctx.messages.getMessage(m.id);
+    assert.equal(fetched.status, "complete");
+  } finally { teardown(ctx); }
+});
