@@ -493,248 +493,6 @@ const DEFAULT_SELECTION_STYLE = "solid";
 
 
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-// Icon path data adapted from ByteDance IconPark (Apache-2.0).
-const ICON_PARK = {
-  addPic: '<path d="M38 21V40C38 41.1046 37.1046 42 36 42H8C6.89543 42 6 41.1046 6 40V12C6 10.8954 6.89543 10 8 10H26.3636" stroke="currentColor" stroke-width="4" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.0005 31.0308L18.0005 23L21.0005 26L24.5005 20.5L32.0005 31.0308H12.0005Z" fill="none" stroke="currentColor" stroke-width="4" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/><path d="M34.0005 10H42.0005" stroke="currentColor" stroke-width="4" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/><path d="M37.9946 5.79541V13.7954" stroke="currentColor" stroke-width="4" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>',
-  copy: '<path d="M13 12.4316V7.8125C13 6.2592 14.2592 5 15.8125 5H40.1875C41.7408 5 43 6.2592 43 7.8125V32.1875C43 33.7408 41.7408 35 40.1875 35H35.5163" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M32.1875 13H7.8125C6.2592 13 5 14.2592 5 15.8125V40.1875C5 41.7408 6.2592 43 7.8125 43H32.1875C33.7408 43 35 41.7408 35 40.1875V15.8125C35 14.2592 33.7408 13 32.1875 13Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  delete: '<path d="M9 10V44H39V10H9Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20 20V33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M28 20V33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 10H44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 10L19.289 4H28.7771L32 10H16Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  documentFolder: '<path d="M32 6H22V42H32V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M42 6H32V42H42V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M10 6L18 7L14.5 42L6 41L10 6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M37 18V15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M27 18V15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  edit: '<path d="M7 42H43" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 26.7199V34H18.3172L39 13.3081L31.6951 6L11 26.7199Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  folderOpen: '<path d="M4 9V41L9 21H39.5V15C39.5 13.8954 38.6046 13 37.5 13H24L19 7H6C4.89543 7 4 7.89543 4 9Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M40 41L44 21H8.8125L4 41H40Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  history: '<path d="M5.81836 6.72729V14H13.0911" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 24C4 35.0457 12.9543 44 24 44V44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C16.598 4 10.1351 8.02111 6.67677 13.9981" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24.005 12L24.0038 24.0088L32.4832 32.4882" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  message: '<path d="M4 6H44V36H29L24 41L19 36H4V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M23 21H25.0025" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M33.001 21H34.9999" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13.001 21H14.9999" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  pin: '<path d="M10.6963 17.5042C13.3347 14.8657 16.4701 14.9387 19.8781 16.8076L32.62 9.74509L31.8989 4.78683L43.2126 16.1005L38.2656 15.3907L31.1918 28.1214C32.9752 31.7589 33.1337 34.6647 30.4953 37.3032C30.4953 37.3032 26.235 33.0429 22.7171 29.525L6.44305 41.5564L18.4382 25.2461C14.9202 21.7281 10.6963 17.5042 10.6963 17.5042Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  preview: '<path d="M24 36C35.0457 36 44 24 44 24C44 24 35.0457 12 24 12C12.9543 12 4 24 4 24C4 24 12.9543 36 24 36Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 29C26.7614 29 29 26.7614 29 24C29 21.2386 26.7614 19 24 19C21.2386 19 19 21.2386 19 24C19 26.7614 21.2386 29 24 29Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  quote: '<path fill-rule="evenodd" clip-rule="evenodd" d="M18.8533 9.11587C11.3227 13.9521 7.13913 19.5811 6.30256 26.0028C5.00021 35.9999 13.9404 40.8932 18.4703 36.4966C23.0002 32.1 20.2848 26.5195 17.0047 24.9941C13.7246 23.4686 11.7187 23.9999 12.0686 21.9614C12.4185 19.923 17.0851 14.2712 21.1849 11.6391C21.4569 11.4078 21.5604 10.959 21.2985 10.6185C21.1262 10.3946 20.7883 9.95545 20.2848 9.30102C19.8445 8.72875 19.4227 8.75017 18.8533 9.11587Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M38.6789 9.11587C31.1484 13.9521 26.9648 19.5811 26.1282 26.0028C24.8259 35.9999 33.7661 40.8932 38.296 36.4966C42.8259 32.1 40.1105 26.5195 36.8304 24.9941C33.5503 23.4686 31.5443 23.9999 31.8943 21.9614C32.2442 19.923 36.9108 14.2712 41.0106 11.6391C41.2826 11.4078 41.3861 10.959 41.1241 10.6185C40.9519 10.3946 40.614 9.95545 40.1105 9.30102C39.6702 8.72875 39.2484 8.75017 38.6789 9.11587Z" fill="currentColor"/>',
-  translate: '<path d="M28.2857 37H39.7143M42 42L39.7143 37M26 42L28.2857 37M28.2857 37L34 24L39.7143 37H28.2857Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 6L17 9" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11H28" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 16C10 16 11.7895 22.2609 16.2632 25.7391C20.7368 29.2174 28 32 28 32" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 11C24 11 22.2105 19.2174 17.7368 23.7826C13.2632 28.3478 6 32 6 32" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>'
-};
-
-function iconParkIcon(name, className = "menu-item-icon") {
-  const body = ICON_PARK[name];
-  if (!body) return "";
-  return `<span class="${className}" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" focusable="false">${body}</svg></span>`;
-}
-
-function menuItemHtml({ icon, label, attrs = "", className = "" }) {
-  return `<button class="${className}" type="button" ${attrs}>${iconParkIcon(icon)}<span>${escapeHtml(label)}</span></button>`;
-}
-
-function renderInlineMarkdown(value) {
-  const codes = [];
-  const protectedText = String(value || "").replace(/`([^`\n]+)`/g, (_match, code) => {
-    const index = codes.push(code) - 1;
-    return `@@AIMASHI_INLINE_CODE_${index}@@`;
-  });
-  let html = escapeHtml(protectedText);
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/\n/g, "<br>");
-  for (let index = 0; index < codes.length; index++) {
-    html = html.replace(
-      `@@AIMASHI_INLINE_CODE_${index}@@`,
-      `<code class="inline-code" tabindex="0" title="点击复制">${escapeHtml(codes[index])}</code>`
-    );
-  }
-  return html;
-}
-
-function codeLanguageId(language = "") {
-  const raw = String(language || "").trim().toLowerCase();
-  const aliases = {
-    javascript: "js",
-    typescript: "ts",
-    shell: "bash",
-    sh: "bash",
-    zsh: "bash",
-    yml: "yaml"
-  };
-  return aliases[raw] || raw || "text";
-}
-
-function codeLanguageLabel(language = "") {
-  const id = codeLanguageId(language);
-  const labels = {
-    js: "JavaScript",
-    jsx: "JSX",
-    ts: "TypeScript",
-    tsx: "TSX",
-    json: "JSON",
-    bash: "Shell",
-    yaml: "YAML",
-    text: "Text"
-  };
-  return labels[id] || id.toUpperCase();
-}
-
-function highlightPlainSegment(segment, language) {
-  const id = codeLanguageId(language);
-  const keywords = id === "bash"
-    ? new Set(["if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in", "function", "return", "export", "local", "set"])
-    : new Set(["const", "let", "var", "function", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue", "class", "extends", "new", "try", "catch", "finally", "throw", "async", "await", "import", "from", "export", "default", "typeof", "instanceof", "in", "of", "this", "super"]);
-  const source = String(segment || "");
-  const tokenPattern = /--?[A-Za-z0-9][\w-]*|\b[A-Za-z_$][\w$-]*\b|\b\d+(?:\.\d+)?\b|[=!<>|&+\-*/%?:.,;()[\]{}]+/g;
-  let cursor = 0;
-  let html = "";
-  for (const match of source.matchAll(tokenPattern)) {
-    const token = match[0];
-    const offset = match.index ?? 0;
-    if (offset > cursor) html += escapeHtml(source.slice(cursor, offset));
-    const escaped = escapeHtml(token);
-    if (/^\d/.test(token)) html += `<span class="syntax-number">${escaped}</span>`;
-    else if (id === "bash" && token.startsWith("-")) html += `<span class="syntax-parameter">${escaped}</span>`;
-    else if (/^[=!<>|&+\-*/%?:]+$/.test(token)) html += `<span class="syntax-operator">${escaped}</span>`;
-    else if (/^[.,;()[\]{}]+$/.test(token)) html += `<span class="syntax-punctuation">${escaped}</span>`;
-    else if (keywords.has(token)) html += `<span class="syntax-keyword">${escaped}</span>`;
-    else if (["true", "false", "null", "undefined"].includes(token)) html += `<span class="syntax-literal">${escaped}</span>`;
-    else {
-      const before = source.slice(0, offset).replace(/\s+$/g, "");
-      const after = source.slice(offset + token.length).replace(/^\s+/g, "");
-      if (before.endsWith(".")) html += `<span class="syntax-property">${escaped}</span>`;
-      else if (after.startsWith("(")) html += `<span class="syntax-function">${escaped}</span>`;
-      else if (/^[A-Z][A-Za-z0-9_$]*$/.test(token)) html += `<span class="syntax-class">${escaped}</span>`;
-      else html += `<span class="syntax-variable">${escaped}</span>`;
-    }
-    cursor = offset + token.length;
-  }
-  if (cursor < source.length) html += escapeHtml(source.slice(cursor));
-  return html;
-}
-
-function highlightCode(code, language = "") {
-  const id = codeLanguageId(language);
-  if (!["js", "jsx", "ts", "tsx", "json", "bash"].includes(id)) return escapeHtml(code);
-  const source = String(code || "");
-  const parts = [];
-  const pattern = id === "json"
-    ? /("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b)|\b(true|false|null)\b|([{}[\]:,])/gi
-    : /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|(\$[A-Za-z_][\w]*|\$\{[^}]+\})/g;
-  let cursor = 0;
-  for (const match of source.matchAll(pattern)) {
-    const index = match.index ?? 0;
-    if (index > cursor) parts.push(highlightPlainSegment(source.slice(cursor, index), id));
-    const token = match[0];
-    if (id === "json") {
-      const after = source.slice(index + token.length).replace(/^\s+/g, "");
-      if (match[1] && after.startsWith(":")) parts.push(`<span class="syntax-property">${escapeHtml(token)}</span>`);
-      else if (match[1]) parts.push(`<span class="syntax-string">${escapeHtml(token)}</span>`);
-      else if (match[2]) parts.push(`<span class="syntax-number">${escapeHtml(token)}</span>`);
-      else if (match[3]) parts.push(`<span class="syntax-literal">${escapeHtml(token)}</span>`);
-      else parts.push(`<span class="syntax-punctuation">${escapeHtml(token)}</span>`);
-    } else if (match[1]) {
-      parts.push(`<span class="syntax-string">${escapeHtml(token)}</span>`);
-    } else if (match[2]) {
-      parts.push(`<span class="syntax-comment">${escapeHtml(token)}</span>`);
-    } else if (match[3]) {
-      parts.push(`<span class="syntax-variable">${escapeHtml(token)}</span>`);
-    }
-    cursor = index + token.length;
-  }
-  if (cursor < source.length) parts.push(highlightPlainSegment(source.slice(cursor), id));
-  return parts.join("");
-}
-
-function renderCodeBlock(code, language = "") {
-  const lang = codeLanguageId(language).replace(/[^A-Za-z0-9_+.-]/g, "").slice(0, 24);
-  const label = codeLanguageLabel(lang);
-  return `
-    <figure class="message-code-block" data-language="${escapeHtml(lang)}">
-      <figcaption>
-        <span>${escapeHtml(label)}</span>
-        <button type="button" data-copy-code aria-label="复制代码" title="复制代码">⧉</button>
-      </figcaption>
-      <pre><code class="syntax-code language-${escapeHtml(lang)}">${highlightCode(String(code || "").replace(/\n$/, ""), lang)}</code></pre>
-    </figure>
-  `;
-}
-
-function renderMarkdown(value) {
-  const lines = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const html = [];
-  let paragraph = [];
-  let list = null;
-  let fence = null;
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return;
-    html.push(`<p>${renderInlineMarkdown(paragraph.join("\n"))}</p>`);
-    paragraph = [];
-  };
-  const flushList = () => {
-    if (!list) return;
-    html.push(`<${list.type}>${list.items.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</${list.type}>`);
-    list = null;
-  };
-  const flushTextBlocks = () => {
-    flushParagraph();
-    flushList();
-  };
-
-  for (const line of lines) {
-    const fenceMatch = line.match(/^```([A-Za-z0-9_+.-]*)\s*$/);
-    if (fence) {
-      if (fenceMatch) {
-        html.push(renderCodeBlock(fence.lines.join("\n"), fence.language));
-        fence = null;
-      } else {
-        fence.lines.push(line);
-      }
-      continue;
-    }
-    if (fenceMatch) {
-      flushTextBlocks();
-      fence = { language: fenceMatch[1] || "", lines: [] };
-      continue;
-    }
-    if (!line.trim()) {
-      flushTextBlocks();
-      continue;
-    }
-    if (/^\s*---+\s*$/.test(line)) {
-      flushTextBlocks();
-      html.push('<hr class="message-divider">');
-      continue;
-    }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushTextBlocks();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
-    if (unordered) {
-      flushParagraph();
-      if (!list || list.type !== "ul") {
-        flushList();
-        list = { type: "ul", items: [] };
-      }
-      list.items.push(unordered[1]);
-      continue;
-    }
-    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
-    if (ordered) {
-      flushParagraph();
-      if (!list || list.type !== "ol") {
-        flushList();
-        list = { type: "ol", items: [] };
-      }
-      list.items.push(ordered[1]);
-      continue;
-    }
-    paragraph.push(line);
-  }
-  flushTextBlocks();
-  if (fence) html.push(renderCodeBlock(fence.lines.join("\n"), fence.language));
-  return html.join("");
-}
 
 async function copyTextToClipboard(text) {
   const value = String(text || "");
@@ -802,7 +560,7 @@ function formatMessageTime(value) {
 function renderMessageTime(value) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) return "";
-  return `<time class="message-time" datetime="${escapeHtml(date.toISOString())}" title="${escapeHtml(date.toLocaleString())}">${escapeHtml(formatMessageTime(date))}</time>`;
+  return `<time class="message-time" datetime="${window.aimashiMarkdown.escapeHtml(date.toISOString())}" title="${window.aimashiMarkdown.escapeHtml(date.toLocaleString())}">${window.aimashiMarkdown.escapeHtml(formatMessageTime(date))}</time>`;
 }
 
 function renderAttachmentChips(attachments = []) {
@@ -816,27 +574,27 @@ function renderAttachmentChips(attachments = []) {
 
 function renderAttachmentThumb(attachment = {}, className = "attachment-thumb") {
   const src = String(attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || "").trim();
-  if (!src || !src.startsWith("data:image/")) return `<span>${escapeHtml(window.aimashiFormat.attachmentGlyph(attachment))}</span>`;
-  return `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="">`;
+  if (!src || !src.startsWith("data:image/")) return `<span>${window.aimashiMarkdown.escapeHtml(window.aimashiFormat.attachmentGlyph(attachment))}</span>`;
+  return `<img class="${window.aimashiMarkdown.escapeHtml(className)}" src="${window.aimashiMarkdown.escapeHtml(src)}" alt="">`;
 }
 
 function renderAttachmentChip(attachment = {}) {
   const image = (attachment.kind || window.aimashiFormat.attachmentKind(attachment)) === "image" && (attachment.thumbnailDataUrl || attachment.thumbnail || attachment.previewDataUrl || attachment.dataUrl || attachment.url);
   const href = String(attachment.dataUrl || "").startsWith("data:") ? String(attachment.dataUrl) : "";
   const tag = href ? "a" : "span";
-  const download = href ? ` href="${escapeHtml(href)}" download="${escapeHtml(attachment.name || "attachment")}"` : "";
+  const download = href ? ` href="${window.aimashiMarkdown.escapeHtml(href)}" download="${window.aimashiMarkdown.escapeHtml(attachment.name || "attachment")}"` : "";
   if (image) {
     return `
-      <button class="message-attachment image" type="button" title="${escapeHtml(attachment.path || attachment.name || "")}" aria-label="预览图片">
+      <button class="message-attachment image" type="button" title="${window.aimashiMarkdown.escapeHtml(attachment.path || attachment.name || "")}" aria-label="预览图片">
         ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
       </button>
     `;
   }
   return `
-    <${tag} class="message-attachment"${download} title="${escapeHtml(attachment.path || attachment.name || "")}">
+    <${tag} class="message-attachment"${download} title="${window.aimashiMarkdown.escapeHtml(attachment.path || attachment.name || "")}">
       ${renderAttachmentThumb(attachment, "message-attachment-thumb")}
-      <strong>${escapeHtml(attachment.name || "附件")}</strong>
-      <em>${escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</em>
+      <strong>${window.aimashiMarkdown.escapeHtml(attachment.name || "附件")}</strong>
+      <em>${window.aimashiMarkdown.escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</em>
     </${tag}>
   `;
 }
@@ -853,7 +611,7 @@ function openImagePreview(src, title = "") {
   overlay.className = "image-preview-overlay";
   overlay.innerHTML = `
     <button class="image-preview-close" type="button" aria-label="关闭">×</button>
-    <img src="${escapeHtml(imageSrc)}" alt="${escapeHtml(title || "图片预览")}">
+    <img src="${window.aimashiMarkdown.escapeHtml(imageSrc)}" alt="${window.aimashiMarkdown.escapeHtml(title || "图片预览")}">
   `;
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay || event.target.closest(".image-preview-close")) closeImagePreview();
@@ -1496,18 +1254,18 @@ function render() {
       button.type = "button";
       button.className = `persona message-card private-message-card${persona.key === state.activeKey ? " active" : ""}${persona.pinned ? " pinned" : ""}`;
       button.innerHTML = `
-        <span class="avatar fellow-photo" data-fellow-avatar="${escapeHtml(persona.key)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(persona.avatarImage || window.aimashiAvatar.avatarAssetForKey(persona.key), persona.avatarCrop, persona.color || "#5e5ce6")}"></span>
+        <span class="avatar fellow-photo" data-fellow-avatar="${window.aimashiMarkdown.escapeHtml(persona.key)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(persona.avatarImage || window.aimashiAvatar.avatarAssetForKey(persona.key), persona.avatarCrop, persona.color || "#5e5ce6")}"></span>
         <span class="persona-main">
           <span class="persona-name-row">
-            <span class="persona-name">${escapeHtml(persona.name)}</span>
+            <span class="persona-name">${window.aimashiMarkdown.escapeHtml(persona.name)}</span>
             <span class="persona-type">私聊</span>
           </span>
-          <span class="persona-key">${escapeHtml(preview.text || "暂无对话")}</span>
+          <span class="persona-key">${window.aimashiMarkdown.escapeHtml(preview.text || "暂无对话")}</span>
         </span>
         <span class="persona-side">
-          <span class="persona-time">${escapeHtml(preview.time)}</span>
+          <span class="persona-time">${window.aimashiMarkdown.escapeHtml(preview.time)}</span>
           <span class="persona-pin${persona.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
-          <span class="persona-unread${unread ? "" : " hidden"}">${escapeHtml(unread > 99 ? "99+" : String(unread))}</span>
+          <span class="persona-unread${unread ? "" : " hidden"}">${window.aimashiMarkdown.escapeHtml(unread > 99 ? "99+" : String(unread))}</span>
         </span>
       `;
       button.addEventListener("click", () => {
@@ -1540,13 +1298,13 @@ function render() {
       <span class="avatar group-avatar"></span>
       <span class="persona-main">
         <span class="persona-name-row">
-          <span class="persona-name">${escapeHtml(group.name || "未命名群聊")}</span>
+          <span class="persona-name">${window.aimashiMarkdown.escapeHtml(group.name || "未命名群聊")}</span>
           <span class="persona-type group">群聊</span>
         </span>
-        <span class="persona-key">${escapeHtml(preview.text)}</span>
+        <span class="persona-key">${window.aimashiMarkdown.escapeHtml(preview.text)}</span>
       </span>
       <span class="persona-side">
-        <span class="persona-time">${escapeHtml(preview.time)}</span>
+        <span class="persona-time">${window.aimashiMarkdown.escapeHtml(preview.time)}</span>
         <span class="persona-pin${group.pinned ? "" : " hidden"}" aria-label="置顶">${ICON_PARK_PIN_SVG}</span>
       </span>
     `;
@@ -1801,10 +1559,10 @@ function renderCapabilityCheckbox({ item, checked, disabled, type }) {
   const meta = item.engineLabel || item.sourceLabel || item.category || item.status || "";
   return `
     <label class="capability-row">
-      <input type="checkbox" data-capability-type="${escapeHtml(type)}" data-capability-id="${escapeHtml(item.id)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <input type="checkbox" data-capability-type="${window.aimashiMarkdown.escapeHtml(type)}" data-capability-id="${window.aimashiMarkdown.escapeHtml(item.id)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
       <span>
-        <strong>${escapeHtml(title)}</strong>
-        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+        <strong>${window.aimashiMarkdown.escapeHtml(title)}</strong>
+        ${meta ? `<small>${window.aimashiMarkdown.escapeHtml(meta)}</small>` : ""}
       </span>
     </label>
   `;
@@ -1820,7 +1578,7 @@ function renderFellowCapabilitiesPanel(fellow) {
       <header>
         <div>
           <strong>能力</strong>
-          <p>${escapeHtml(engineLabel(engine))} · ${plugins.length} 插件 · ${skills.length} 技能 · ${connectors.length} 连接</p>
+          <p>${window.aimashiMarkdown.escapeHtml(engineLabel(engine))} · ${plugins.length} 插件 · ${skills.length} 技能 · ${connectors.length} 连接</p>
         </div>
         <label class="capability-default-toggle">
           <input type="checkbox" data-capability-default ${capabilities.inheritEngineDefaults ? "checked" : ""}>
@@ -1887,10 +1645,10 @@ function renderContacts() {
     button.innerHTML = `
       <span class="avatar fellow-photo" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(fellow.avatarImage || window.aimashiAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></span>
       <span class="contact-row-main">
-        <strong>${escapeHtml(fellow.name)}</strong>
-        <small>${escapeHtml(fellow.bio || "本地伙伴")}</small>
+        <strong>${window.aimashiMarkdown.escapeHtml(fellow.name)}</strong>
+        <small>${window.aimashiMarkdown.escapeHtml(fellow.bio || "本地伙伴")}</small>
       </span>
-      <span class="contact-row-side">${escapeHtml(summary.time || "")}</span>
+      <span class="contact-row-side">${window.aimashiMarkdown.escapeHtml(summary.time || "")}</span>
     `;
     button.addEventListener("click", () => {
       state.activeContactKey = fellow.key;
@@ -1917,22 +1675,22 @@ function renderContactDetail(fellow) {
       <header class="contact-profile-head">
         <button class="contact-profile-avatar" type="button" data-contact-action="edit" title="编辑联系人头像" style="${window.aimashiAvatar.avatarBackgroundStyle(fellow.avatarImage || window.aimashiAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
         <div class="contact-profile-title">
-          <h2>${escapeHtml(fellow.name || "联系人")}</h2>
+          <h2>${window.aimashiMarkdown.escapeHtml(fellow.name || "联系人")}</h2>
           <div class="contact-engine-badge" title="Agent 引擎">
             <span>Agent</span>
-            <strong>${escapeHtml(engineLabel(engine))}</strong>
+            <strong>${window.aimashiMarkdown.escapeHtml(engineLabel(engine))}</strong>
           </div>
-          <p>${escapeHtml(fellow.bio || "本地伙伴")}</p>
+          <p>${window.aimashiMarkdown.escapeHtml(fellow.bio || "本地伙伴")}</p>
         </div>
         <div class="contact-actions">
-          <button class="primary contact-message-action" type="button" data-contact-action="message" title="发消息" aria-label="发消息">${iconParkIcon("message", "contact-action-icon")}</button>
+          <button class="primary contact-message-action" type="button" data-contact-action="message" title="发消息" aria-label="发消息">${window.aimashiMarkdown.iconParkIcon("message", "contact-action-icon")}</button>
           <button class="secondary" type="button" data-contact-action="edit">编辑</button>
           ${fellow.key === "aimashi" ? "" : `<button class="secondary danger" type="button" data-contact-action="delete">删除伙伴</button>`}
         </div>
       </header>
       <section class="contact-note">
         <strong>最近内容</strong>
-        <p>${escapeHtml(summary.preview)}</p>
+        <p>${window.aimashiMarkdown.escapeHtml(summary.preview)}</p>
       </section>
       ${renderFellowCapabilitiesPanel(fellow)}
     </article>
@@ -2042,14 +1800,14 @@ function renderFellowContextMenu() {
   const pet = petStatusForKey(fellow.key);
   const petAction = pet.hasAsset
     ? pet.placed
-      ? menuItemHtml({ icon: "message", label: `收回「${fellow.name}」`, attrs: 'data-fellow-action="recall"' })
-      : menuItemHtml({ icon: "message", label: "放进桌面", attrs: 'data-fellow-action="place"' })
-    : menuItemHtml({ icon: "addPic", label: "生成桌宠", attrs: 'data-fellow-action="generate-pet"' });
+      ? window.aimashiMarkdown.menuItemHtml({ icon: "message", label: `收回「${fellow.name}」`, attrs: 'data-fellow-action="recall"' })
+      : window.aimashiMarkdown.menuItemHtml({ icon: "message", label: "放进桌面", attrs: 'data-fellow-action="place"' })
+    : window.aimashiMarkdown.menuItemHtml({ icon: "addPic", label: "生成桌宠", attrs: 'data-fellow-action="generate-pet"' });
   menu.innerHTML = `
-    ${menuItemHtml({ icon: "pin", label: fellow.pinned ? "取消置顶" : "置顶", attrs: 'data-fellow-action="pin"' })}
-    ${menuItemHtml({ icon: "edit", label: "编辑", attrs: 'data-fellow-action="edit"' })}
+    ${window.aimashiMarkdown.menuItemHtml({ icon: "pin", label: fellow.pinned ? "取消置顶" : "置顶", attrs: 'data-fellow-action="pin"' })}
+    ${window.aimashiMarkdown.menuItemHtml({ icon: "edit", label: "编辑", attrs: 'data-fellow-action="edit"' })}
     ${petAction}
-    ${fellow.key === "aimashi" ? "" : `<div class="skill-context-menu-separator" role="separator"></div>${menuItemHtml({ icon: "delete", label: "删除伙伴", attrs: 'data-fellow-action="delete"', className: "danger" })}`}
+    ${fellow.key === "aimashi" ? "" : `<div class="skill-context-menu-separator" role="separator"></div>${window.aimashiMarkdown.menuItemHtml({ icon: "delete", label: "删除伙伴", attrs: 'data-fellow-action="delete"', className: "danger" })}`}
   `;
   const rect = menu.getBoundingClientRect();
   const width = rect.width || 138;
@@ -2110,10 +1868,10 @@ function renderGroupContextMenu() {
   syncTopbarClickCapture();
   if (!open) return;
   menu.innerHTML = `
-    ${menuItemHtml({ icon: "pin", label: group.pinned ? "取消置顶" : "置顶", attrs: 'data-group-action="pin"' })}
-    ${menuItemHtml({ icon: "edit", label: "编辑群组", attrs: 'data-group-action="edit"' })}
+    ${window.aimashiMarkdown.menuItemHtml({ icon: "pin", label: group.pinned ? "取消置顶" : "置顶", attrs: 'data-group-action="pin"' })}
+    ${window.aimashiMarkdown.menuItemHtml({ icon: "edit", label: "编辑群组", attrs: 'data-group-action="edit"' })}
     <div class="skill-context-menu-separator" role="separator"></div>
-    ${menuItemHtml({ icon: "delete", label: "删除群组", attrs: 'data-group-action="delete"', className: "danger" })}
+    ${window.aimashiMarkdown.menuItemHtml({ icon: "delete", label: "删除群组", attrs: 'data-group-action="delete"', className: "danger" })}
   `;
   const rect = menu.getBoundingClientRect();
   const width = rect.width || 138;
@@ -2179,8 +1937,8 @@ function replyQuoteHtml(replyTo) {
   if (!replyTo?.content) return "";
   return `
     <div class="message-reply-quote">
-      <span>${escapeHtml(replyTo.author || (replyTo.role === "user" ? "你" : "AI"))}</span>
-      <p>${escapeHtml(replyTo.content)}</p>
+      <span>${window.aimashiMarkdown.escapeHtml(replyTo.author || (replyTo.role === "user" ? "你" : "AI"))}</span>
+      <p>${window.aimashiMarkdown.escapeHtml(replyTo.content)}</p>
     </div>
   `;
 }
@@ -2239,8 +1997,8 @@ function renderComposerReply() {
   }
   els.composerReply.innerHTML = `
     <div>
-      <span>回复 ${escapeHtml(reply.author || "消息")}</span>
-      <p>${escapeHtml(reply.content || "")}</p>
+      <span>回复 ${window.aimashiMarkdown.escapeHtml(reply.author || "消息")}</span>
+      <p>${window.aimashiMarkdown.escapeHtml(reply.content || "")}</p>
     </div>
     <button type="button" data-clear-reply title="取消回复" aria-label="取消回复">×</button>
   `;
@@ -2449,10 +2207,10 @@ function renderSessionMenu() {
     row.className = `session-row${session.id === activeId ? " active" : ""}`;
     row.innerHTML = `
       <span>
-        <strong>${escapeHtml(session.title || "新对话")}</strong>
-        <small>${escapeHtml(new Date(session.updatedAt || session.createdAt || Date.now()).toLocaleString())}</small>
+        <strong>${window.aimashiMarkdown.escapeHtml(session.title || "新对话")}</strong>
+        <small>${window.aimashiMarkdown.escapeHtml(new Date(session.updatedAt || session.createdAt || Date.now()).toLocaleString())}</small>
       </span>
-      <em title="重命名" data-session-edit="${escapeHtml(session.id)}">${iconParkIcon("edit", "session-row-edit-icon")}</em>
+      <em title="重命名" data-session-edit="${window.aimashiMarkdown.escapeHtml(session.id)}">${window.aimashiMarkdown.iconParkIcon("edit", "session-row-edit-icon")}</em>
     `;
     row.addEventListener("click", async (event) => {
       const editTarget = event.target.closest("[data-session-edit]");
@@ -2553,7 +2311,7 @@ function renderTraceBlocks({ reasoning, tools, content, expanded, scopeKey }) {
   };
   const rowAttrs = (key, idx, stateForKey) => {
     const attrs = [];
-    if (key) attrs.push(`data-trace-key="${escapeHtml(key)}"`);
+    if (key) attrs.push(`data-trace-key="${window.aimashiMarkdown.escapeHtml(key)}"`);
     if (stateForKey.open) attrs.push("open");
     if (stateForKey.open && stateForKey.userOpen) {
       attrs.push('data-user-open="true"');
@@ -2571,8 +2329,8 @@ function renderTraceBlocks({ reasoning, tools, content, expanded, scopeKey }) {
     const stateForKey = openState(key);
     rows.push(
       `<details class="trace-row reasoning${animClass(key)}"${rowAttrs(key, rows.length, stateForKey)}>` +
-        `<summary><span class="trace-chevron">▸</span><span class="trace-cmd">thinking</span><span class="trace-arg">${escapeHtml(reasoningText.slice(0, 80).replace(/\s+/g, " "))}</span></summary>` +
-        `<pre class="trace-body">${escapeHtml(reasoningText)}</pre>` +
+        `<summary><span class="trace-chevron">▸</span><span class="trace-cmd">thinking</span><span class="trace-arg">${window.aimashiMarkdown.escapeHtml(reasoningText.slice(0, 80).replace(/\s+/g, " "))}</span></summary>` +
+        `<pre class="trace-body">${window.aimashiMarkdown.escapeHtml(reasoningText)}</pre>` +
       `</details>`
     );
   }
@@ -2593,11 +2351,11 @@ function renderTraceBlocks({ reasoning, tools, content, expanded, scopeKey }) {
         `<summary>` +
           `<span class="trace-chevron">▸</span>` +
           `<span class="trace-glyph">${glyph}</span>` +
-          `<span class="trace-cmd">${escapeHtml(name)}</span>` +
-          (previewInline ? `<span class="trace-arg">${escapeHtml(previewInline)}</span>` : "") +
-          (meta ? `<span class="trace-meta">${escapeHtml(meta)}</span>` : "") +
+          `<span class="trace-cmd">${window.aimashiMarkdown.escapeHtml(name)}</span>` +
+          (previewInline ? `<span class="trace-arg">${window.aimashiMarkdown.escapeHtml(previewInline)}</span>` : "") +
+          (meta ? `<span class="trace-meta">${window.aimashiMarkdown.escapeHtml(meta)}</span>` : "") +
         `</summary>` +
-        (preview ? `<pre class="trace-body">${escapeHtml(preview)}</pre>` : "") +
+        (preview ? `<pre class="trace-body">${window.aimashiMarkdown.escapeHtml(preview)}</pre>` : "") +
       `</details>`
     );
   }
@@ -2621,9 +2379,9 @@ function renderMessageHtml(message, ctx) {
   const taskAffordanceHtml = taskMeta
     ? `<div class="task-fire-affordance">
          <span class="task-fire-icon">📅</span>
-         来自定时任务「${escapeHtml(taskMeta.title)}」 ·
-         ${escapeHtml(formatRunTime(typeof firedAt === "string" ? new Date(firedAt).getTime() : firedAt))} ·
-         <button class="link" type="button" data-jump-task="${escapeHtml(taskMeta.id)}">打开任务</button>
+         来自定时任务「${window.aimashiMarkdown.escapeHtml(taskMeta.title)}」 ·
+         ${window.aimashiMarkdown.escapeHtml(formatRunTime(typeof firedAt === "string" ? new Date(firedAt).getTime() : firedAt))} ·
+         <button class="link" type="button" data-jump-task="${window.aimashiMarkdown.escapeHtml(taskMeta.id)}">打开任务</button>
        </div>`
     : "";
   const label = message.role === "user" ? (user.avatarText || window.aimashiAvatar.initials(user.displayName)) : window.aimashiAvatar.initials(persona?.name || "A");
@@ -2648,14 +2406,14 @@ function renderMessageHtml(message, ctx) {
     })
     : "";
   const timeHtml = renderMessageTime(message.createdAt);
-  const bodyHtml = String(message.content || "").trim() ? renderMarkdown(message.content) : "";
+  const bodyHtml = String(message.content || "").trim() ? window.aimashiMarkdown.renderMarkdown(message.content) : "";
   const replyHtml = replyQuoteHtml(message.replyTo);
   const translation = window.aimashiMessageMenu?.translationHtml(message, messageIndex) || "";
   const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)].map(hydrateAttachmentPreview));
   const pinnedHtml = message.pinned ? `<span class="message-pin-badge">${ICON_PARK_PIN_SVG}置顶</span>` : "";
   const roleClass = message.role === "user" ? "user" : "assistant";
   return `<article class="message ${roleClass}">
-      <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? escapeHtml(label) : ""}</div>
+      <div class="avatar" style="background-color:${window.aimashiMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? window.aimashiMarkdown.escapeHtml(label) : ""}</div>
       <div class="message-stack">${taskAffordanceHtml}${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
     </article>`;
 }
@@ -2711,9 +2469,9 @@ function renderChat() {
       expanded: true,
       scopeKey: `run:${s.runId || ""}`
     });
-    const textHtml = s.text ? `<div class="bubble">${renderMarkdown(s.text)}</div>${renderMessageTime(s.createdAt)}` : "";
+    const textHtml = s.text ? `<div class="bubble">${window.aimashiMarkdown.renderMarkdown(s.text)}</div>${renderMessageTime(s.createdAt)}` : "";
     article.innerHTML = `
-      <div class="avatar" style="background-color:${escapeHtml(avatarBackgroundColor)};${imageStyle}"></div>
+      <div class="avatar" style="background-color:${window.aimashiMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}"></div>
       <div class="message-stack">${traceHtml}${textHtml}</div>
     `;
     els.chat.appendChild(article);
@@ -2923,9 +2681,9 @@ function renderSlashCommandMenu() {
     return;
   }
   els.slashCommandMenu.innerHTML = commands.map((item, index) => `
-    <button type="button" class="slash-command-item${index === state.slashSelectedIndex ? " active" : ""}" data-command="${escapeHtml(item.command)}">
-      <span class="slash-command-token">${escapeHtml(item.command)}</span>
-      <span class="slash-command-description">${escapeHtml(item.description)}</span>
+    <button type="button" class="slash-command-item${index === state.slashSelectedIndex ? " active" : ""}" data-command="${window.aimashiMarkdown.escapeHtml(item.command)}">
+      <span class="slash-command-token">${window.aimashiMarkdown.escapeHtml(item.command)}</span>
+      <span class="slash-command-description">${window.aimashiMarkdown.escapeHtml(item.description)}</span>
     </button>
   `).join("");
   els.slashCommandMenu.querySelectorAll("[data-command]").forEach((button) => {
@@ -2952,11 +2710,11 @@ function renderComposerAttachments() {
   const attachments = state.pendingAttachments;
   els.composerAttachments.classList.toggle("hidden", attachments.length === 0);
   els.composerAttachments.innerHTML = attachments.map((attachment) => `
-    <div class="composer-attachment${attachment.thumbnailDataUrl ? " image" : ""}" title="${escapeHtml(attachment.path || attachment.name)}">
+    <div class="composer-attachment${attachment.thumbnailDataUrl ? " image" : ""}" title="${window.aimashiMarkdown.escapeHtml(attachment.path || attachment.name)}">
       <span class="composer-attachment-kind">${renderAttachmentThumb(attachment, "composer-attachment-thumb")}</span>
-      <span class="composer-attachment-name">${escapeHtml(attachment.name || "附件")}</span>
-      <span class="composer-attachment-size">${escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</span>
-      <button type="button" data-attachment-remove="${escapeHtml(attachment.id)}" title="移除附件" aria-label="移除附件">×</button>
+      <span class="composer-attachment-name">${window.aimashiMarkdown.escapeHtml(attachment.name || "附件")}</span>
+      <span class="composer-attachment-size">${window.aimashiMarkdown.escapeHtml(window.aimashiFormat.formatBytes(attachment.size))}</span>
+      <button type="button" data-attachment-remove="${window.aimashiMarkdown.escapeHtml(attachment.id)}" title="移除附件" aria-label="移除附件">×</button>
     </div>
   `).join("");
   els.composerAttachments.querySelectorAll("[data-attachment-remove]").forEach((button) => {
@@ -3056,22 +2814,22 @@ function renderSkillPicker() {
   els.skillPickerBody.innerHTML = `
     <aside class="skill-picker-plugins">
       ${plugins.map((plugin) => `
-        <button class="${plugin.id === state.skillPickerPluginId ? "active" : ""}" type="button" data-skill-picker-plugin="${escapeHtml(plugin.id)}">
-          <span>${escapeHtml(plugin.label || plugin.name)}</span>
+        <button class="${plugin.id === state.skillPickerPluginId ? "active" : ""}" type="button" data-skill-picker-plugin="${window.aimashiMarkdown.escapeHtml(plugin.id)}">
+          <span>${window.aimashiMarkdown.escapeHtml(plugin.label || plugin.name)}</span>
           <em>${pluginCounts[plugin.id] || plugin.skillCount || 0}</em>
         </button>
       `).join("")}
     </aside>
     <section class="skill-picker-skills">
       <header>
-        <span>${escapeHtml(needle ? "搜索结果" : (currentPlugin?.label || "Skills"))}</span>
+        <span>${window.aimashiMarkdown.escapeHtml(needle ? "搜索结果" : (currentPlugin?.label || "Skills"))}</span>
         <em>${filtered.length}</em>
       </header>
       <div class="skill-picker-list">
         ${filtered.length ? filtered.map((skill) => `
-          <button class="skill-picker-item" type="button" data-skill-pick="${escapeHtml(skill.name)}">
-            <strong>${escapeHtml(skill.name)}</strong>
-            <small>${escapeHtml((skill.description || window.aimashiSkillHelpers.skillSummaryZh(skill) || "").slice(0, 108))}</small>
+          <button class="skill-picker-item" type="button" data-skill-pick="${window.aimashiMarkdown.escapeHtml(skill.name)}">
+            <strong>${window.aimashiMarkdown.escapeHtml(skill.name)}</strong>
+            <small>${window.aimashiMarkdown.escapeHtml((skill.description || window.aimashiSkillHelpers.skillSummaryZh(skill) || "").slice(0, 108))}</small>
           </button>
         `).join("") : `<div class="skill-picker-empty">${state.skillsLoading ? "正在加载…" : "没有匹配的 Skill"}</div>`}
       </div>
@@ -3301,10 +3059,10 @@ async function initializeRuntime() {
     });
   }
   if (window.aimashiSkillHelpers && window.aimashiSkillHelpers.initSkillHelpers) {
-    window.aimashiSkillHelpers.initSkillHelpers({ escapeHtml });
+    window.aimashiSkillHelpers.initSkillHelpers({ escapeHtml: window.aimashiMarkdown.escapeHtml });
   }
   if (window.aimashiAvatar && window.aimashiAvatar.initAvatarHelpers) {
-    window.aimashiAvatar.initAvatarHelpers({ escapeHtml });
+    window.aimashiAvatar.initAvatarHelpers({ escapeHtml: window.aimashiMarkdown.escapeHtml });
   }
   if (window.aimashiModelHelpers && window.aimashiModelHelpers.initModelHelpers) {
     window.aimashiModelHelpers.initModelHelpers({
@@ -3325,13 +3083,13 @@ async function initializeRuntime() {
     });
   }
   if (window.aimashiSetupGuide && window.aimashiSetupGuide.initSetupGuide) {
-    window.aimashiSetupGuide.initSetupGuide({ state, escapeHtml });
+    window.aimashiSetupGuide.initSetupGuide({ state, escapeHtml: window.aimashiMarkdown.escapeHtml });
   }
   if (window.aimashiModelSettings && window.aimashiModelSettings.initModelSettings) {
     window.aimashiModelSettings.initModelSettings({
       state,
       els,
-      escapeHtml,
+      escapeHtml: window.aimashiMarkdown.escapeHtml,
       setText,
       updateModelFieldVisibility,
       providerPresets,
@@ -3343,9 +3101,9 @@ async function initializeRuntime() {
       state,
       els,
       aimashi: window.aimashi,
-      escapeHtml,
+      escapeHtml: window.aimashiMarkdown.escapeHtml,
       setText,
-      menuItemHtml,
+      menuItemHtml: window.aimashiMarkdown.menuItemHtml,
       syncTopbarClickCapture,
       closeGroupContextMenu,
       showNarrowContent,
@@ -3359,7 +3117,7 @@ async function initializeRuntime() {
       state,
       els,
       aimashi: window.aimashi,
-      escapeHtml,
+      escapeHtml: window.aimashiMarkdown.escapeHtml,
       setText,
       formatRunTime,
       renderMessageHtml,
@@ -3377,7 +3135,7 @@ async function initializeRuntime() {
       avatarAssetForKey: window.aimashiAvatar.avatarAssetForKey,
       cryptoRandomId,
       avatarBackgroundStyle: window.aimashiAvatar.avatarBackgroundStyle,
-      escapeHtml,
+      escapeHtml: window.aimashiMarkdown.escapeHtml,
       setText,
       renderView,
       refreshRuntime,
@@ -3404,15 +3162,15 @@ async function initializeRuntime() {
       messageAtIndex,
       messageReferenceForIndex,
       messageContextText,
-      menuItemHtml,
+      menuItemHtml: window.aimashiMarkdown.menuItemHtml,
       activeSession,
       persistSessionQuietly,
       replacePersistedSessionQuietly,
       renderChat,
       renderSessionMenu,
       renderComposerReply,
-      escapeHtml,
-      renderMarkdown,
+      escapeHtml: window.aimashiMarkdown.escapeHtml,
+      renderMarkdown: window.aimashiMarkdown.renderMarkdown,
       copyTextToClipboard,
       nowIso,
       cryptoRandomId,
@@ -4176,7 +3934,7 @@ function renderFellowAvatarDefaults() {
   state.fellowAvatarPresetGroup = activeGroup;
   if (els.fellowAvatarDefaultTabs) {
     els.fellowAvatarDefaultTabs.innerHTML = window.aimashiAvatar.avatarPresetGroupTabs.map((group) => `
-      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${escapeHtml(group.label)}</button>
+      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${window.aimashiMarkdown.escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${window.aimashiMarkdown.escapeHtml(group.label)}</button>
     `).join("");
     els.fellowAvatarDefaultTabs.querySelectorAll("[data-avatar-group]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4190,7 +3948,7 @@ function renderFellowAvatarDefaults() {
   const selected = state.fellowAvatarDraft.image;
   const presets = window.aimashiAvatar.avatarPresetGroups[activeGroup] || window.aimashiAvatar.avatarPresetGroups.human;
   els.fellowAvatarDefaults.innerHTML = presets.map((preset) => `
-    <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${escapeHtml(preset.src)}" data-avatar-name="${escapeHtml(preset.name)}" title="${escapeHtml(preset.name)}" aria-label="${escapeHtml(preset.name)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(preset.src, window.aimashiAvatar.avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
+    <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${window.aimashiMarkdown.escapeHtml(preset.src)}" data-avatar-name="${window.aimashiMarkdown.escapeHtml(preset.name)}" title="${window.aimashiMarkdown.escapeHtml(preset.name)}" aria-label="${window.aimashiMarkdown.escapeHtml(preset.name)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(preset.src, window.aimashiAvatar.avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
   `).join("");
   els.fellowAvatarDefaults.querySelectorAll("[data-avatar]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4208,7 +3966,7 @@ function renderProfileAvatarDefaults() {
   state.profileAvatarPresetGroup = activeGroup;
   if (els.profileAvatarDefaultTabs) {
     els.profileAvatarDefaultTabs.innerHTML = window.aimashiAvatar.avatarPresetGroupTabs.map((group) => `
-      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${escapeHtml(group.label)}</button>
+      <button type="button" class="${activeGroup === group.key ? "active" : ""}" data-avatar-group="${window.aimashiMarkdown.escapeHtml(group.key)}" role="tab" aria-selected="${activeGroup === group.key ? "true" : "false"}">${window.aimashiMarkdown.escapeHtml(group.label)}</button>
     `).join("");
     els.profileAvatarDefaultTabs.querySelectorAll("[data-avatar-group]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4222,7 +3980,7 @@ function renderProfileAvatarDefaults() {
   const selected = state.profileAvatarDraft.image;
   const presets = window.aimashiAvatar.avatarPresetGroups[activeGroup] || window.aimashiAvatar.avatarPresetGroups.human;
   els.profileAvatarDefaults.innerHTML = presets.map((preset) => `
-    <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${escapeHtml(preset.src)}" data-avatar-name="${escapeHtml(preset.name)}" title="${escapeHtml(preset.name)}" aria-label="${escapeHtml(preset.name)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(preset.src, window.aimashiAvatar.avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
+    <button type="button" class="avatar-default${selected === preset.src ? " active" : ""}" data-avatar="${window.aimashiMarkdown.escapeHtml(preset.src)}" data-avatar-name="${window.aimashiMarkdown.escapeHtml(preset.name)}" title="${window.aimashiMarkdown.escapeHtml(preset.name)}" aria-label="${window.aimashiMarkdown.escapeHtml(preset.name)}" style="${window.aimashiAvatar.avatarThumbBackgroundStyle(preset.src, window.aimashiAvatar.avatarDefaultCropForSrc(preset.src), "#eef0ff")}"></button>
   `).join("");
   els.profileAvatarDefaults.querySelectorAll("[data-avatar]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -5186,7 +4944,7 @@ function renderHeaderStatus() {
   }
   const count = sessionsForPersona(active.key).length;
   const startupLoading = state.startupTasks[0]?.label;
-  const trailing = startupLoading ? ` · 正在${escapeHtml(startupLoading)}` : "";
+  const trailing = startupLoading ? ` · 正在${window.aimashiMarkdown.escapeHtml(startupLoading)}` : "";
   els.activeChatMeta.innerHTML = `${count} 个会话 · 在线${trailing}`;
 }
 
@@ -5295,7 +5053,7 @@ function startAfterFirstPaint() {
         <article class="setup-guide bootstrap">
           <div class="setup-guide-main">
             <strong>Aimashi 初始化失败</strong>
-            <p>${escapeHtml(message)}</p>
+            <p>${window.aimashiMarkdown.escapeHtml(message)}</p>
           </div>
         </article>
       `;

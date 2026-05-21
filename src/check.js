@@ -80,6 +80,7 @@ const required = [
   "src/renderer/skill-library.js",
   "src/renderer/setup-guide.js",
   "src/renderer/avatar-helpers.js",
+  "src/renderer/markdown-helpers.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",
