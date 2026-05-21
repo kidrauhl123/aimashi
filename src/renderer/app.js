@@ -2906,7 +2906,7 @@ function render() {
   }
   renderView();
   renderSessionMenu();
-  if (!hasActiveMessageTextSelection()) renderChat();
+  if (!window.aimashiMessageMenu?.hasActiveMessageTextSelection()) renderChat();
 }
 
 function renderView() {
@@ -3544,7 +3544,7 @@ function renderSkillPreview() {
 
 function openSkillContextMenu(skillId, x, y) {
   if (!skillId) return;
-  closeMessageContextMenu();
+  window.aimashiMessageMenu?.closeMessageContextMenu();
   closeGroupContextMenu();
   state.skillContextMenu = { open: true, x, y, skillId };
   renderSkillContextMenu();
@@ -3960,7 +3960,7 @@ function petStatusForKey(key) {
 
 function openFellowContextMenu(fellowKey, x, y) {
   if (!fellowKey) return;
-  closeMessageContextMenu();
+  window.aimashiMessageMenu?.closeMessageContextMenu();
   closeGroupContextMenu();
   state.fellowContextMenu = { open: true, x, y, fellowKey };
   renderFellowContextMenu();
@@ -4028,7 +4028,7 @@ function groupById(groupId) {
 
 function openGroupContextMenu(groupId, x, y) {
   if (!groupId) return;
-  closeMessageContextMenu();
+  window.aimashiMessageMenu?.closeMessageContextMenu();
   closeFellowContextMenu();
   closeSkillContextMenu();
   state.groupContextMenu = { open: true, x, y, groupId };
@@ -4125,65 +4125,6 @@ function replyQuoteHtml(replyTo) {
   `;
 }
 
-function clearMessageSelectionHighlight() {
-  try {
-    window.CSS?.highlights?.delete?.("aimashi-message-selection");
-  } catch {
-    // Highlight API is optional.
-  }
-}
-
-function highlightMessageSelection(range) {
-  clearMessageSelectionHighlight();
-  try {
-    if (!range || !window.Highlight || !window.CSS?.highlights) return;
-    window.CSS.highlights.set("aimashi-message-selection", new window.Highlight(range));
-  } catch {
-    // Keep native selection behavior when custom highlights are unavailable.
-  }
-}
-
-function selectionInsideBubble(bubble) {
-  const selection = window.getSelection?.();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-  const text = selection.toString().trim();
-  if (!text) return null;
-  const anchorInside = selection.anchorNode && bubble.contains(selection.anchorNode);
-  const focusInside = selection.focusNode && bubble.contains(selection.focusNode);
-  if (!anchorInside || !focusInside) return null;
-  const range = selection.getRangeAt(0).cloneRange();
-  return { text, range };
-}
-
-function hasActiveMessageTextSelection() {
-  const selection = window.getSelection?.();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
-  if (!String(selection.toString() || "").trim()) return false;
-  const anchorBubble = selection.anchorNode?.parentElement?.closest?.(".bubble[data-message-index]");
-  const focusBubble = selection.focusNode?.parentElement?.closest?.(".bubble[data-message-index]");
-  return Boolean(anchorBubble && focusBubble && anchorBubble === focusBubble && els.chat?.contains(anchorBubble));
-}
-
-function openMessageContextMenu(messageIndex, x, y, selection = null) {
-  const index = Number(messageIndex);
-  if (!messageAtIndex(index)) return;
-  closeSkillContextMenu();
-  closeFellowContextMenu();
-  closeGroupContextMenu();
-  const selectionText = String(selection?.text || "").trim();
-  state.messageContextMenu = { open: true, x, y, messageIndex: index, selectionText };
-  if (selectionText) highlightMessageSelection(selection.range);
-  else clearMessageSelectionHighlight();
-  renderMessageContextMenu();
-}
-
-function closeMessageContextMenu() {
-  if (!state.messageContextMenu.open) return;
-  state.messageContextMenu = { open: false, x: 0, y: 0, messageIndex: -1, selectionText: "" };
-  clearMessageSelectionHighlight();
-  renderMessageContextMenu();
-}
-
 let composerCompositionEndedAt = 0;
 
 function isComposerComposing(event = null) {
@@ -4243,169 +4184,6 @@ function renderComposerReply() {
     </div>
     <button type="button" data-clear-reply title="取消回复" aria-label="取消回复">×</button>
   `;
-}
-
-function replyToMessage(message, index = state.messageContextMenu.messageIndex, selectionText = "") {
-  const reference = messageReferenceForIndex(Number(index), selectionText);
-  if (!reference) return;
-  state.replyDraft = reference;
-  renderComposerReply();
-  els.chatInput?.focus();
-}
-
-function replyContextPrompt(text, replyTo) {
-  if (!replyTo?.content) return text;
-  return [
-    "用户正在回复会话中的某一条消息。请把“被回复消息”作为这次回复的直接上下文，但不要在回答里机械复述它。",
-    "",
-    `被回复消息作者：${replyTo.author || (replyTo.role === "user" ? "用户" : "助手")}`,
-    "被回复消息：",
-    replyTo.content,
-    "",
-    "用户实际输入：",
-    text
-  ].join("\n");
-}
-
-function translationHtml(message, index) {
-  const translation = message?.translation;
-  if (!translation) return "";
-  const status = translation.status || (translation.text ? "done" : "");
-  const label = translation.sourceText ? "选中文本译文" : "译文";
-  const body = status === "loading"
-    ? '<p class="message-translation-muted">正在翻译...</p>'
-    : status === "error"
-      ? `<p class="message-translation-error">${escapeHtml(translation.error || "翻译失败")}</p>`
-      : `<div class="message-translation-body">${renderMarkdown(translation.text || "")}</div>`;
-  const copyButton = status === "done" && translation.text
-    ? `<button type="button" data-copy-translation="${index}" title="复制译文" aria-label="复制译文">⧉</button>`
-    : "";
-  return `
-    <div class="message-translation">
-      <div class="message-translation-head">
-        <span>${label}</span>
-        ${copyButton}
-      </div>
-      ${body}
-    </div>
-  `;
-}
-
-async function translateMessage(message, index = state.messageContextMenu.messageIndex, selectionText = "") {
-  const text = messageContextText(message, selectionText);
-  const messageIndex = Number(index);
-  const session = activeSession();
-  const target = messageAtIndex(messageIndex);
-  if (!text || !target) return;
-  if (state.isGenerating) {
-    target.translation = {
-      status: "error",
-      error: "请等当前回复生成结束后再翻译。",
-      sourceText: String(selectionText || "").trim(),
-      translatedAt: nowIso()
-    };
-    renderChat();
-    return;
-  }
-  target.translation = {
-    status: "loading",
-    text: "",
-    error: "",
-    sourceText: String(selectionText || "").trim(),
-    translatedAt: nowIso()
-  };
-  renderChat();
-  try {
-    const prompt = [
-      "请把下面这条聊天消息翻译成简体中文。",
-      "要求：只输出译文；保持原意、语气和代码/命令/链接；不要添加解释。",
-      "",
-      text
-    ].join("\n");
-    const response = await window.aimashi.sendChat({
-      fellowKey: state.activeKey,
-      personaKey: state.activeKey,
-      sessionId: `utility:translate:${cryptoRandomId()}`,
-      utility: true,
-      messages: [{ role: "user", content: prompt }]
-    });
-    const translated = String(response.choices?.[0]?.message?.content || "").trim();
-    target.translation = translated
-      ? { status: "done", text: translated, error: "", sourceText: String(selectionText || "").trim(), translatedAt: nowIso() }
-      : { status: "error", text: "", error: "模型没有返回译文。", sourceText: String(selectionText || "").trim(), translatedAt: nowIso() };
-  } catch (error) {
-    target.translation = {
-      status: "error",
-      text: "",
-      error: `翻译失败: ${error.message || error}`,
-      sourceText: String(selectionText || "").trim(),
-      translatedAt: nowIso()
-    };
-  }
-  renderChat();
-  await persistSessionQuietly(session);
-}
-
-async function toggleMessagePinned(index) {
-  const message = messageAtIndex(index);
-  if (!message) return;
-  message.pinned = !message.pinned;
-  message.pinnedAt = message.pinned ? nowIso() : "";
-  const session = activeSession();
-  session.updatedAt = nowIso();
-  renderChat();
-  await replacePersistedSessionQuietly(session);
-}
-
-async function deleteMessageAt(index) {
-  const session = activeSession();
-  if (!messageAtIndex(index)) return;
-  session.messages.splice(index, 1);
-  session.updatedAt = nowIso();
-  renderChat();
-  renderSessionMenu();
-  await replacePersistedSessionQuietly(session);
-}
-
-function renderMessageContextMenu() {
-  if (!els.messageContextMenu) return;
-  const menu = els.messageContextMenu;
-  const message = messageAtIndex(state.messageContextMenu.messageIndex);
-  const open = state.messageContextMenu.open && message;
-  menu.classList.toggle("hidden", !open);
-  if (!open) return;
-  const selectionText = String(state.messageContextMenu.selectionText || "").trim();
-  const hasSelection = Boolean(selectionText);
-  const contextText = messageContextText(message, selectionText);
-  const hasText = Boolean(contextText);
-  menu.innerHTML = `
-    ${menuItemHtml({ icon: "quote", label: hasSelection ? "回复选中" : "回复", attrs: `data-message-action="reply" ${hasText ? "" : "disabled"}` })}
-    ${menuItemHtml({ icon: "copy", label: hasSelection ? "拷贝选中" : "拷贝", attrs: `data-message-action="copy" ${hasText ? "" : "disabled"}` })}
-    ${menuItemHtml({ icon: "translate", label: hasSelection ? "翻译选中" : "翻译", attrs: `data-message-action="translate" ${hasText ? "" : "disabled"}` })}
-    <div class="skill-context-menu-separator" role="separator"></div>
-    ${menuItemHtml({ icon: "pin", label: message.pinned ? "取消置顶" : "置顶", attrs: 'data-message-action="pin"' })}
-    ${menuItemHtml({ icon: "delete", label: "删除", attrs: 'data-message-action="delete"', className: "danger" })}
-  `;
-  const rect = menu.getBoundingClientRect();
-  const width = rect.width || 116;
-  const height = rect.height || 210;
-  menu.style.left = `${Math.max(8, Math.min(state.messageContextMenu.x, window.innerWidth - width - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(state.messageContextMenu.y, window.innerHeight - height - 8))}px`;
-  menu.querySelectorAll("[data-message-action]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const action = button.dataset.messageAction;
-      const index = state.messageContextMenu.messageIndex;
-      const actionSelectionText = String(state.messageContextMenu.selectionText || "").trim();
-      const targetMessage = messageAtIndex(index);
-      closeMessageContextMenu();
-      if (!targetMessage) return;
-      if (action === "reply") replyToMessage(targetMessage, index, actionSelectionText);
-      if (action === "copy") await copyTextToClipboard(messageContextText(targetMessage, actionSelectionText));
-      if (action === "translate") await translateMessage(targetMessage, index, actionSelectionText);
-      if (action === "pin") await toggleMessagePinned(index);
-      if (action === "delete") await deleteMessageAt(index);
-    });
-  });
 }
 
 async function openEditFellowDialog(fellowKey) {
@@ -4947,7 +4725,7 @@ function renderMessageHtml(message, ctx) {
   const timeHtml = renderMessageTime(message.createdAt);
   const bodyHtml = String(message.content || "").trim() ? renderMarkdown(message.content) : "";
   const replyHtml = replyQuoteHtml(message.replyTo);
-  const translation = translationHtml(message, messageIndex);
+  const translation = window.aimashiMessageMenu?.translationHtml(message, messageIndex) || "";
   const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)].map(hydrateAttachmentPreview));
   const pinnedHtml = message.pinned ? `<span class="message-pin-badge">${ICON_PARK_PIN_SVG}置顶</span>` : "";
   const roleClass = message.role === "user" ? "user" : "assistant";
@@ -5609,6 +5387,31 @@ async function initializeRuntime() {
       appendTransientChat,
     });
   }
+  if (window.aimashiMessageMenu && window.aimashiMessageMenu.initMessageMenu) {
+    window.aimashiMessageMenu.initMessageMenu({
+      state,
+      els,
+      aimashi: window.aimashi,
+      messageAtIndex,
+      messageReferenceForIndex,
+      messageContextText,
+      menuItemHtml,
+      activeSession,
+      persistSessionQuietly,
+      replacePersistedSessionQuietly,
+      renderChat,
+      renderSessionMenu,
+      renderComposerReply,
+      escapeHtml,
+      renderMarkdown,
+      copyTextToClipboard,
+      nowIso,
+      cryptoRandomId,
+      closeSkillContextMenu,
+      closeFellowContextMenu,
+      closeGroupContextMenu,
+    });
+  }
   setTimeout(() => {
     Promise.allSettled([
       trackStartupTask("加载 Hermes 模型列表", loadModelCatalog),
@@ -5670,7 +5473,7 @@ document.addEventListener("keydown", (event) => {
   if (state.skillContextMenu.open) closeSkillContextMenu();
   if (state.fellowContextMenu.open) closeFellowContextMenu();
   if (state.groupContextMenu.open) closeGroupContextMenu();
-  if (state.messageContextMenu.open) closeMessageContextMenu();
+  if (state.messageContextMenu.open) window.aimashiMessageMenu?.closeMessageContextMenu();
   closeComposerAddMenu();
   if (state.skillPreviewOpen) {
     state.skillPreviewOpen = false;
@@ -5692,15 +5495,15 @@ document.addEventListener("click", (event) => {
   if (state.groupContextMenu.open && !els.groupContextMenu?.contains(event.target)) closeGroupContextMenu();
 });
 document.addEventListener("click", (event) => {
-  if (state.messageContextMenu.open && !els.messageContextMenu?.contains(event.target)) closeMessageContextMenu();
+  if (state.messageContextMenu.open && !els.messageContextMenu?.contains(event.target)) window.aimashiMessageMenu?.closeMessageContextMenu();
 });
 els.chat?.addEventListener("contextmenu", (event) => {
   const bubble = event.target.closest(".bubble[data-message-index]");
   if (!bubble || !els.chat.contains(bubble)) return;
-  const selection = selectionInsideBubble(bubble);
+  const selection = window.aimashiMessageMenu?.selectionInsideBubble(bubble);
   event.preventDefault();
   event.stopPropagation();
-  openMessageContextMenu(bubble.dataset.messageIndex, event.clientX, event.clientY, selection);
+  window.aimashiMessageMenu?.openMessageContextMenu(bubble.dataset.messageIndex, event.clientX, event.clientY, selection);
 });
 document.addEventListener("click", (event) => {
   if (!state.sessionMenuOpen) return;
@@ -7193,7 +6996,10 @@ els.chatForm.addEventListener("submit", async (event) => {
     // can cause the assistant message to land in /api/messages first,
     // and Web/mobile clients will show the assistant before the prompt.
     const userCloudPush = pushCloudMessageQuietly(session, userMessage);
-    const outgoingText = replyContextPrompt(await outgoingMessageForSubmit(text), replyTo);
+    const outgoingBase = await outgoingMessageForSubmit(text);
+    const outgoingText = window.aimashiMessageMenu
+      ? window.aimashiMessageMenu.replyContextPrompt(outgoingBase, replyTo)
+      : outgoingBase;
     const history = messagesForActive()
       .filter((message) => message.content || (Array.isArray(message.attachments) && message.attachments.length))
       .map((message) => ({ role: message.role, content: message.content, attachments: message.attachments || [] }));
