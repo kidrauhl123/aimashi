@@ -11,9 +11,25 @@ try {
 } catch {
   ({ createCloudStore } = require("./src/cloud/sqlite-store.js"));
 }
-const { createSocialStore } = require("../src/cloud/social-store.js");
-const { createMessagesStore } = require("../src/cloud/messages-store.js");
-const { dmRoomId, ensureDmRoom } = require("../src/cloud/dm-room.js");
+let createSocialStore = null;
+try {
+  ({ createSocialStore } = require("../src/cloud/social-store.js"));
+} catch {
+  ({ createSocialStore } = require("./src/cloud/social-store.js"));
+}
+let createMessagesStore = null;
+try {
+  ({ createMessagesStore } = require("../src/cloud/messages-store.js"));
+} catch {
+  ({ createMessagesStore } = require("./src/cloud/messages-store.js"));
+}
+let dmRoomId = null;
+let ensureDmRoom = null;
+try {
+  ({ dmRoomId, ensureDmRoom } = require("../src/cloud/dm-room.js"));
+} catch {
+  ({ dmRoomId, ensureDmRoom } = require("./src/cloud/dm-room.js"));
+}
 
 const host = process.env.AIMASHI_CLOUD_HOST || "127.0.0.1";
 const port = Number(process.env.AIMASHI_CLOUD_PORT || process.env.PORT || 4175);

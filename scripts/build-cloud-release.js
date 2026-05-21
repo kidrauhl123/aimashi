@@ -257,6 +257,9 @@ function verifyRelease() {
     "api/server.js",
     "api/package.json",
     "api/src/cloud/sqlite-store.js",
+    "api/src/cloud/social-store.js",
+    "api/src/cloud/messages-store.js",
+    "api/src/cloud/dm-room.js",
     "api/src/cloud/desktop-sync.js",
     "api/src/cloud/desktop-bridge-permission.js",
     "api/src/permission-modes.js",
@@ -284,6 +287,9 @@ function verifyRelease() {
   for (const file of [
     "api/server.js",
     "api/src/cloud/sqlite-store.js",
+    "api/src/cloud/social-store.js",
+    "api/src/cloud/messages-store.js",
+    "api/src/cloud/dm-room.js",
     "api/src/cloud/desktop-sync.js",
     "api/src/cloud/desktop-bridge-permission.js",
     "api/src/permission-modes.js",
@@ -378,6 +384,9 @@ function verifyRelease() {
 
   childProcess.execFileSync(process.execPath, ["-e", `
     require(${JSON.stringify(assertFile("api/src/cloud/sqlite-store.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud/social-store.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud/messages-store.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud/dm-room.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud/desktop-sync.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud/desktop-bridge-permission.js"))});
     require(${JSON.stringify(assertFile("api/src/permission-modes.js"))});
