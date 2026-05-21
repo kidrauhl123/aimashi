@@ -66,6 +66,7 @@ const required = [
   "src/renderer/conductor.js",
   "src/renderer/group.js",
   "src/renderer/tasks-panel.js",
+  "src/renderer/pet-dialog.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",
