@@ -1038,17 +1038,46 @@ registerIpcHandlers(ipcModules, { /* 注入上下文 */ });
 | A1 Tasks panel | f731a1b | 7604 | `src/renderer/tasks-panel.js` (494 行) |
 | A2 Pet dialog | 8fbaf88 | 7511 | `src/renderer/pet-dialog.js` (147 行) |
 | A4 Message menu | 375289c | 7317 | `src/renderer/message-menu.js` (283 行) |
-| B1 Settings Appearance | b2d6fa3 | 7133 | `src/renderer/settings-appearance.js` (244 行) + **critical init-order fix** |
+| B1 Settings Appearance | b2d6fa3 | 7133 | `src/renderer/settings-appearance.js` (244 行) + init-order bug fix |
+| (plan progress) | 239c377 | 7133 | 文档更新 |
+| B4a Session read-state | 9f6afb2 | 7067 | `src/renderer/session-read-state.js` (110 行) |
+| **pingfang fix** | 861f831 | 7067 | 关键 bug 修复：inits 必须在 loadChatSessions 之前 |
+| A3a Skill data helpers | dadcfe5 | 7011 | `src/renderer/skill-helpers.js` (77 行) |
+| B3 Settings Cross-device | 44d9acd | 6852 | `src/renderer/settings-remote.js` (198 行) |
+| A3b1 Skill markdown | 0c4aeb3 | 6765 | 扩展 skill-helpers.js (stripFrontmatter + 2 markdown renderers) |
+| Scrollbar overlay | 4a10871 | 6613 | `src/renderer/scrollbar-overlay.js` (199 行) — 自包含 DOM 工具 |
+| Format helpers | 8fe19de | 6584 | `src/renderer/format-helpers.js` (42 行) — formatBytes / attachment helpers |
 
-**累计：app.js 从 8055 行降到 7133 行（-922 / -11.4%）**。每个 commit 都跑过 `node src/check.js` + `npm test (241/241)` + electron 启动无 stderr 错误。
+**累计：app.js 从 8055 行降到 6584 行（-1471 / -18.3%）**。每个 commit 都跑过 `node src/check.js` + `npm test (241/241)` + electron 启动无 stderr 错误。
+
+### 当前模块清单（9 个独立特性 + 1 个 helper bucket）
+
+| 模块 | 行数 | 职责 |
+|---|---|---|
+| `src/renderer/group.js`（原有） | 974 | 群聊 |
+| `src/renderer/tasks-panel.js` | 494 | 任务面板 |
+| `src/renderer/pet-dialog.js` | 147 | 桌宠生成对话框 |
+| `src/renderer/message-menu.js` | 283 | 消息右键菜单 |
+| `src/renderer/settings-appearance.js` | 244 | 外观设置 tab |
+| `src/renderer/settings-remote.js` | 198 | 跨设备连接 tab |
+| `src/renderer/session-read-state.js` | 110 | 未读 badge / read state |
+| `src/renderer/skill-helpers.js` | 187 | skill 数据 + markdown 渲染 |
+| `src/renderer/scrollbar-overlay.js` | 199 | 自定义滚动条 |
+| `src/renderer/format-helpers.js` | 42 | formatBytes / attachment kind/glyph |
 
 ### 关键发现 & 修复
 
-**init-order bug**（在 B1 修复，bundle 进 b2d6fa3）：原本 `window.aimashi*.init*` 全部放在 `initializeRuntime()` 的第一次 `render()` 之后。这意味着首次 render 时模块的注入依赖还是 undefined，每次 `window.aimashi*.renderXxx()` 都在抛 TypeError。但渲染器异常不冒到 stderr，smoke 检测没抓到。第二次 render（用户交互触发）时 init 已完成，所以肉眼看不出。
+**init-order bug 第一回**（在 B1 修复，bundle 进 b2d6fa3）：原本 `window.aimashi*.init*` 全部放在 `initializeRuntime()` 的第一次 `render()` 之后。这意味着首次 render 时模块的注入依赖还是 undefined，每次 `window.aimashi*.renderXxx()` 都在抛 TypeError。但渲染器异常不冒到 stderr，smoke 检测没抓到。第二次 render（用户交互触发）时 init 已完成，所以肉眼看不出。
 
 修复：所有模块 init 移到 `render()` 之前。
 
-教训：写新模块时，对外暴露的 render 函数应该有 `if (!state || !els) return;` 防御，避免靠 init 顺序保证安全。后续 Task（B2+）的新模块都应加这个 guard。
+**init-order bug 第二回 / "pingfang" 崩溃**（用户报告，在 861f831 修复）：B1 的"init 在 render() 之前"修复不够——`trackStartupTask` 在 await 任务前/后都会触发 `render()`。`initializeRuntime` 是 `await trackStartupTask("初始化 runtime", ...) → state.runtime = runtime → await trackStartupTask("加载会话", loadChatSessions) → [inits] → render()` 的序列。第二个 trackStartupTask 的内部 render() 触发时机：state.runtime 已设（不再 early-return）+ 模块还没 init → applyAppearance → fontPresets undefined → 抛 "Cannot read properties of undefined (reading 'pingfang')"。
+
+修复：所有模块 init 移到 `state.runtime = runtime` 之后、`loadChatSessions trackStartupTask` 之前。
+
+教训：
+- 写新模块时，**对外暴露的 render 函数应该有 `if (!state || !els) return;` 防御**，避免靠 init 顺序保证安全。B4a+ 的新模块都加了这个 guard
+- electron renderer 进程的 JS 异常不会冒到主进程 stderr，需要 DevTools 或 `--enable-logging=stderr` 才能看到。未来 smoke 应该主动开 logging
 
 ### Deferred Sub-Tasks
 
@@ -1060,8 +1089,23 @@ registerIpcHandlers(ipcModules, { /* 注入上下文 */ });
   - B4a：只抽未读相关的轻量 helper（latestAssistantMessageTime, unreadCountForPersona, totalUnreadCount, markPersonaRead, persistReadStateQuietly, initializeReadStateForPersonas, ensureReadState）
   - B4b：sessionsForPersona + activeSession + persistSession 系列（要逐函数验证 chat 主流程不破）
 
-### 下一步
+### 下一步剩余清单（按风险递增排序）
 
-继续 Phase B 时建议顺序：B4a（未读 helper，最小 + 隔离） → B3（跨设备 settings，独立 UI） → B2（model settings，依赖较多 OAuth UI） → A3a → A3b → B5（fellow manager，最大单刀，最后做） → B4b。
+**Phase B 剩余**：
+- **B2 Settings - Model tab**（~500 行）—— 涉及 OAuth UI、provider 切换、Hermes 状态显示。需要 inject 较多 deps
+- **B5 Fellow manager**（~700 行）—— Phase B 最大单刀；fellow CRUD + 头像裁剪 + 引擎配置面板
+- **B4b Session manager core**（高风险）—— sessionsForPersona / activeSession / persistSession 是聊天主流程高频依赖
 
-或者按用户实际改动热点决定。
+**Phase A 剩余**：
+- **A3b2 Skills UI render**（~500 行）—— renderSkillLibrary, renderSkillPreview, context menu, filter/visible helpers。注意 `syncTopbarClickCapture` 是跨域共用的，必须保留在 app.js
+
+**Phase C / D / E**（后续）：
+- Sidebar 布局 helper（小，30 行，但有 script-load 时机问题需要解决）
+- model/provider 查询函数族（modelKey, catalogEntries, providerEntries, modelsForProvider 等，~150 行）
+- effort / permission options（涉及 state.engineCapabilities）
+- 主进程：scheduler MCP / cloud bridge / engine lifecycle 等（参考原 plan Phase D）
+- 事件监听按域拆（参考原 plan Phase C 后段）
+
+**继续推进时建议**：每次只拆一个特性，commit 后用户先 smoke。fellow / session / chat 主流程的几大块强烈建议留到最后，因为出错代价高。当前 -18% 已经让产品代码组织显著改善——按用户最初诉求"代码精炼 + AI 改不冲突"，9 个独立模块已经覆盖了大部分非聊天主流程的特性，下一阶段收益递减且风险递增。
+
+可以考虑：先 push 当前 refactor branch 享受收益（CLAUDE.md 已有"代码组织"规约约束未来 AI），剩下的等真有改动需求再针对性拆。
