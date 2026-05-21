@@ -137,3 +137,33 @@ test("GET /api/social/invite-codes lists own pending invites", async () => {
     assert.equal(list.body.invites.length, 2);
   } finally { await stopServer(ctx); }
 });
+
+test("GET /api/social/friends lists accepted friends", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const bob = await register(ctx.port, "bob");
+    const created = await api(ctx.port, "POST", "/api/social/invite-codes", { token: alice.token, body: {} });
+    await api(ctx.port, "POST", "/api/social/invite-codes/" + created.body.code + "/accept", { token: bob.token, body: {} });
+    const aliceList = await api(ctx.port, "GET", "/api/social/friends", { token: alice.token });
+    assert.equal(aliceList.status, 200);
+    assert.equal(aliceList.body.friends.length, 1);
+    assert.equal(aliceList.body.friends[0].id, bob.user.id);
+    const bobList = await api(ctx.port, "GET", "/api/social/friends", { token: bob.token });
+    assert.equal(bobList.body.friends[0].id, alice.user.id);
+  } finally { await stopServer(ctx); }
+});
+
+test("DELETE /api/social/friends/:userId removes friendship but keeps DM room", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const bob = await register(ctx.port, "bob");
+    const created = await api(ctx.port, "POST", "/api/social/invite-codes", { token: alice.token, body: {} });
+    await api(ctx.port, "POST", "/api/social/invite-codes/" + created.body.code + "/accept", { token: bob.token, body: {} });
+    const del = await api(ctx.port, "DELETE", "/api/social/friends/" + bob.user.id, { token: alice.token });
+    assert.equal(del.status, 200);
+    const aliceList = await api(ctx.port, "GET", "/api/social/friends", { token: alice.token });
+    assert.equal(aliceList.body.friends.length, 0);
+  } finally { await stopServer(ctx); }
+});

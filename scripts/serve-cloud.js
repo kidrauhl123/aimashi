@@ -713,6 +713,20 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { invites: rows });
     }
 
+    if (req.method === "GET" && url.pathname === "/api/social/friends") {
+      const friendIds = context.socialStore.listFriends(auth.user.id);
+      const friends = friendIds
+        .map((id) => context.cloudStore.getUserPublic(id))
+        .filter(Boolean);
+      return writeJson(res, 200, { friends });
+    }
+
+    const unfriendMatch = url.pathname.match(/^\/api\/social\/friends\/([a-zA-Z0-9_-]+)$/);
+    if (req.method === "DELETE" && unfriendMatch) {
+      context.socialStore.removeFriendship(auth.user.id, unfriendMatch[1]);
+      return writeJson(res, 200, { ok: true });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       cloudStore.logoutSession(tokenFromRequest(req));
       return writeJson(res, 200, { ok: true });
