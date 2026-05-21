@@ -1175,6 +1175,7 @@ function render() {
         state.activeKey = persona.key;
         state.activeGroupId = "";
         if (window.aimashiGroup) window.aimashiGroup.moduleState.activeGroupId = null;
+        if (window.aimashiSocial) window.aimashiSocial.setActiveRoomId(null);
         const latest = sessionsForPersona(persona.key)[0];
         state.activeSessionIdByPersona[persona.key] = latest?.id;
         state.replyDraft = null;
@@ -1276,6 +1277,7 @@ function render() {
       state.activeKey = group.id;
       state.activeGroupId = group.id;
       if (window.aimashiGroup) window.aimashiGroup.moduleState.activeGroupId = group.id;
+      if (window.aimashiSocial) window.aimashiSocial.setActiveRoomId(null);
       state.replyDraft = null;
       state.sessionMenuOpen = false;
       showNarrowContent();

@@ -107,10 +107,10 @@
         moduleState.myUsername = meRes.data.username || "";
         moduleState.myUserId = meRes.data.id || "";
       }
-      if (friendsRes.ok) moduleState.friends = friendsRes.data || [];
-      if (roomsRes.ok) moduleState.rooms = roomsRes.data || [];
-      if (incomingRes.ok) moduleState.incomingRequests = incomingRes.data || [];
-      if (outgoingRes.ok) moduleState.outgoingRequests = outgoingRes.data || [];
+      if (friendsRes.ok) moduleState.friends = friendsRes.data?.friends || [];
+      if (roomsRes.ok) moduleState.rooms = roomsRes.data?.rooms || [];
+      if (incomingRes.ok) moduleState.incomingRequests = incomingRes.data?.requests || [];
+      if (outgoingRes.ok) moduleState.outgoingRequests = outgoingRes.data?.requests || [];
 
       // Fetch initial messages for up to INITIAL_ROOMS_CAP rooms.
       const roomsToFetch = moduleState.rooms.slice(0, INITIAL_ROOMS_CAP);
@@ -120,9 +120,9 @@
         }
         try {
           const msgRes = await api.listRoomMessages(room.id, 0, 100);
-          if (msgRes.ok && Array.isArray(msgRes.data)) {
-            const msgs = msgRes.data.slice().sort((a, b) => a.seq - b.seq);
-            const maxSeq = msgs.length ? msgs[msgs.length - 1].seq : 0;
+          if (msgRes.ok) {
+            const msgs = (msgRes.data?.messages || []).slice().sort((a, b) => a.seq - b.seq);
+            const maxSeq = msgs.reduce((m, x) => Math.max(m, Number(x.seq) || 0), 0);
             moduleState.messageCache.set(room.id, { messages: msgs, maxSeq });
           }
         } catch (err) {
@@ -324,22 +324,25 @@
       _addFriendModal.setAttribute("aria-modal", "true");
       document.body.appendChild(_addFriendModal);
     }
-    _renderAddFriendModal(_addFriendModal);
-    _addFriendModal.classList.remove("hidden");
 
+    // Define close() first so the close button rendered by _renderAddFriendModal
+    // references this open's own teardown, not a stale handler from a prior open.
     function onEsc(e) {
-      if (e.key === "Escape") { closeModal(); }
+      if (e.key === "Escape") { close(); }
     }
     function onBackdrop(e) {
-      if (e.target === _addFriendModal) closeModal();
+      if (e.target === _addFriendModal) close();
     }
-    function closeModal() {
+    function close() {
       _addFriendModal.classList.add("hidden");
       document.removeEventListener("keydown", onEsc);
       _addFriendModal.removeEventListener("click", onBackdrop);
     }
-    // Store closeModal so _renderAddFriendModal can wire close button
-    _addFriendModal._closeModal = closeModal;
+    // Assign before rendering so _renderAddFriendModal picks up the fresh closure.
+    _addFriendModal._closeModal = close;
+
+    _renderAddFriendModal(_addFriendModal);
+    _addFriendModal.classList.remove("hidden");
     document.addEventListener("keydown", onEsc);
     _addFriendModal.addEventListener("click", onBackdrop);
   }
@@ -448,7 +451,7 @@
         if (usernameInput) usernameInput.value = "";
         // Refresh outgoing list
         const outRes = await window.aimashi.social.listFriendRequests("outgoing");
-        if (outRes.ok) moduleState.outgoingRequests = outRes.data || [];
+        if (outRes.ok) moduleState.outgoingRequests = outRes.data?.requests || [];
         // Re-render modal sections
         const oList = card.querySelector("#socialOutgoingList");
         if (oList) _renderRequestList(oList, moduleState.outgoingRequests, "outgoing", modal);
@@ -555,7 +558,8 @@
         return;
       }
       // If WS event doesn't arrive within 500ms, optimistically append from response.
-      const sentMsg = res.data;
+      const sentMsg = res.data?.message;
+      if (!sentMsg || !sentMsg.id) return; // server didn't return a message somehow — skip optimistic
       if (sentMsg) {
         setTimeout(() => {
           const entry = moduleState.messageCache.get(roomId);
