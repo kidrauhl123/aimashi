@@ -19,9 +19,6 @@ let scrollbarOverlayEl = null;
 let scrollbarOverlayTarget = null;
 let scrollbarDrag = null;
 let skillPickerHoverCloseTimer = 0;
-let appearanceSaveStatusTimer = 0;
-let appearanceAutoSaveTimer = 0;
-let appearanceAutoSaveSeq = 0;
 const qrSvgCache = new Map();
 const ICON_PARK_PIN_SVG = '<svg class="icon-park-pin" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M10.6963 17.5042C13.3347 14.8657 16.4701 14.9387 19.8781 16.8076L32.62 9.74509L31.8989 4.78683L43.2126 16.1005L38.2656 15.3907L31.1918 28.1214C32.9752 31.7589 33.1337 34.6647 30.4953 37.3032C30.4953 37.3032 26.235 33.0429 22.7171 29.525L6.44305 41.5564L18.4382 25.2461C14.9202 21.7281 10.6963 17.5042 10.6963 17.5042Z"/></svg>';
 const SETUP_GUIDE_DISMISSED_KEY = "aimashi.setupGuideDismissed.v2";
@@ -378,20 +375,6 @@ function renderQr(el, text) {
   });
 }
 
-function showAppearanceSaveStatus(text, kind = "ok") {
-  if (!els.appearanceSaveStatus) return;
-  if (appearanceSaveStatusTimer) window.clearTimeout(appearanceSaveStatusTimer);
-  els.appearanceSaveStatus.textContent = text;
-  els.appearanceSaveStatus.dataset.kind = kind;
-  els.appearanceSaveStatus.classList.toggle("visible", Boolean(text));
-  if (!text) return;
-  appearanceSaveStatusTimer = window.setTimeout(() => {
-    els.appearanceSaveStatus.textContent = "";
-    els.appearanceSaveStatus.classList.remove("visible");
-    delete els.appearanceSaveStatus.dataset.kind;
-    appearanceSaveStatusTimer = 0;
-  }, kind === "error" ? 3600 : 1800);
-}
 
 function applySidebarWidth(width = state.sidebarWidth, persist = false) {
   const next = clampSidebarWidth(width);
@@ -1196,188 +1179,6 @@ const DEFAULT_USER_BUBBLE_COLOR = "#0162db";
 const DEFAULT_LIST_STYLE = "flush";
 const DEFAULT_SELECTION_STYLE = "solid";
 
-function normalizeHexColor(value, fallback = DEFAULT_ACCENT_COLOR) {
-  const raw = String(value || "").trim();
-  const expanded = raw.replace(/^#([0-9a-fA-F]{3})$/, (_, hex) => `#${hex.split("").map((part) => part + part).join("")}`);
-  return /^#[0-9a-fA-F]{6}$/.test(expanded) ? expanded.toLowerCase() : fallback;
-}
-
-function normalizeListStyle(value) {
-  return value === "flush" ? "flush" : DEFAULT_LIST_STYLE;
-}
-
-function normalizeSelectionStyle(value) {
-  return value === "solid" ? "solid" : DEFAULT_SELECTION_STYLE;
-}
-
-function hexToRgb(value) {
-  const hex = normalizeHexColor(value).slice(1);
-  return {
-    r: Number.parseInt(hex.slice(0, 2), 16),
-    g: Number.parseInt(hex.slice(2, 4), 16),
-    b: Number.parseInt(hex.slice(4, 6), 16)
-  };
-}
-
-function relativeLuminance(rgb) {
-  const channel = (value) => {
-    const next = Math.max(0, Math.min(255, Number(value) || 0)) / 255;
-    return next <= 0.03928 ? next / 12.92 : ((next + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
-}
-
-function selectionTextColors(rgb) {
-  const lightBackground = relativeLuminance(rgb) > 0.56;
-  return lightBackground
-    ? {
-        text: "rgba(0, 0, 0, 0.90)",
-        muted: "rgba(0, 0, 0, 0.66)",
-        faint: "rgba(0, 0, 0, 0.48)"
-      }
-    : {
-        text: "#ffffff",
-        muted: "rgba(255, 255, 255, 0.78)",
-        faint: "rgba(255, 255, 255, 0.62)"
-      };
-}
-
-function fontStackForAppearance(appearance = {}) {
-  return fontPresets[appearance.fontPreset || "system"] || fontPresets.system;
-}
-
-function applyAppearance(appearance = {}) {
-  const theme = appearance.theme === "dark" ? "dark" : "light";
-  const accentColor = normalizeHexColor(appearance.accentColor);
-  const rgb = hexToRgb(accentColor);
-  const userBubbleColor = normalizeHexColor(appearance.userBubbleColor, DEFAULT_USER_BUBBLE_COLOR);
-  const userBubbleRgb = hexToRgb(userBubbleColor);
-  const userBubbleText = selectionTextColors(userBubbleRgb).text;
-  const listStyle = normalizeListStyle(appearance.listStyle);
-  const selectionStyle = normalizeSelectionStyle(appearance.selectionStyle);
-  const softActive = `rgb(${rgb.r} ${rgb.g} ${rgb.b} / ${theme === "dark" ? "0.22" : "0.16"})`;
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.dataset.listStyle = listStyle;
-  document.documentElement.dataset.selectionStyle = selectionStyle;
-  document.documentElement.dataset.hoverBackground = appearance.showHoverBackground === false ? "false" : "true";
-  document.documentElement.dataset.showUserAvatar = appearance.showUserAvatar === false ? "false" : "true";
-  document.documentElement.dataset.showAssistantAvatar = appearance.showAssistantAvatar === false ? "false" : "true";
-  document.documentElement.style.setProperty("--app-font", fontStackForAppearance(appearance));
-  document.documentElement.style.setProperty("--accent", accentColor);
-  document.documentElement.style.setProperty("--accent-rgb", `${rgb.r} ${rgb.g} ${rgb.b}`);
-  document.documentElement.style.setProperty("--active", softActive);
-  document.documentElement.style.setProperty("--user-bubble", userBubbleColor);
-  document.documentElement.style.setProperty("--user-bubble-text", userBubbleText);
-  if (selectionStyle === "solid") {
-    const textColors = selectionTextColors(rgb);
-    document.documentElement.style.setProperty("--list-active", accentColor);
-    document.documentElement.style.setProperty("--list-active-text", textColors.text);
-    document.documentElement.style.setProperty("--list-active-muted", textColors.muted);
-    document.documentElement.style.setProperty("--list-active-faint", textColors.faint);
-  } else {
-    document.documentElement.style.setProperty("--list-active", softActive);
-    document.documentElement.style.setProperty("--list-active-text", accentColor);
-    document.documentElement.style.setProperty("--list-active-muted", "var(--muted)");
-    document.documentElement.style.setProperty("--list-active-faint", "var(--faint)");
-  }
-}
-
-function currentAppearanceDraft() {
-  return {
-    theme: els.appearanceTheme?.value || "light",
-    fontPreset: els.appearanceFontPreset?.value || "system",
-    accentColor: normalizeHexColor(els.appearanceAccentColor?.value),
-    userBubbleColor: normalizeHexColor(els.appearanceUserBubbleColor?.value, DEFAULT_USER_BUBBLE_COLOR),
-    showHoverBackground: els.appearanceShowHoverBackground?.getAttribute("aria-checked") !== "false",
-    showUserAvatar: els.appearanceShowUserAvatar?.getAttribute("aria-checked") !== "false",
-    showAssistantAvatar: els.appearanceShowAssistantAvatar?.getAttribute("aria-checked") !== "false",
-    listStyle: normalizeListStyle(els.appearanceListStyle?.value),
-    selectionStyle: normalizeSelectionStyle(els.appearanceSelectionStyle?.value)
-  };
-}
-
-function setSettingsSwitch(button, enabled) {
-  if (!button) return;
-  button.classList.toggle("active", Boolean(enabled));
-  button.setAttribute("aria-checked", enabled ? "true" : "false");
-}
-
-function toggleSettingsSwitch(button) {
-  const next = button?.getAttribute("aria-checked") !== "true";
-  setSettingsSwitch(button, next);
-  scheduleAppearanceSave(0);
-}
-
-function syncAppearanceControls(appearance = currentAppearanceDraft()) {
-  const fontPreset = fontPresets[appearance.fontPreset] ? appearance.fontPreset : "system";
-  if (els.appearanceFontPreset) els.appearanceFontPreset.value = fontPreset;
-  document.querySelectorAll("[data-font-preset]").forEach((button) => {
-    const active = button.dataset.fontPreset === fontPreset;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-checked", active ? "true" : "false");
-  });
-  const listStyle = normalizeListStyle(appearance.listStyle);
-  if (els.appearanceListStyle) els.appearanceListStyle.value = listStyle;
-  document.querySelectorAll("[data-list-style]").forEach((button) => {
-    const active = button.dataset.listStyle === listStyle;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-checked", active ? "true" : "false");
-  });
-  const selectionStyle = normalizeSelectionStyle(appearance.selectionStyle);
-  if (els.appearanceSelectionStyle) els.appearanceSelectionStyle.value = selectionStyle;
-  document.querySelectorAll("[data-selection-style]").forEach((button) => {
-    const active = button.dataset.selectionStyle === selectionStyle;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-checked", active ? "true" : "false");
-  });
-  const accentColor = normalizeHexColor(appearance.accentColor);
-  if (els.appearanceAccentColor) els.appearanceAccentColor.value = accentColor;
-  if (els.appearanceAccentPreview) els.appearanceAccentPreview.style.backgroundColor = accentColor;
-  const userBubbleColor = normalizeHexColor(appearance.userBubbleColor, DEFAULT_USER_BUBBLE_COLOR);
-  if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = userBubbleColor;
-  if (els.appearanceUserBubblePreview) els.appearanceUserBubblePreview.style.backgroundColor = userBubbleColor;
-  setSettingsSwitch(els.appearanceShowHoverBackground, appearance.showHoverBackground !== false);
-  setSettingsSwitch(els.appearanceShowUserAvatar, appearance.showUserAvatar !== false);
-  setSettingsSwitch(els.appearanceShowAssistantAvatar, appearance.showAssistantAvatar !== false);
-}
-
-function mergeRuntimeAppearance(appearance) {
-  state.runtime = {
-    ...(state.runtime || {}),
-    appearance: {
-      ...(state.runtime?.appearance || {}),
-      ...appearance
-    }
-  };
-}
-
-async function persistAppearanceDraft(appearance) {
-  if (!window.aimashi?.saveAppearance) return;
-  const seq = ++appearanceAutoSaveSeq;
-  try {
-    const runtime = await window.aimashi.saveAppearance(appearance);
-    if (seq !== appearanceAutoSaveSeq) return;
-    state.runtime = runtime;
-    applyAppearance(runtime.appearance || appearance);
-    showAppearanceSaveStatus("已保存");
-  } catch (error) {
-    console.error(error);
-    showAppearanceSaveStatus("保存失败", "error");
-  }
-}
-
-function scheduleAppearanceSave(delay = 160) {
-  const next = currentAppearanceDraft();
-  applyAppearance(next);
-  syncAppearanceControls(next);
-  mergeRuntimeAppearance(next);
-  showAppearanceSaveStatus("正在保存...");
-  if (appearanceAutoSaveTimer) window.clearTimeout(appearanceAutoSaveTimer);
-  appearanceAutoSaveTimer = window.setTimeout(() => {
-    appearanceAutoSaveTimer = 0;
-    persistAppearanceDraft(currentAppearanceDraft());
-  }, delay);
-}
 
 function initials(name) {
   return (name || "?").trim().slice(0, 2).toUpperCase();
@@ -2568,14 +2369,14 @@ function render() {
     listStyle: DEFAULT_LIST_STYLE,
     selectionStyle: DEFAULT_SELECTION_STYLE
   };
-  applyAppearance(appearance);
+  window.aimashiSettingsAppearance.applyAppearance(appearance);
   if (!editingAppearance) {
     els.appearanceTheme.value = appearance.theme || "light";
     const savedFontPreset = appearance.fontPreset || "system";
     els.appearanceFontPreset.value = fontPresets[savedFontPreset] ? savedFontPreset : "system";
-    if (els.appearanceListStyle) els.appearanceListStyle.value = normalizeListStyle(appearance.listStyle);
-    if (els.appearanceSelectionStyle) els.appearanceSelectionStyle.value = normalizeSelectionStyle(appearance.selectionStyle);
-    syncAppearanceControls(appearance);
+    if (els.appearanceListStyle) els.appearanceListStyle.value = window.aimashiSettingsAppearance.normalizeListStyle(appearance.listStyle);
+    if (els.appearanceSelectionStyle) els.appearanceSelectionStyle.value = window.aimashiSettingsAppearance.normalizeSelectionStyle(appearance.selectionStyle);
+    window.aimashiSettingsAppearance.syncAppearanceControls(appearance);
   }
   const user = runtime.user || { displayName: "Boss", avatarText: "B", avatarColor: "#111827", avatarImage: "" };
   applyUserAvatar(els.userAvatar, user);
@@ -5322,7 +5123,9 @@ async function initializeRuntime() {
   state.firstRun = Array.isArray(runtime?.created) && runtime.created.length > 0;
   state.runtime = runtime;
   await trackStartupTask("加载会话", loadChatSessions);
-  render();
+  // Initialize extracted renderer modules BEFORE the first render(), so that
+  // render() can safely call into window.aimashi*.renderXxx without hitting
+  // TypeError on undefined state/els references inside the modules.
   if (window.aimashiGroup && window.aimashiGroup.initGroupModule) {
     try {
       await window.aimashiGroup.initGroupModule({
@@ -5387,6 +5190,18 @@ async function initializeRuntime() {
       appendTransientChat,
     });
   }
+  if (window.aimashiSettingsAppearance && window.aimashiSettingsAppearance.initSettingsAppearance) {
+    window.aimashiSettingsAppearance.initSettingsAppearance({
+      state,
+      els,
+      aimashi: window.aimashi,
+      fontPresets,
+      DEFAULT_ACCENT_COLOR,
+      DEFAULT_USER_BUBBLE_COLOR,
+      DEFAULT_LIST_STYLE,
+      DEFAULT_SELECTION_STYLE,
+    });
+  }
   if (window.aimashiMessageMenu && window.aimashiMessageMenu.initMessageMenu) {
     window.aimashiMessageMenu.initMessageMenu({
       state,
@@ -5412,6 +5227,7 @@ async function initializeRuntime() {
       closeGroupContextMenu,
     });
   }
+  render();
   setTimeout(() => {
     Promise.allSettled([
       trackStartupTask("加载 Hermes 模型列表", loadModelCatalog),
@@ -6560,60 +6376,60 @@ els.profileForm?.addEventListener("submit", async (event) => {
 
 els.appearanceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceTheme.addEventListener("change", () => {
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceFontPreset.addEventListener("change", () => {
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceFontChoices?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-font-preset]");
   if (!button || !els.appearanceFontChoices.contains(button)) return;
   els.appearanceFontPreset.value = button.dataset.fontPreset || "system";
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceListStyle?.addEventListener("change", () => {
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceSelectionStyle?.addEventListener("change", () => {
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceAccentColor?.addEventListener("input", () => {
-  scheduleAppearanceSave();
+  window.aimashiSettingsAppearance.scheduleAppearanceSave();
 });
 
 els.appearanceAccentReset?.addEventListener("click", () => {
   if (els.appearanceAccentColor) els.appearanceAccentColor.value = DEFAULT_ACCENT_COLOR;
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceUserBubbleColor?.addEventListener("input", () => {
-  scheduleAppearanceSave();
+  window.aimashiSettingsAppearance.scheduleAppearanceSave();
 });
 
 els.appearanceUserBubbleReset?.addEventListener("click", () => {
   if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = DEFAULT_USER_BUBBLE_COLOR;
-  scheduleAppearanceSave(0);
+  window.aimashiSettingsAppearance.scheduleAppearanceSave(0);
 });
 
 els.appearanceShowHoverBackground?.addEventListener("click", () => {
-  toggleSettingsSwitch(els.appearanceShowHoverBackground);
+  window.aimashiSettingsAppearance.toggleSettingsSwitch(els.appearanceShowHoverBackground);
 });
 
 els.appearanceShowUserAvatar?.addEventListener("click", () => {
-  toggleSettingsSwitch(els.appearanceShowUserAvatar);
+  window.aimashiSettingsAppearance.toggleSettingsSwitch(els.appearanceShowUserAvatar);
 });
 
 els.appearanceShowAssistantAvatar?.addEventListener("click", () => {
-  toggleSettingsSwitch(els.appearanceShowAssistantAvatar);
+  window.aimashiSettingsAppearance.toggleSettingsSwitch(els.appearanceShowAssistantAvatar);
 });
 
 els.fellowForm?.addEventListener("submit", async (event) => {
