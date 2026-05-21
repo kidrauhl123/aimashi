@@ -33,6 +33,7 @@ const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
 const { createHermesChatAdapter } = require("./main/hermes-chat-adapter.js");
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
+const { createSettingsStore } = require("./main/settings-store.js");
 const { createSkillsLoader } = require("./main/skills-loader.js");
 const { createTasksStore } = require("./main/tasks-store.js");
 const { createScheduler } = require("./main/scheduler.js");
@@ -99,6 +100,16 @@ let engineState = {
   lastError: "",
   logs: []
 };
+
+const settingsStore = createSettingsStore({
+  runtimePaths,
+  readJson,
+  writeRuntimeConfig,
+  readConfiguredPort,
+  getEngineState: () => engineState,
+  AIMASHI_DAEMON_DEFAULT_PORT,
+  AIMASHI_CLOUD_DEFAULT_URL,
+});
 
 const skillsLoader = createSkillsLoader({
   runtimePaths,
@@ -186,16 +197,6 @@ function ensureGroupStore() {
   return _groupStore;
 }
 
-function defaultModelSettings() {
-  return {
-    provider: "",
-    model: "",
-    apiKeyEnv: "",
-    apiKey: "",
-    baseUrl: "",
-    apiMode: ""
-  };
-}
 
 function runtimePaths() {
   const root = app.getPath("userData");
@@ -342,169 +343,6 @@ function isEngineInstalled() {
   return false;
 }
 
-function defaultUserProfile() {
-  return {
-    displayName: "Boss",
-    avatarText: "B",
-    avatarColor: "#111827",
-    avatarImage: "",
-    avatarCrop: { x: 50, y: 50, zoom: 1 }
-  };
-}
-
-function defaultAppearanceSettings() {
-  return {
-    theme: "light",
-    fontPreset: "pingfang",
-    accentColor: "#0162db",
-    userBubbleColor: "#0162db",
-    showHoverBackground: false,
-    showUserAvatar: true,
-    showAssistantAvatar: true,
-    listStyle: "flush",
-    selectionStyle: "solid"
-  };
-}
-
-function defaultPermissionSettings() {
-  return {
-    mode: "ask"
-  };
-}
-
-function defaultDaemonSettings() {
-  const port = Number.isInteger(AIMASHI_DAEMON_DEFAULT_PORT) && AIMASHI_DAEMON_DEFAULT_PORT > 0
-    ? AIMASHI_DAEMON_DEFAULT_PORT
-    : 27861;
-  return {
-    enabled: true,
-    host: process.env.AIMASHI_DAEMON_HOST || "127.0.0.1",
-    port
-  };
-}
-
-function defaultRelaySettings() {
-  return {
-    enabled: false,
-    url: process.env.AIMASHI_RELAY_URL || "wss://agi.buytb01.com/relay",
-    deviceId: `aimashi-${crypto.randomUUID()}`,
-    secret: crypto.randomBytes(32).toString("hex")
-  };
-}
-
-function defaultEffortSettings() {
-  return {
-    level: "medium"
-  };
-}
-
-function normalizeEffortLevel(value, engine = "hermes") {
-  const raw = String(value || "").trim().toLowerCase();
-  const normalized = raw === "extra-high" || raw === "extra_high" ? "xhigh" : raw;
-  const valid = engine === "claude-code"
-    ? ["low", "medium", "high", "xhigh", "max"]
-    : engine === "codex"
-      ? ["minimal", "low", "medium", "high", "xhigh"]
-      : ["none", "minimal", "low", "medium", "high", "xhigh"];
-  return valid.includes(normalized) ? normalized : "medium";
-}
-
-function normalizeStoredEffortLevel(value) {
-  const raw = String(value || "").trim().toLowerCase();
-  const normalized = raw === "extra-high" || raw === "extra_high" ? "xhigh" : raw;
-  return ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(normalized) ? normalized : "medium";
-}
-
-function effortSettings() {
-  const p = runtimePaths();
-  const saved = readJson(p.effortSettings, {});
-  return {
-    ...defaultEffortSettings(),
-    ...saved,
-    level: normalizeEffortLevel(saved.level || defaultEffortSettings().level, "hermes")
-  };
-}
-
-function effortStatus() {
-  return { level: effortSettings().level };
-}
-
-function writeEffortSettings(settings = {}) {
-  const p = runtimePaths();
-  const next = {
-    level: normalizeEffortLevel(settings.level || settings.effortLevel, "hermes")
-  };
-  fs.mkdirSync(path.dirname(p.effortSettings), { recursive: true });
-  fs.writeFileSync(p.effortSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  writeRuntimeConfig(engineState.port || readConfiguredPort());
-  return next;
-}
-
-function permissionSettings() {
-  const p = runtimePaths();
-  const saved = readJson(p.permissionSettings, {});
-  return {
-    ...defaultPermissionSettings(),
-    ...saved,
-    mode: normalizePermissionMode(saved.mode || defaultPermissionSettings().mode)
-  };
-}
-
-function permissionStatus() {
-  const settings = permissionSettings();
-  return {
-    mode: settings.mode,
-    label: permissionModeLabel(settings.mode)
-  };
-}
-
-function writePermissionSettings(settings = {}) {
-  const p = runtimePaths();
-  const next = {
-    mode: normalizePermissionMode(settings.mode)
-  };
-  fs.mkdirSync(path.dirname(p.permissionSettings), { recursive: true });
-  fs.writeFileSync(p.permissionSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  writeRuntimeConfig(engineState.port || readConfiguredPort());
-  return next;
-}
-
-function normalizeDaemonHost(value) {
-  const host = String(value || "").trim();
-  if (host === "0.0.0.0" || host === "::" || host === "127.0.0.1" || host === "localhost") return host;
-  return "127.0.0.1";
-}
-
-function normalizeDaemonPort(value) {
-  const port = Number(value);
-  if (Number.isInteger(port) && port > 0 && port < 65536) return port;
-  return defaultDaemonSettings().port;
-}
-
-function daemonSettings() {
-  const saved = readJson(runtimePaths().daemonSettings, {});
-  return {
-    ...defaultDaemonSettings(),
-    ...saved,
-    enabled: saved.enabled !== false,
-    host: normalizeDaemonHost(saved.host || defaultDaemonSettings().host),
-    port: normalizeDaemonPort(saved.port || defaultDaemonSettings().port)
-  };
-}
-
-function writeDaemonSettings(settings = {}) {
-  const p = runtimePaths();
-  const current = daemonSettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    host: normalizeDaemonHost(settings.host || current.host),
-    port: normalizeDaemonPort(settings.port || current.port)
-  };
-  fs.mkdirSync(path.dirname(p.daemonSettings), { recursive: true });
-  fs.writeFileSync(p.daemonSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
 function daemonToken() {
   const p = runtimePaths();
   if (!fs.existsSync(p.daemonToken)) {
@@ -512,117 +350,6 @@ function daemonToken() {
     fs.writeFileSync(p.daemonToken, `${crypto.randomBytes(32).toString("hex")}\n`, { mode: 0o600 });
   }
   return fs.readFileSync(p.daemonToken, "utf8").trim();
-}
-
-function normalizeRelayUrl(value) {
-  const raw = String(value || "").trim();
-  try {
-    const url = new URL(raw || defaultRelaySettings().url);
-    if (url.protocol !== "ws:" && url.protocol !== "wss:") return defaultRelaySettings().url;
-    if (!url.pathname || url.pathname === "/") url.pathname = "/relay";
-    return url.toString();
-  } catch {
-    return defaultRelaySettings().url;
-  }
-}
-
-function relaySettings() {
-  const p = runtimePaths();
-  let saved = readJson(p.relaySettings, null);
-  if (!saved || typeof saved !== "object" || !saved.deviceId || !saved.secret) {
-    saved = { ...defaultRelaySettings(), ...(saved && typeof saved === "object" ? saved : {}) };
-    fs.mkdirSync(path.dirname(p.relaySettings), { recursive: true });
-    fs.writeFileSync(p.relaySettings, JSON.stringify(saved, null, 2) + "\n", { mode: 0o600 });
-  }
-  return {
-    ...defaultRelaySettings(),
-    ...saved,
-    enabled: Boolean(saved.enabled),
-    url: normalizeRelayUrl(saved.url),
-    deviceId: String(saved.deviceId || defaultRelaySettings().deviceId).trim(),
-    secret: String(saved.secret || defaultRelaySettings().secret).trim()
-  };
-}
-
-function writeRelaySettings(settings = {}) {
-  const p = runtimePaths();
-  const current = relaySettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    url: normalizeRelayUrl(settings.url || current.url),
-    deviceId: String(settings.deviceId || current.deviceId).trim(),
-    secret: String(settings.secret || current.secret).trim()
-  };
-  fs.mkdirSync(path.dirname(p.relaySettings), { recursive: true });
-  fs.writeFileSync(p.relaySettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
-function defaultCloudSettings() {
-  return {
-    enabled: false,
-    url: AIMASHI_CLOUD_DEFAULT_URL,
-    token: "",
-    user: null
-  };
-}
-
-function normalizeCloudUrl(value) {
-  const raw = String(value || "").trim();
-  try {
-    const url = new URL(raw || AIMASHI_CLOUD_DEFAULT_URL);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return AIMASHI_CLOUD_DEFAULT_URL;
-    url.hash = "";
-    url.search = "";
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return AIMASHI_CLOUD_DEFAULT_URL;
-  }
-}
-
-function cloudSettings() {
-  const saved = readJson(runtimePaths().cloudSettings, {});
-  return {
-    ...defaultCloudSettings(),
-    ...saved,
-    enabled: Boolean(saved.enabled && saved.token),
-    url: normalizeCloudUrl(saved.url),
-    token: String(saved.token || ""),
-    user: saved.user && typeof saved.user === "object" ? saved.user : null
-  };
-}
-
-function writeCloudSettings(settings = {}) {
-  const p = runtimePaths();
-  const current = cloudSettings();
-  const next = {
-    enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
-    url: normalizeCloudUrl(settings.url || current.url),
-    token: String(settings.token !== undefined ? settings.token : current.token || ""),
-    user: settings.user !== undefined ? settings.user : current.user
-  };
-  if (!next.token) {
-    next.enabled = false;
-    next.user = null;
-  }
-  fs.mkdirSync(path.dirname(p.cloudSettings), { recursive: true });
-  fs.writeFileSync(p.cloudSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  return next;
-}
-
-function readCloudWorkspace() {
-  return readJson(runtimePaths().cloudWorkspace, null);
-}
-
-function writeCloudWorkspace(workspace) {
-  const p = runtimePaths();
-  fs.mkdirSync(path.dirname(p.cloudWorkspace), { recursive: true });
-  fs.writeFileSync(p.cloudWorkspace, JSON.stringify({
-    workspace: workspace || null,
-    syncedAt: new Date().toISOString()
-  }, null, 2) + "\n", { mode: 0o600 });
-  return readCloudWorkspace();
 }
 
 function mergeCloudWorkspaceIntoChatStore(workspace) {
@@ -1076,7 +803,7 @@ function writeSchedulerMcpContext({ fellowId = "", sessionId = "", originMessage
 // reach the daemon over the network.
 function resolveDaemonBaseUrl() {
   if (controlServerState.baseUrl) return controlServerState.baseUrl;
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   if (settings?.host && settings?.port) {
     return `http://${settings.host}:${settings.port}`;
   }
@@ -1207,7 +934,7 @@ function ensureCodexHome() {
 function appearanceSettings() {
   const p = runtimePaths();
   const saved = readJson(p.appearanceSettings, {});
-  return { ...defaultAppearanceSettings(), ...saved };
+  return { ...settingsStore.defaultAppearanceSettings(), ...saved };
 }
 
 function defaultFellowManifest() {
@@ -1233,7 +960,7 @@ function normalizeFellowEngineConfig(input = {}) {
   const effortLevel = String(value.effortLevel || value.effort_level || value.reasoningEffort || value.reasoning_effort || "").trim();
   if (model) next.model = model;
   if (permissionMode) next.permissionMode = permissionMode;
-  if (effortLevel) next.effortLevel = normalizeStoredEffortLevel(effortLevel);
+  if (effortLevel) next.effortLevel = settingsStore.normalizeStoredEffortLevel(effortLevel);
   return next;
 }
 
@@ -1255,7 +982,7 @@ function mergeFellowEngineConfig(current = {}, update = {}) {
     || Object.prototype.hasOwnProperty.call(update || {}, "reasoningEffort")
     || Object.prototype.hasOwnProperty.call(update || {}, "reasoning_effort")) {
     const effortLevel = String(update.effortLevel || update.effort_level || update.reasoningEffort || update.reasoning_effort || "").trim();
-    if (effortLevel) next.effortLevel = normalizeStoredEffortLevel(effortLevel);
+    if (effortLevel) next.effortLevel = settingsStore.normalizeStoredEffortLevel(effortLevel);
     else delete next.effortLevel;
   }
   return next;
@@ -1913,9 +1640,9 @@ function safeReadLocalFileAttachment(input = {}) {
 async function fetchCloudFileAttachment(input = {}) {
   const urlPath = String(input.url || input.path || "").trim();
   if (!/^\/api\/files\/[a-zA-Z0-9_-]+$/.test(urlPath)) throw new Error("Cloud file URL is invalid.");
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) throw new Error("请先登录 Aimashi Cloud。");
-  const response = await fetch(`${normalizeCloudUrl(settings.url)}${urlPath}`, {
+  const response = await fetch(`${settingsStore.normalizeCloudUrl(settings.url)}${urlPath}`, {
     headers: { Authorization: `Bearer ${settings.token}` },
     signal: AbortSignal.timeout(15000)
   });
@@ -2458,7 +2185,7 @@ function initializeRuntimeCore() {
   }
 
   if (writeFileIfMissing(p.modelSettings, JSON.stringify({
-    ...defaultModelSettings()
+    ...settingsStore.defaultModelSettings()
   }, null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-model.json");
   }
@@ -2469,15 +2196,15 @@ function initializeRuntimeCore() {
 
   importFromSystemHermes();
 
-  if (writeFileIfMissing(p.permissionSettings, JSON.stringify(defaultPermissionSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.permissionSettings, JSON.stringify(settingsStore.defaultPermissionSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-permissions.json");
   }
 
-  if (writeFileIfMissing(p.effortSettings, JSON.stringify(defaultEffortSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.effortSettings, JSON.stringify(settingsStore.defaultEffortSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-effort.json");
   }
 
-  if (writeFileIfMissing(p.daemonSettings, JSON.stringify(defaultDaemonSettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.daemonSettings, JSON.stringify(settingsStore.defaultDaemonSettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-daemon.json");
   }
 
@@ -2485,15 +2212,15 @@ function initializeRuntimeCore() {
     created.push("runtime/engine-home/aimashi-daemon.key");
   }
 
-  if (writeFileIfMissing(p.relaySettings, JSON.stringify(defaultRelaySettings(), null, 2) + "\n", 0o600)) {
+  if (writeFileIfMissing(p.relaySettings, JSON.stringify(settingsStore.defaultRelaySettings(), null, 2) + "\n", 0o600)) {
     created.push("runtime/engine-home/aimashi-relay.json");
   }
 
-  if (writeFileIfMissing(p.userProfile, JSON.stringify(defaultUserProfile(), null, 2) + "\n")) {
+  if (writeFileIfMissing(p.userProfile, JSON.stringify(settingsStore.defaultUserProfile(), null, 2) + "\n")) {
     created.push("runtime/engine-home/aimashi-user.json");
   }
 
-  if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(defaultAppearanceSettings(), null, 2) + "\n")) {
+  if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(settingsStore.defaultAppearanceSettings(), null, 2) + "\n")) {
     created.push("runtime/engine-home/aimashi-appearance.json");
   }
 
@@ -2563,8 +2290,8 @@ function apiKey() {
 function modelSettings() {
   const p = runtimePaths();
   const saved = readJson(p.modelSettings, {});
-  if (!saved.provider && !saved.model && !saved.apiKey) return defaultModelSettings();
-  return { ...defaultModelSettings(), ...saved };
+  if (!saved.provider && !saved.model && !saved.apiKey) return settingsStore.defaultModelSettings();
+  return { ...settingsStore.defaultModelSettings(), ...saved };
 }
 
 function defaultProviderStore() {
@@ -2701,8 +2428,8 @@ function writeRuntimeConfig(port) {
   const model = String(settings.model || "").trim();
   const baseUrl = String(settings.baseUrl || "").trim();
   const apiMode = String(settings.apiMode || "").trim();
-  const approvalsMode = permissionSettings().mode;
-  const reasoningEffort = effortSettings().level;
+  const approvalsMode = settingsStore.permissionSettings().mode;
+  const reasoningEffort = settingsStore.effortSettings().level;
   const source = engineSource();
   const configPath = path.join(effectiveHermesHome(), "config.yaml");
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -2755,9 +2482,9 @@ function writeRuntimeConfig(port) {
   atomicWriteFile(configPath, lines.join("\n"), 0o600);
 }
 
-function daemonConnectUrls(settings = daemonSettings()) {
-  const port = normalizeDaemonPort(settings.port);
-  const host = normalizeDaemonHost(settings.host);
+function daemonConnectUrls(settings = settingsStore.daemonSettings()) {
+  const port = settingsStore.normalizeDaemonPort(settings.port);
+  const host = settingsStore.normalizeDaemonHost(settings.host);
   if (host !== "0.0.0.0" && host !== "::") {
     return [`http://${host}:${port}`];
   }
@@ -2773,10 +2500,10 @@ function daemonConnectUrls(settings = daemonSettings()) {
   return urls.length ? urls : [`http://127.0.0.1:${port}`];
 }
 
-function daemonPingUrls(settings = daemonSettings()) {
+function daemonPingUrls(settings = settingsStore.daemonSettings()) {
   const urls = daemonConnectUrls(settings);
-  const port = normalizeDaemonPort(settings.port);
-  const host = normalizeDaemonHost(settings.host);
+  const port = settingsStore.normalizeDaemonPort(settings.port);
+  const host = settingsStore.normalizeDaemonHost(settings.host);
   const localUrl = `http://127.0.0.1:${port}`;
   const candidates = host === "0.0.0.0" || host === "::" || host === "localhost"
     ? [localUrl, ...urls]
@@ -2785,7 +2512,7 @@ function daemonPingUrls(settings = daemonSettings()) {
 }
 
 function getDaemonStatus() {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   return {
     processMode: IS_DAEMON_PROCESS ? "daemon" : "desktop",
     serviceLabel: AIMASHI_DAEMON_SERVICE_LABEL,
@@ -2816,7 +2543,7 @@ function getDaemonPairingInfo() {
 async function getObservedDaemonStatus(timeoutMs = 500) {
   const status = getDaemonStatus();
   if (controlServerState.running) return status;
-  const ping = await pingDaemon(daemonSettings(), timeoutMs);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), timeoutMs);
   return {
     ...status,
     running: ping.ok,
@@ -2837,7 +2564,7 @@ function relayHttpOrigin(wsUrl) {
   }
 }
 
-function relayPairingLink(settings = relaySettings()) {
+function relayPairingLink(settings = settingsStore.relaySettings()) {
   const origin = relayHttpOrigin(settings.url);
   if (!origin) return "";
   const params = new URLSearchParams({
@@ -2850,7 +2577,7 @@ function relayPairingLink(settings = relaySettings()) {
 }
 
 function relayStatus(includeSecret = false) {
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   return {
     enabled: settings.enabled,
     connected: Boolean(relayState.connected),
@@ -2895,11 +2622,11 @@ function getRuntimeStatus(created = []) {
     relay: relayStatus(false),
     cloud: cloudStatus(false),
     auth: codexAuth,
-    user: { ...defaultUserProfile(), ...readJson(p.userProfile, {}) },
+    user: { ...settingsStore.defaultUserProfile(), ...readJson(p.userProfile, {}) },
     appearance: appearanceSettings(),
     agentEngines: localAgentEngines(),
-    permissions: permissionStatus(),
-    effort: effortStatus(),
+    permissions: settingsStore.permissionStatus(),
+    effort: settingsStore.effortStatus(),
     model: {
       provider: settings.provider,
       model: settings.model,
@@ -3421,7 +3148,7 @@ function externalAgentStatus({ fellow, engine, sessionId }) {
   const config = normalizeFellowEngineConfig(fellow.engineConfig);
   const model = config.model || (engine === "claude-code" ? "Claude Code 默认模型" : "Codex 默认模型");
   const permission = config.permissionMode || "default";
-  const effort = normalizeEffortLevel(config.effortLevel || "medium", engine);
+  const effort = settingsStore.normalizeEffortLevel(config.effortLevel || "medium", engine);
   const externalSessionId = getAgentSessionId(engine, fellow.key, sessionId) || "尚未创建";
   const label = engine === "claude-code" ? "Claude Code" : "Codex";
   return [
@@ -3506,7 +3233,7 @@ function runHermesSlashCommand({ text, fellow, sessionId }) {
     text,
     sessionKey,
     chatName: fellow.name || "Aimashi",
-    userName: readJson(p.userProfile, defaultUserProfile()).displayName || "Aimashi"
+    userName: readJson(p.userProfile, settingsStore.defaultUserProfile()).displayName || "Aimashi"
   });
   const script = `
 import asyncio, json, sys
@@ -4802,13 +4529,13 @@ async function handleControlRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/relay/start") {
       const body = await readControlBody(req);
-      writeRelaySettings({ ...body, enabled: true });
+      settingsStore.writeRelaySettings({ ...body, enabled: true });
       await startRelayClient();
       writeControlJson(res, 200, relayStatus(false));
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/relay/stop") {
-      writeRelaySettings({ enabled: false });
+      settingsStore.writeRelaySettings({ enabled: false });
       writeControlJson(res, 200, stopRelayClient());
       return;
     }
@@ -4861,13 +4588,13 @@ async function handleControlRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/api/effort/save") {
       const body = await readControlBody(req);
-      writeEffortSettings(body);
+      settingsStore.writeEffortSettings(body);
       writeControlJson(res, 200, getRuntimeStatus());
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/permissions/save") {
       const body = await readControlBody(req);
-      writePermissionSettings(body);
+      settingsStore.writePermissionSettings(body);
       writeControlJson(res, 200, getRuntimeStatus());
       return;
     }
@@ -5001,9 +4728,9 @@ function sweepExpiredOneshotTasks(store) {
 async function startControlServer(options = {}) {
   initializeRuntime();
   if (controlServer && controlServerState.running) return getDaemonStatus();
-  const settings = { ...daemonSettings(), ...options };
-  const host = normalizeDaemonHost(settings.host);
-  const preferredPort = normalizeDaemonPort(settings.port);
+  const settings = { ...settingsStore.daemonSettings(), ...options };
+  const host = settingsStore.normalizeDaemonHost(settings.host);
+  const preferredPort = settingsStore.normalizeDaemonPort(settings.port);
   const port = await choosePort(preferredPort, 20);
   if (!port) throw new Error("No available local port for Aimashi daemon.");
   controlServerState = {
@@ -5027,9 +4754,9 @@ async function startControlServer(options = {}) {
   initSchedulerSubsystem();
   controlServerState.running = true;
   controlServerState.starting = false;
-  writeDaemonSettings({ ...settings, host, port });
+  settingsStore.writeDaemonSettings({ ...settings, host, port });
   appendDaemonLog(`Aimashi daemon listening at ${controlServerState.baseUrl}`);
-  if (relaySettings().enabled) {
+  if (settingsStore.relaySettings().enabled) {
     startRelayClient().catch((error) => {
       relayState.lastError = String(error?.message || error);
       appendRelayLog(`Relay auto-start failed: ${relayState.lastError}`);
@@ -5053,7 +4780,7 @@ function stopControlServer() {
   return getDaemonStatus();
 }
 
-async function pingDaemon(settings = daemonSettings(), timeoutMs = 1200) {
+async function pingDaemon(settings = settingsStore.daemonSettings(), timeoutMs = 1200) {
   const urls = daemonPingUrls(settings);
   for (const baseUrl of urls) {
     try {
@@ -5067,7 +4794,7 @@ async function pingDaemon(settings = daemonSettings(), timeoutMs = 1200) {
 }
 
 async function notifyDaemonRelay(action, body = {}) {
-  const ping = await pingDaemon(daemonSettings(), 500);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), 500);
   if (!ping.ok || !ping.baseUrl) return null;
   const response = await fetch(`${ping.baseUrl}/api/relay/${action}`, {
     method: "POST",
@@ -5083,7 +4810,7 @@ async function notifyDaemonRelay(action, body = {}) {
 }
 
 async function fetchDaemonRelayStatus() {
-  const ping = await pingDaemon(daemonSettings(), 500);
+  const ping = await pingDaemon(settingsStore.daemonSettings(), 500);
   if (!ping.ok || !ping.baseUrl) return null;
   const response = await fetch(`${ping.baseUrl}/api/relay/status`, {
     headers: { Authorization: `Bearer ${daemonToken()}` },
@@ -5098,7 +4825,7 @@ async function startDaemonService() {
     return { ...getDaemonStatus(), running: false, disabled: true };
   }
   initializeRuntime();
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   if (IS_DAEMON_PROCESS) return startControlServer(settings);
   const existing = await pingDaemon(settings, 500);
   if (existing.ok) return { ...getDaemonStatus(), running: true, baseUrl: existing.baseUrl };
@@ -5122,7 +4849,7 @@ function stopDaemonService() {
 }
 
 function appendCloudLog(line) {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   const token = String(settings.token || "");
   const clean = String(line || "").replace(token ? new RegExp(token, "g") : /$a/, "[REDACTED]");
   cloudBridgeState.logs.push(clean);
@@ -5130,8 +4857,8 @@ function appendCloudLog(line) {
 }
 
 function cloudStatus(includeToken = false) {
-  const settings = cloudSettings();
-  const cloudWorkspace = readCloudWorkspace();
+  const settings = settingsStore.cloudSettings();
+  const cloudWorkspace = settingsStore.readCloudWorkspace();
   const workspace = cloudWorkspace?.workspace || null;
   return {
     enabled: Boolean(settings.enabled && settings.token),
@@ -5150,8 +4877,8 @@ function cloudStatus(includeToken = false) {
 }
 
 async function cloudApi(pathSegment, { method = "GET", body = null, token = "" } = {}) {
-  const settings = cloudSettings();
-  const baseUrl = normalizeCloudUrl(settings.url);
+  const settings = settingsStore.cloudSettings();
+  const baseUrl = settingsStore.normalizeCloudUrl(settings.url);
   const headers = { "Content-Type": "application/json" };
   const bearer = token || settings.token;
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
@@ -5167,17 +4894,17 @@ async function cloudApi(pathSegment, { method = "GET", body = null, token = "" }
 }
 
 async function syncAimashiCloudWorkspace() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   const data = await cloudApi("/api/me");
-  writeCloudSettings({ user: data.user || settings.user });
-  writeCloudWorkspace(data.workspace || null);
+  settingsStore.writeCloudSettings({ user: data.user || settings.user });
+  settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
   return cloudStatus(false);
 }
 
 async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = {}) {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token || !session?.id || !message) return cloudStatus(false);
   const fellow = loadFellowManifest().fellows.find((item) => item.key === fellowKey || item.id === fellowKey) || {};
   const conversation = cloudConversationFromDesktopSession(session, fellow);
@@ -5192,22 +4919,22 @@ async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = 
       ...cloudMessageFromDesktopMessage(message)
     }
   });
-  writeCloudWorkspace(pushed.workspace || null);
+  settingsStore.writeCloudWorkspace(pushed.workspace || null);
   mergeCloudWorkspaceIntoChatStore(pushed.workspace || null);
   return cloudStatus(false);
 }
 
 async function loginAimashiCloud({ username, password, mode = "login", url = "" } = {}) {
-  const nextUrl = normalizeCloudUrl(url || cloudSettings().url);
-  writeCloudSettings({ url: nextUrl, enabled: false, token: "", user: null });
+  const nextUrl = settingsStore.normalizeCloudUrl(url || settingsStore.cloudSettings().url);
+  settingsStore.writeCloudSettings({ url: nextUrl, enabled: false, token: "", user: null });
   const pathSegment = mode === "register" ? "/api/auth/register" : "/api/auth/login";
   const data = await cloudApi(pathSegment, {
     method: "POST",
     body: { username: String(username || "").trim(), password: String(password || "") },
     token: ""
   });
-  writeCloudSettings({ url: nextUrl, enabled: true, token: data.token, user: data.user || null });
-  writeCloudWorkspace(data.workspace || null);
+  settingsStore.writeCloudSettings({ url: nextUrl, enabled: true, token: data.token, user: data.user || null });
+  settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
   startCloudEvents();
   startCloudBridge();
@@ -5216,17 +4943,17 @@ async function loginAimashiCloud({ username, password, mode = "login", url = "" 
 
 async function logoutAimashiCloud() {
   try {
-    if (cloudSettings().token) await cloudApi("/api/auth/logout", { method: "POST", body: {} });
+    if (settingsStore.cloudSettings().token) await cloudApi("/api/auth/logout", { method: "POST", body: {} });
   } catch {
     // Local logout should still clear the desktop token.
   }
-  writeCloudSettings({ enabled: false, token: "", user: null });
+  settingsStore.writeCloudSettings({ enabled: false, token: "", user: null });
   stopCloudEvents();
   stopCloudBridge();
   return cloudStatus(false);
 }
 
-function cloudWebSocketUrl(pathname, settings = cloudSettings()) {
+function cloudWebSocketUrl(pathname, settings = settingsStore.cloudSettings()) {
   const url = new URL(settings.url);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = pathname;
@@ -5234,15 +4961,15 @@ function cloudWebSocketUrl(pathname, settings = cloudSettings()) {
   return url;
 }
 
-function cloudWebSocketProtocols(settings = cloudSettings()) {
+function cloudWebSocketProtocols(settings = settingsStore.cloudSettings()) {
   return [`aimashi-token.${settings.token}`];
 }
 
-function cloudEventsUrl(settings = cloudSettings()) {
+function cloudEventsUrl(settings = settingsStore.cloudSettings()) {
   return cloudWebSocketUrl("/api/events", settings).toString();
 }
 
-function cloudBridgeUrl(settings = cloudSettings()) {
+function cloudBridgeUrl(settings = settingsStore.cloudSettings()) {
   const url = cloudWebSocketUrl("/api/bridge", settings);
   url.searchParams.set("deviceName", `${os.hostname()} Aimashi Desktop`);
   url.searchParams.set("engine", "codex");
@@ -5275,7 +5002,7 @@ function stopCloudEvents() {
 
 function scheduleCloudEventsReconnect() {
   if (cloudEventsReconnectTimer) return;
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return;
   cloudEventsReconnectTimer = setTimeout(() => {
     cloudEventsReconnectTimer = null;
@@ -5286,7 +5013,7 @@ function scheduleCloudEventsReconnect() {
 function handleCloudWorkspaceEvent(message = {}) {
   const workspace = message.workspace || null;
   if (!workspace) return;
-  writeCloudWorkspace(workspace);
+  settingsStore.writeCloudWorkspace(workspace);
   mergeCloudWorkspaceIntoChatStore(workspace);
   broadcastRendererEvent("cloud:event", {
     type: String(message.type || "workspace_updated"),
@@ -5320,7 +5047,7 @@ function handleCloudEventsMessage(raw) {
 }
 
 function startCloudEvents() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   if (cloudEventsClient && [WebSocket.CONNECTING, WebSocket.OPEN].includes(cloudEventsClient.readyState)) {
     return cloudStatus(false);
@@ -5363,7 +5090,7 @@ function stopCloudBridge() {
 
 function scheduleCloudBridgeReconnect() {
   if (cloudBridgeReconnectTimer) return;
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return;
   cloudBridgeReconnectTimer = setTimeout(() => {
     cloudBridgeReconnectTimer = null;
@@ -5463,7 +5190,7 @@ function handleCloudBridgeMessage(ws, raw) {
 }
 
 function startCloudBridge() {
-  const settings = cloudSettings();
+  const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
   if (cloudBridgeClient && [WebSocket.CONNECTING, WebSocket.OPEN].includes(cloudBridgeClient.readyState)) {
     return cloudStatus(false);
@@ -5493,7 +5220,7 @@ function startCloudBridge() {
 }
 
 function appendRelayLog(line) {
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   const clean = String(line || "")
     .replace(new RegExp(settings.secret, "g"), "[REDACTED]")
     .replace(new RegExp(daemonToken(), "g"), "[REDACTED]");
@@ -5509,7 +5236,7 @@ function relaySend(payload) {
 
 function scheduleRelayReconnect() {
   if (relayReconnectTimer) return;
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   if (!settings.enabled) return;
   relayReconnectTimer = setTimeout(() => {
     relayReconnectTimer = null;
@@ -5531,7 +5258,7 @@ function stopRelayClient() {
   if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, "remote disabled");
   relayState = {
     ...relayState,
-    enabled: relaySettings().enabled,
+    enabled: settingsStore.relaySettings().enabled,
     connected: false,
     connecting: false,
     mobilePeers: 0
@@ -5649,12 +5376,12 @@ async function handleRelayRpc(message = {}) {
       return;
     }
     if (method === "POST" && requestPath === "/api/effort/save") {
-      writeEffortSettings(body);
+      settingsStore.writeEffortSettings(body);
       relayRpcResult(clientId, id, true, getRuntimeStatus());
       return;
     }
     if (method === "POST" && requestPath === "/api/permissions/save") {
-      writePermissionSettings(body);
+      settingsStore.writePermissionSettings(body);
       relayRpcResult(clientId, id, true, getRuntimeStatus());
       return;
     }
@@ -5730,7 +5457,7 @@ function handleRelayMessage(raw) {
 
 async function startRelayClient() {
   initializeRuntime();
-  const settings = relaySettings();
+  const settings = settingsStore.relaySettings();
   relayState = {
     ...relayState,
     enabled: settings.enabled,
@@ -6559,7 +6286,7 @@ function createActiveClaudeCodeChatAdapter() {
     getSchedulerMcpSpec,
     injectGroupContextForSdk,
     lastUserPrompt,
-    normalizeEffortLevel,
+    normalizeEffortLevel: settingsStore.normalizeEffortLevel,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionEntry,
@@ -6577,7 +6304,7 @@ function createActiveCodexChatAdapter() {
     getAgentSessionId,
     injectGroupContextForSdk,
     lastUserPrompt,
-    normalizeEffortLevel,
+    normalizeEffortLevel: settingsStore.normalizeEffortLevel,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionId,
@@ -6908,14 +6635,14 @@ ipcMain.handle("daemon:status", async () => {
   return getObservedDaemonStatus(500);
 });
 ipcMain.handle("daemon:pairing", async () => {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   const ping = await pingDaemon(settings, 500);
   return { ...getDaemonPairingInfo(), running: controlServerState.running || ping.ok, baseUrl: ping.baseUrl || getDaemonStatus().baseUrl };
 });
 ipcMain.handle("daemon:start", () => startDaemonService());
 ipcMain.handle("daemon:stop", () => stopDaemonService());
 ipcMain.handle("daemon:settings-save", (_event, settings) => {
-  writeDaemonSettings(settings);
+  settingsStore.writeDaemonSettings(settings);
   return getDaemonStatus();
 });
 ipcMain.handle("util:qr-svg", (_event, text) => {
@@ -6939,7 +6666,7 @@ ipcMain.handle("relay:status", async () => {
   return relayStatus(true);
 });
 ipcMain.handle("relay:start", async () => {
-  writeRelaySettings({ enabled: true });
+  settingsStore.writeRelaySettings({ enabled: true });
   if (!IS_DAEMON_PROCESS) {
     const daemonRelay = await notifyDaemonRelay("start");
     if (daemonRelay) return { ...relayStatus(true), ...daemonRelay };
@@ -6947,14 +6674,14 @@ ipcMain.handle("relay:start", async () => {
   return startRelayClient();
 });
 ipcMain.handle("relay:stop", () => {
-  writeRelaySettings({ enabled: false });
+  settingsStore.writeRelaySettings({ enabled: false });
   if (!IS_DAEMON_PROCESS) {
     notifyDaemonRelay("stop").catch(() => {});
   }
   return stopRelayClient();
 });
 ipcMain.handle("relay:settings-save", async (_event, settings) => {
-  const next = writeRelaySettings(settings);
+  const next = settingsStore.writeRelaySettings(settings);
   if (!IS_DAEMON_PROCESS) {
     const daemonRelay = await notifyDaemonRelay(next.enabled ? "start" : "stop", next);
     if (daemonRelay) return { ...relayStatus(true), ...daemonRelay };
@@ -7010,11 +6737,11 @@ ipcMain.handle("skills:read", (_event, skillId) => skillsLoader.readLocalSkill(s
 ipcMain.handle("skills:delete", (_event, skillId) => skillsLoader.deleteLocalSkill(skillId));
 ipcMain.handle("skills:open-directory", (_event, skillId) => skillsLoader.openLocalSkillDirectory(skillId));
 ipcMain.handle("permissions:save", async (_event, settings) => {
-  writePermissionSettings(settings);
+  settingsStore.writePermissionSettings(settings);
   return getRuntimeStatus();
 });
 ipcMain.handle("effort:save", async (_event, settings) => {
-  writeEffortSettings(settings);
+  settingsStore.writeEffortSettings(settings);
   return getRuntimeStatus();
 });
 ipcMain.handle("model:save", (_event, settings) => {
@@ -7080,7 +6807,7 @@ ipcMain.handle("appearance:save", (_event, settings) => {
 
 ipcMain.handle("profile:save", (_event, profile) => {
   const p = runtimePaths();
-  const current = { ...defaultUserProfile(), ...readJson(p.userProfile, {}) };
+  const current = { ...settingsStore.defaultUserProfile(), ...readJson(p.userProfile, {}) };
   const next = {
     displayName: String(profile.displayName || current.displayName || "Boss").trim() || "Boss",
     avatarText: String(profile.avatarText || current.avatarText || "B").trim().slice(0, 2).toUpperCase() || "B",
@@ -7260,7 +6987,7 @@ ipcMain.handle("pet:place", (_event, key) => placeFellowPet(key));
 ipcMain.handle("pet:recall", (_event, key) => recallFellowPet(key));
 
 async function callDaemonTasks(pathSegment, opts = {}) {
-  const settings = daemonSettings();
+  const settings = settingsStore.daemonSettings();
   const baseUrl = controlServerState.baseUrl || `http://${settings.host}:${settings.port}`;
   const response = await fetch(`${baseUrl}${pathSegment}`, {
     ...opts,
@@ -7291,7 +7018,7 @@ function subscribeDaemonTaskEvents() {
   let reconnectDelay = 1000;
 
   function connect() {
-    const settings = daemonSettings();
+    const settings = settingsStore.daemonSettings();
     const baseUrl = controlServerState.baseUrl || `http://${settings.host}:${settings.port}`;
     const token = daemonToken();
     let pathname = "/api/tasks/events";

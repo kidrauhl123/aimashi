@@ -149,7 +149,9 @@ assert.equal(adapterForEngine("codex").responseModel, "codex-cli");
 assert.equal(resolveChatEngineAdapter({ agent_engine: "claude-code" }).transport, "claude-agent-sdk");
 
 const mainSource = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
-const defaultModelBody = mainSource.match(/function defaultModelSettings\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+// defaultModelSettings was moved to src/main/settings-store.js; assert against the extracted module.
+const settingsStoreSource = fs.readFileSync(path.join(__dirname, "main", "settings-store.js"), "utf8");
+const defaultModelBody = settingsStoreSource.match(/function defaultModelSettings\(\) \{[\s\S]*?\n {2}\}/)?.[0] || "";
 assert.doesNotMatch(defaultModelBody, /provider: "xai"[\s\S]*model: "grok-4\.1-fast"/);
 assert.doesNotMatch(defaultModelBody, /provider: "openai-codex"[\s\S]*model: "gpt-5\.3-codex"/);
 assert.match(defaultModelBody, /provider: ""[\s\S]*model: ""/);
