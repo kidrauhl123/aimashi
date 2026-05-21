@@ -477,119 +477,11 @@ const providerLabels = {
   lmstudio: "LM Studio"
 };
 
-function activeAgentEngine() {
-  const persona = activePersona();
-  return persona?.agentEngine || persona?.agent_engine || "hermes";
-}
-
-function engineConfigForPersona(persona = activePersona()) {
-  return persona?.engineConfig || persona?.engine_config || {};
-}
-
-function externalModelEntries(engine) {
-  if (engine === "claude-code") {
-    return [
-      { id: "default", provider: "claude-code", providerLabel: "Claude Code", model: "", label: "Claude Code 默认" },
-      { id: "claude-opus-4-7", provider: "claude-code", providerLabel: "Claude Code", model: "claude-opus-4-7", label: "Claude Opus 4.7" },
-      { id: "claude-sonnet-4-6", provider: "claude-code", providerLabel: "Claude Code", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-      { id: "opus", provider: "claude-code", providerLabel: "Claude Code", model: "opus", label: "Opus alias" },
-      { id: "sonnet", provider: "claude-code", providerLabel: "Claude Code", model: "sonnet", label: "Sonnet alias" }
-    ];
-  }
-  if (engine === "codex") {
-    const entries = [{ id: "default", provider: "codex", providerLabel: "Codex CLI", model: "", label: "Codex 默认" }];
-    const dynamic = Array.isArray(state.codexModels) ? state.codexModels : [];
-    if (dynamic.length) {
-      for (const m of dynamic) {
-        if (!m?.slug) continue;
-        entries.push({
-          id: m.slug,
-          provider: "codex",
-          providerLabel: "Codex CLI",
-          model: m.slug,
-          label: m.displayName || m.slug
-        });
-      }
-      return entries;
-    }
-    // Fallback if ~/.codex/models_cache.json is missing (fresh install pre-login).
-    return [
-      ...entries,
-      { id: "gpt-5.3-codex-spark", provider: "codex", providerLabel: "Codex CLI", model: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
-      { id: "gpt-5.3-codex", provider: "codex", providerLabel: "Codex CLI", model: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-      { id: "gpt-5.2", provider: "codex", providerLabel: "Codex CLI", model: "gpt-5.2", label: "GPT-5.2" }
-    ];
-  }
-  return [];
-}
-
-function externalPermissionOptions(engine) {
-  if (engine === "claude-code") {
-    return [
-      { value: "default", label: "Ask Permissions", title: "Claude Code 默认权限，危险操作会询问。" },
-      { value: "acceptEdits", label: "Accept Edits", title: "Claude Code 自动接受文件编辑，其他危险操作仍按规则处理。" },
-      { value: "plan", label: "Plan Mode", title: "Claude Code 计划模式，只读规划。" },
-      { value: "auto", label: "Auto Mode", title: "Claude Code 自动判断低风险操作，高风险操作仍会询问。" },
-      { value: "bypassPermissions", label: "Bypass Permissions", title: "Claude Code Bypass Permissions，只在完全信任时使用。" }
-    ];
-  }
-  if (engine === "codex") {
-    return [
-      { value: "default", label: "Ask", title: "Codex 默认 workspace-write + untrusted。" },
-      { value: "acceptEdits", label: "Edits", title: "Codex workspace-write + on-request。" },
-      { value: "readOnly", label: "Read", title: "Codex 只读模式。" },
-      { value: "bypassPermissions", label: "YOLO", title: "Codex danger-full-access + never。" }
-    ];
-  }
-  // Hermes — pull from real engine capabilities (probed via SETTINGS_SCHEMA).
-  // Defaults to the upstream ask/yolo/deny set if the probe hasn't completed.
-  const modes = (state.engineCapabilities && Array.isArray(state.engineCapabilities.approvalModes) && state.engineCapabilities.approvalModes.length)
-    ? state.engineCapabilities.approvalModes
-    : ["ask", "yolo", "deny"];
-  return modes.map((value) => ({
-    value,
-    label: APPROVAL_LABELS[value] || value,
-    title: APPROVAL_TITLES[value] || ""
-  }));
-}
-
-function effortOptions(engine) {
-  if (engine === "claude-code") {
-    return [
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-      { value: "xhigh", label: "Extra high" },
-      { value: "max", label: "Max" }
-    ];
-  }
-  if (engine === "codex") {
-    return [
-      { value: "minimal", label: "Minimal" },
-      { value: "low", label: "Low" },
-      { value: "medium", label: "Medium" },
-      { value: "high", label: "High" },
-      { value: "xhigh", label: "Extra high" }
-    ];
-  }
-  // Hermes — pull from real engine capabilities (probed via SETTINGS_SCHEMA at
-  // startup). Defaults to low/medium/high if the probe hasn't completed yet.
-  const levels = (state.engineCapabilities && Array.isArray(state.engineCapabilities.effortLevels) && state.engineCapabilities.effortLevels.length)
-    ? state.engineCapabilities.effortLevels
-    : ["low", "medium", "high"];
-  return levels.map((value) => ({ value, label: EFFORT_LABELS[value] || value }));
-}
-
-function effortLabelForLevel(level = "") {
-  const selected = els.effortSelect?.selectedOptions?.[0];
-  if (selected?.textContent) return selected.textContent;
-  return effortOptions(activeAgentEngine()).find((item) => item.value === level)?.label || "Medium";
-}
 
 function setEffortSelectOptions(engine, currentLevel) {
   if (!els.effortSelect) return;
   const previous = els.effortSelect.value;
-  const options = effortOptions(engine);
+  const options = window.aimashiEngineOptions.effortOptions(engine);
   const ids = new Set(options.map((option) => option.value));
   const nextValue = ids.has(currentLevel) ? currentLevel : ids.has(previous) ? previous : "medium";
   els.effortSelect.innerHTML = "";
@@ -604,15 +496,15 @@ function setEffortSelectOptions(engine, currentLevel) {
 
 function syncEffortControl(runtime = state.runtime) {
   if (!els.effortSelect || !els.effortLabel) return;
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   const external = engine === "claude-code" || engine === "codex";
-  const level = external ? (engineConfigForPersona().effortLevel || "medium") : (runtime?.effort?.level || "medium");
+  const level = external ? (window.aimashiEngineOptions.engineConfigForPersona().effortLevel || "medium") : (runtime?.effort?.level || "medium");
   if (document.activeElement !== els.effortSelect) setEffortSelectOptions(engine, level);
   if (document.activeElement !== els.effortSelect) {
     els.effortSelect.value = [...els.effortSelect.options].some((option) => option.value === level) ? level : "medium";
   }
-  setText(els.effortLabel, effortLabelForLevel(els.effortSelect.value));
-  els.effortSelect.title = `推理强度：${effortLabelForLevel(els.effortSelect.value)}`;
+  setText(els.effortLabel, window.aimashiEngineOptions.effortLabelForLevel(els.effortSelect.value));
+  els.effortSelect.title = `推理强度：${window.aimashiEngineOptions.effortLabelForLevel(els.effortSelect.value)}`;
 }
 
 function fillModelFieldsFromPreset(key) {
@@ -689,10 +581,10 @@ function permissionLabelForMode(mode = "") {
   if (mode === "ask" || mode === "manual") return "Ask";
   if (mode === "yolo" || mode === "off") return "YOLO";
   if (mode === "deny" || mode === "dontAsk") return "Deny";
-  if (mode === "acceptEdits") return activeAgentEngine() === "claude-code" ? "Accept Edits" : "Edits";
-  if (mode === "plan") return activeAgentEngine() === "claude-code" ? "Plan Mode" : "Plan";
+  if (mode === "acceptEdits") return window.aimashiEngineOptions.activeAgentEngine() === "claude-code" ? "Accept Edits" : "Edits";
+  if (mode === "plan") return window.aimashiEngineOptions.activeAgentEngine() === "claude-code" ? "Plan Mode" : "Plan";
   if (mode === "auto") return "Auto Mode";
-  if (mode === "bypassPermissions") return activeAgentEngine() === "claude-code" ? "Bypass Permissions" : "YOLO";
+  if (mode === "bypassPermissions") return window.aimashiEngineOptions.activeAgentEngine() === "claude-code" ? "Bypass Permissions" : "YOLO";
   if (mode === "readOnly") return "Read";
   return "Ask";
 }
@@ -700,7 +592,7 @@ function permissionLabelForMode(mode = "") {
 function setPermissionSelectOptions(engine, currentMode) {
   if (!els.permissionMode) return;
   const previous = els.permissionMode.value;
-  const options = externalPermissionOptions(engine);
+  const options = window.aimashiEngineOptions.externalPermissionOptions(engine);
   const ids = new Set(options.map((option) => option.value));
   const nextValue = ids.has(currentMode) ? currentMode : ids.has(previous) ? previous : options[0]?.value || "";
   els.permissionMode.innerHTML = "";
@@ -716,9 +608,9 @@ function setPermissionSelectOptions(engine, currentMode) {
 
 function syncPermissionControl(runtime = state.runtime) {
   if (!els.permissionMode || !els.permissionLabel) return;
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   const external = engine === "claude-code" || engine === "codex";
-  const mode = external ? (engineConfigForPersona().permissionMode || "default") : (runtime?.permissions?.mode || "manual");
+  const mode = external ? (window.aimashiEngineOptions.engineConfigForPersona().permissionMode || "default") : (runtime?.permissions?.mode || "manual");
   setPermissionSelectOptions(engine, mode);
   if (document.activeElement !== els.permissionMode) {
     els.permissionMode.value = [...els.permissionMode.options].some((option) => option.value === mode) ? mode : els.permissionMode.options[0]?.value || "";
@@ -764,10 +656,10 @@ function connectedModelEntries(runtime = state.runtime) {
 }
 
 function renderModelSelectors(runtime = state.runtime) {
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   if (engine === "claude-code" || engine === "codex") {
-    const config = engineConfigForPersona();
-    const entries = externalModelEntries(engine);
+    const config = window.aimashiEngineOptions.engineConfigForPersona();
+    const entries = window.aimashiEngineOptions.externalModelEntries(engine);
     setSelectOptions(els.quickModelSelect, entries, config.model || "default");
     if (els.quickModelSelect) els.quickModelSelect.disabled = !entries.length;
     setProviderOptions(els.modelSelect, window.aimashiModelHelpers.providerEntries().filter((entry) => !providerIsConnected(entry.provider, runtime)), "");
@@ -1675,7 +1567,7 @@ async function loadEngineCapabilities() {
   }
   state.engineCapabilities = caps;
   // `render()` calls syncEffortControl + syncPermissionControl which use
-  // effortOptions()/externalPermissionOptions() — those now read state.engineCapabilities.
+  // window.aimashiEngineOptions.effortOptions()/window.aimashiEngineOptions.externalPermissionOptions() — those now read state.engineCapabilities.
   render();
 }
 
@@ -1879,9 +1771,9 @@ function render() {
   els.codexCancel.classList.toggle("hidden", !auth.codexStarting);
   if (!editingModel) updateModelFieldVisibility(runtime);
   if (els.quickModelSelect && document.activeElement !== els.quickModelSelect) {
-    const engine = activeAgentEngine();
+    const engine = window.aimashiEngineOptions.activeAgentEngine();
     const currentModelId = engine === "claude-code" || engine === "codex"
-      ? (engineConfigForPersona().model || "default")
+      ? (window.aimashiEngineOptions.engineConfigForPersona().model || "default")
       : window.aimashiModelHelpers.presetKeyForModel(runtime.model);
     if ([...els.quickModelSelect.options].some((option) => option.value === currentModelId)) {
       els.quickModelSelect.value = currentModelId;
@@ -1890,7 +1782,7 @@ function render() {
   }
   syncEffortControl(runtime);
   const connectedEntries = connectedModelEntries(runtime);
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   const engineInfo = runtime.agentEngines || {};
   const externalAvailable = engine === "claude-code"
     ? engineInfo.claudeCode?.available
@@ -4023,7 +3915,7 @@ function appendTransientChat(role, content) {
 
 function filteredSlashCommands() {
   const filter = state.slashFilter.replace(/^\//, "").trim().toLowerCase();
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   const commands = engine === "claude-code" || engine === "codex"
     ? (state.agentSlashCommands[engine] || [])
     : (state.slashCommands || fallbackSlashCommands);
@@ -4037,7 +3929,7 @@ function externalSlashInvocation(text) {
   if (!command.startsWith("/")) return null;
   const argsText = input.slice(command.length).trim();
   const args = argsText ? argsText.split(/\s+/).filter(Boolean) : [];
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   if (engine !== "claude-code" && engine !== "codex") return null;
   const found = (state.agentSlashCommands[engine] || []).find((item) => String(item.command || "").toLowerCase() === command);
   return found ? { engine, command, args, item: found } : null;
@@ -4470,6 +4362,16 @@ async function initializeRuntime() {
       els,
       providerLabels,
       providerPresets,
+    });
+  }
+  if (window.aimashiEngineOptions && window.aimashiEngineOptions.initEngineOptions) {
+    window.aimashiEngineOptions.initEngineOptions({
+      state,
+      els,
+      activePersona,
+      APPROVAL_LABELS,
+      APPROVAL_TITLES,
+      EFFORT_LABELS,
     });
   }
   if (window.aimashiTasksPanel && window.aimashiTasksPanel.initTasksPanel) {
@@ -5081,10 +4983,10 @@ els.authMethod.addEventListener("change", () => {
 
 els.quickModelSelect?.addEventListener("change", async () => {
   syncQuickModelLabel();
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   if (engine === "claude-code" || engine === "codex") {
     const persona = activePersona();
-    const entry = externalModelEntries(engine).find((item) => item.id === els.quickModelSelect.value);
+    const entry = window.aimashiEngineOptions.externalModelEntries(engine).find((item) => item.id === els.quickModelSelect.value);
     if (!persona || !entry) return;
     els.quickModelSelect.disabled = true;
     setText(els.modelSwitchStatus, "保存模型...");
@@ -5093,7 +4995,7 @@ els.quickModelSelect?.addEventListener("change", async () => {
         key: persona.key,
         agentEngine: engine,
         engineConfig: {
-          ...engineConfigForPersona(persona),
+          ...window.aimashiEngineOptions.engineConfigForPersona(persona),
           model: entry.model || ""
         }
       });
@@ -5142,7 +5044,7 @@ els.quickModelSelect?.addEventListener("change", async () => {
 els.effortSelect?.addEventListener("change", async () => {
   const level = els.effortSelect.value;
   syncEffortControl(state.runtime);
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   if (engine === "claude-code" || engine === "codex") {
     const persona = activePersona();
     if (!persona) return;
@@ -5153,7 +5055,7 @@ els.effortSelect?.addEventListener("change", async () => {
         key: persona.key,
         agentEngine: engine,
         engineConfig: {
-          ...engineConfigForPersona(persona),
+          ...window.aimashiEngineOptions.engineConfigForPersona(persona),
           effortLevel: level
         }
       });
@@ -5187,7 +5089,7 @@ els.effortSelect?.addEventListener("change", async () => {
 
 els.permissionMode?.addEventListener("change", async () => {
   const mode = els.permissionMode.value;
-  const engine = activeAgentEngine();
+  const engine = window.aimashiEngineOptions.activeAgentEngine();
   if (engine === "claude-code" || engine === "codex") {
     const persona = activePersona();
     if (!persona) return;
@@ -5199,7 +5101,7 @@ els.permissionMode?.addEventListener("change", async () => {
         key: persona.key,
         agentEngine: engine,
         engineConfig: {
-          ...engineConfigForPersona(persona),
+          ...window.aimashiEngineOptions.engineConfigForPersona(persona),
           permissionMode: mode
         }
       });

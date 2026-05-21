@@ -75,6 +75,7 @@ const required = [
   "src/renderer/scrollbar-overlay.js",
   "src/renderer/format-helpers.js",
   "src/renderer/model-helpers.js",
+  "src/renderer/engine-options.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",
