@@ -457,10 +457,10 @@ function renderConversationList() {
     let color = "#5e5ce6";
     if (it.kind === "room") color = it.isDM ? "#5e5ce6" : "#34c759";
     if (it.kind === "desktop") color = "#ff9f0a"; // desktop fellow = orange tint
-    // Only use the avatar URL if it's absolute or a data URL — desktop syncs
-    // store relative paths like ./assets/avatar-08.png that don't exist on
-    // the cloud-served web origin, so fall back to the colored letter circle.
-    const useAvatar = it.avatar && (/^(https?:|data:)/i.test(it.avatar));
+    // Accept absolute URLs, data URLs, and relative ./assets/... paths
+    // (the cloud release bundles preset avatars under web/assets/ so
+    // ./assets/avatars-pet/05.png resolves against the web origin).
+    const useAvatar = it.avatar && (/^(https?:|data:|\.?\/assets\/)/i.test(it.avatar));
     const avatarStyle = useAvatar
       ? `background-image:url('${escapeHtml(it.avatar)}'); background-size:cover; background-position:center;`
       : `background-color:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
@@ -683,7 +683,7 @@ function renderActiveChat() {
     const conv = activeWorkspaceConversation();
     if (!conv) { setComposerEnabled(false, "对话不存在"); return; }
     els.activeAvatar.textContent = "";
-    const useAvatar = conv.avatar && (/^(https?:|data:)/i.test(conv.avatar));
+    const useAvatar = conv.avatar && (/^(https?:|data:|\.?\/assets\/)/i.test(conv.avatar));
     if (useAvatar) {
       els.activeAvatar.style.backgroundImage = `url('${conv.avatar}')`;
       els.activeAvatar.style.backgroundSize = "cover";
