@@ -262,7 +262,7 @@ p {
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
-  background: var(--accent);
+  background: #ff3b30;
   color: #fff;
   font-size: 10px;
   font-style: normal;
@@ -353,21 +353,28 @@ p {
   grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  width: calc(100% - 14px);
+  width: 100%;
   min-height: 60px;
-  margin: 0 7px;
+  margin: 0;
   padding: 9px 10px;
-  border-radius: 11px;
+  border-radius: inherit;
   background: transparent;
   color: var(--text);
   text-align: left;
 }
 
-.persona:hover {
+/* Hover/active live on the row wrapper so the highlight fills the full card
+   rectangle symmetrically (including the gap reserved for the ⋯ menu). */
+.persona-row {
+  position: relative;
+  display: block;
+  margin: 0 7px;
+  border-radius: 11px;
+}
+.persona-row:hover {
   background: var(--hover);
 }
-
-.persona.active {
+.persona-row.active {
   background: var(--list-active);
 }
 
@@ -1498,16 +1505,7 @@ p {
   color: inherit;
 }
 
-/* ── per-conversation row + ⋯ menu ──────────────────────────────────────── */
-
-.persona-row {
-  position: relative;
-  display: block;
-}
-
-.persona-row > .persona {
-  width: 100%;
-}
+/* ── per-conversation ⋯ menu (.persona-row hover/active above) ──────────── */
 
 .persona-more {
   position: absolute;

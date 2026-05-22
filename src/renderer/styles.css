@@ -358,7 +358,7 @@ body.window-blurred .traffic-spacer:hover .traffic-light.green {
   height: 16px;
   border-radius: 8px;
   padding: 0 4px;
-  background: var(--accent, #0162db);
+  background: #ff3b30;
   color: #fff;
   font-size: 10px;
   line-height: 16px;
@@ -980,7 +980,7 @@ body.sidebar-resizing * {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--accent);
+  background: #ff3b30;
   color: #fff;
   font-size: 10px;
   line-height: 18px;

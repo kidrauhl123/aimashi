@@ -22,7 +22,12 @@
     messageCache: new Map(),
     activeRoomId: null,
     myUsername: "",
-    myUserId: ""
+    myUserId: "",
+    // unreadByRoom: roomId → count. Bumped by WS room.message_appended when
+    // the message is from someone else and the room isn't currently open.
+    // Cleared by setActiveRoomId (and on bootstrap — incomingRequests path
+    // doesn't update this, only message activity does).
+    unreadByRoom: new Map()
   };
 
   let deps = null;
@@ -219,11 +224,19 @@
       }
       const entry = moduleState.messageCache.get(roomId);
       // De-dup by id
-      if (!entry.messages.find((m) => m.id === message.id)) {
+      const fresh = !entry.messages.find((m) => m.id === message.id);
+      if (fresh) {
         entry.messages.push(message);
         entry.messages.sort((a, b) => a.seq - b.seq);
       }
       if (message.seq > entry.maxSeq) entry.maxSeq = message.seq;
+
+      // Unread bookkeeping: count messages that aren't mine and didn't land
+      // in the currently open room.
+      const isMine = message.sender_kind === "user" && message.sender_ref === moduleState.myUserId;
+      if (fresh && !isMine && roomId !== moduleState.activeRoomId) {
+        moduleState.unreadByRoom.set(roomId, (moduleState.unreadByRoom.get(roomId) || 0) + 1);
+      }
 
       // If this is the active room, append to DOM directly for snappy UX.
       if (roomId === moduleState.activeRoomId) {
@@ -739,7 +752,16 @@
   // ── getters / setters ─────────────────────────────────────────────────────
 
   function getActiveRoomId() { return moduleState.activeRoomId; }
-  function setActiveRoomId(id) { moduleState.activeRoomId = id || null; }
+  function setActiveRoomId(id) {
+    moduleState.activeRoomId = id || null;
+    if (id) moduleState.unreadByRoom.delete(id);
+  }
+  function getUnreadForRoom(roomId) { return moduleState.unreadByRoom.get(roomId) || 0; }
+  function getTotalRoomUnread() {
+    let total = 0;
+    for (const n of moduleState.unreadByRoom.values()) total += n;
+    return total;
+  }
 
   // ── exports ───────────────────────────────────────────────────────────────
 
@@ -769,6 +791,8 @@
     sendInActiveGroupRoom,
     getActiveRoomId,
     setActiveRoomId,
+    getUnreadForRoom,
+    getTotalRoomUnread,
     _internalCtx
   };
 })(typeof window !== "undefined" ? window : globalThis);

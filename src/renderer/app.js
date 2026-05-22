@@ -337,6 +337,7 @@ const els = {
   mobileRelayHint: document.getElementById("mobileRelayHint"),
   tasksUnreadBadge: document.getElementById("tasksUnreadBadge"),
   contactsUnreadBadge: document.getElementById("contactsUnreadBadge"),
+  chatUnreadBadge: document.getElementById("chatUnreadBadge"),
   tasksSidebar: document.getElementById("tasksSidebar"),
   tasksNav: document.getElementById("tasksNav"),
   tasksView: document.getElementById("tasksView"),
@@ -1209,6 +1210,10 @@ function render() {
       const activeRoomId = window.aimashiSocial?.getActiveRoomId?.();
       dmBtn.className = `persona message-card private-message-card${room.id === activeRoomId ? " active" : ""}`;
       const dmColor = "#5e5ce6";
+      const dmUnread = window.aimashiSocial?.getUnreadForRoom?.(room.id) || 0;
+      const dmUnreadHtml = dmUnread > 0
+        ? `<span class="persona-side"><span class="persona-unread" aria-label="${dmUnread} 条未读">${dmUnread > 99 ? "99+" : dmUnread}</span></span>`
+        : "";
       dmBtn.innerHTML = `
         <span class="avatar fellow-photo" style="background-color:${window.aimashiMarkdown.escapeHtml(dmColor)}; color:#fff; display:flex; align-items:center; justify-content:center;">${window.aimashiMarkdown.escapeHtml((otherName[0] || "?").toUpperCase())}</span>
         <span class="persona-main">
@@ -1218,6 +1223,7 @@ function render() {
           </span>
           <span class="persona-key">${window.aimashiMarkdown.escapeHtml(dmPreview)}</span>
         </span>
+        ${dmUnreadHtml}
       `;
       dmBtn.addEventListener("click", () => {
         state.activeKey = "";
@@ -1240,6 +1246,10 @@ function render() {
       grBtn.className = `persona message-card group-persona${groom.id === activeRoomId ? " active" : ""}`;
       const grColor = window.aimashiAvatar ? "#5e5ce6" : "#5e5ce6";
       const memberCountText = groom.memberCount ? ` · ${groom.memberCount}人` : "";
+      const grUnread = window.aimashiSocial?.getUnreadForRoom?.(groom.id) || 0;
+      const grUnreadHtml = grUnread > 0
+        ? `<span class="persona-side"><span class="persona-unread" aria-label="${grUnread} 条未读">${grUnread > 99 ? "99+" : grUnread}</span></span>`
+        : "";
       grBtn.innerHTML = `
         <span class="avatar group-avatar" style="background-color:${window.aimashiMarkdown.escapeHtml(grColor)}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px;">${window.aimashiMarkdown.escapeHtml((groom.name[0] || "G").toUpperCase())}</span>
         <span class="persona-main">
@@ -1249,6 +1259,7 @@ function render() {
           </span>
           <span class="persona-key">${window.aimashiMarkdown.escapeHtml(grPreview)}</span>
         </span>
+        ${grUnreadHtml}
       `;
       grBtn.addEventListener("click", () => {
         state.activeKey = "";
@@ -1369,6 +1380,16 @@ function renderView() {
       els.contactsUnreadBadge.textContent = String(incomingCount > 99 ? "99+" : incomingCount);
     } else {
       els.contactsUnreadBadge.classList.add("hidden");
+    }
+  }
+  // Chat unread = total unread DM/group room messages.
+  const roomUnread = window.aimashiSocial?.getTotalRoomUnread?.() || 0;
+  if (els.chatUnreadBadge) {
+    if (roomUnread > 0) {
+      els.chatUnreadBadge.classList.remove("hidden");
+      els.chatUnreadBadge.textContent = String(roomUnread > 99 ? "99+" : roomUnread);
+    } else {
+      els.chatUnreadBadge.classList.add("hidden");
     }
   }
   els.fellowDialog?.classList.toggle("hidden", !state.fellowDialogOpen);
