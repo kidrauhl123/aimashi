@@ -8,7 +8,15 @@
   const conductorModule = (typeof window !== "undefined" && window.aimashiConductor)
     ? window.aimashiConductor
     : (typeof require !== "undefined" ? require("./conductor.js") : {});
+  const responseModeModule = (typeof window !== "undefined" && window.aimashiGroupResponseMode)
+    ? window.aimashiGroupResponseMode
+    : (typeof require !== "undefined" ? require("./response-mode.js") : {});
   const { createConductor } = conductorModule || {};
+  const {
+    GROUP_RESPONSE_MODE,
+    groupResponseMode,
+    groupResponseModePatch,
+  } = responseModeModule || {};
   // parseMentions/filterRecentTurnsForFellow/etc. accessed via promptsModule when needed.
 
   const moduleState = {
@@ -283,50 +291,159 @@
       return;
     }
     const membersBox = document.getElementById("groupInfoMembers");
-    const hostSelect = document.getElementById("groupInfoHost");
     const nameInput = document.getElementById("groupInfoName");
-    const nameSaveBtn = document.getElementById("groupInfoNameSave");
     const goalInput = document.getElementById("groupInfoGoal");
     const closeBtn = document.getElementById("groupInfoClose");
-    const goalSaveBtn = document.getElementById("groupInfoGoalSave");
     const resetCtxBtn = document.getElementById("groupInfoResetCtx");
+    const responseModeEl = document.getElementById("groupInfoResponseMode");
+    const addMemberToggle = document.getElementById("groupInfoAddMemberToggle");
+    const addableBox = document.getElementById("groupInfoAddable");
 
     const infoFellowNamesById = currentFellowNamesById();
     if (nameInput) nameInput.value = group.name || "";
-    if (nameInput && nameSaveBtn) {
-      nameSaveBtn.onclick = async () => {
-        const name = nameInput.value.trim() || "未命名群聊";
-        group.name = name;
-        try {
-          Object.assign(group, await window.aimashi.groups.update(group.id, { name }));
-          nameSaveBtn.textContent = "已保存";
-          setTimeout(() => { nameSaveBtn.textContent = "保存群名"; }, 1500);
-          triggerRender();
-        } catch (e) {
-          console.warn("[group] save name failed:", e);
-          alert("保存群名失败：" + (e && e.message ? e.message : String(e)));
-        }
-      };
+    if (goalInput) goalInput.value = (group.decorations && group.decorations.pinnedGoal) || "";
+    refreshResponseModeOptions();
+
+    function fellowById(fellowId) {
+      return currentFellows().find((f) => (f.id || f.key) === fellowId) || null;
+    }
+
+    function applyMemberAvatar(avatarEl, fellow, fellowId) {
+      const color = fellow?.color || "#5e5ce6";
+      if (typeof window.aimashiAvatar?.avatarThumbBackgroundStyle === "function") {
+        const image = fellow?.avatarImage || (typeof window.aimashiAvatar?.avatarAssetForKey === "function" ? window.aimashiAvatar.avatarAssetForKey(fellowId) : "");
+        const style = window.aimashiAvatar.avatarThumbBackgroundStyle(image, fellow?.avatarCrop, color);
+        avatarEl.style.cssText = style && style.trim() ? style : "background-color:" + color + ";";
+      } else {
+        avatarEl.style.background = color;
+      }
+    }
+
+    async function saveGroupNameIfChanged() {
+      if (!nameInput) return;
+      const name = nameInput.value.trim() || "未命名群聊";
+      if (name === (group.name || "未命名群聊")) return;
+      group.name = name;
+      try {
+        Object.assign(group, await window.aimashi.groups.update(group.id, { name }));
+        triggerRender();
+      } catch (e) {
+        console.warn("[group] save name failed:", e);
+        alert("保存群名失败：" + (e && e.message ? e.message : String(e)));
+      }
+    }
+
+    async function saveGoalIfChanged() {
+      if (!goalInput) return;
+      const goal = goalInput.value.trim();
+      const previous = (group.decorations && group.decorations.pinnedGoal) || "";
+      if (goal === previous) return;
+      const decorations = { ...(group.decorations || {}), pinnedGoal: goal || null };
+      group.decorations = decorations;
+      try {
+        Object.assign(group, await window.aimashi.groups.update(group.id, { decorations }));
+        triggerRender();
+      } catch (e) {
+        console.warn("[group] save goal failed:", e);
+      }
+    }
+
+    async function setHostMember(group, memberId) {
+      if (!memberId || memberId === getHostFellowId(group)) return;
+      group.hostMember = fellowMember(memberId);
+      try {
+        Object.assign(group, await window.aimashi.groups.update(group.id, { hostMember: fellowMember(memberId) }));
+        triggerRender();
+      } catch (e) {
+        console.warn("[group] host switch failed:", e);
+        return;
+      }
+      renderActiveGroup(group);
+      refreshMembers();
+    }
+
+    function refreshResponseModeOptions() {
+      if (!responseModeEl) return;
+      const mode = groupResponseMode ? groupResponseMode(group) : "conductor";
+      responseModeEl.querySelectorAll("[data-group-response-mode]").forEach((button) => {
+        const selected = button.dataset.groupResponseMode === mode;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-checked", selected ? "true" : "false");
+      });
+    }
+
+    async function onResponseModeClick(event) {
+      const button = event.target.closest("[data-group-response-mode]");
+      if (!button || !responseModeEl.contains(button)) return;
+      const nextMode = button.dataset.groupResponseMode || GROUP_RESPONSE_MODE?.Conductor || "conductor";
+      const patch = groupResponseModePatch
+        ? groupResponseModePatch(group, nextMode)
+        : { decorations: { ...(group.decorations || {}), responseMode: nextMode } };
+      group.decorations = patch.decorations;
+      refreshResponseModeOptions();
+      try {
+        Object.assign(group, await window.aimashi.groups.update(group.id, patch));
+        triggerRender();
+        refreshResponseModeOptions();
+      } catch (e) {
+        console.warn("[group] response mode save failed:", e);
+        alert("保存回复模式失败：" + (e && e.message ? e.message : String(e)));
+      }
     }
 
     function refreshMembers() {
       membersBox.innerHTML = "";
       for (const memberId of memberFellowIds(group)) {
+        const fellow = fellowById(memberId);
         const row = document.createElement("div");
         row.className = "group-info-member-row";
+        const main = document.createElement("span");
+        main.className = "group-info-member-main";
+        const avatarEl = document.createElement("span");
+        avatarEl.className = "member-avatar";
+        applyMemberAvatar(avatarEl, fellow, memberId);
         const label = document.createElement("span");
         label.className = "group-info-member-name";
-        label.textContent = (infoFellowNamesById[memberId] || memberId) +
-          (memberId === getHostFellowId(group) ? " 👑" : "");
-        row.appendChild(label);
-        if (memberFellowIds(group).length > 1) {
-          const removeBtn = document.createElement("button");
-          removeBtn.type = "button";
-          removeBtn.className = "group-info-remove-btn";
-          removeBtn.textContent = "移除";
-          removeBtn.addEventListener("click", () => removeMember(group, memberId));
-          row.appendChild(removeBtn);
+        label.textContent = infoFellowNamesById[memberId] || memberId;
+        if (memberId === getHostFellowId(group)) {
+          const crown = document.createElement("span");
+          crown.className = "group-info-host-badge";
+          crown.textContent = "群主";
+          label.appendChild(crown);
         }
+        main.appendChild(avatarEl);
+        main.appendChild(label);
+        row.appendChild(main);
+        const actions = document.createElement("span");
+        actions.className = "group-info-member-actions";
+        const actionButton = document.createElement("button");
+        actionButton.type = "button";
+        actionButton.className = "group-info-member-action-button";
+        actionButton.setAttribute("aria-label", "成员操作");
+        actionButton.textContent = "⋯";
+        const actionMenu = document.createElement("span");
+        actionMenu.className = "group-info-member-action-menu hidden";
+        actionMenu.innerHTML = `
+          <button type="button" data-group-member-action="set-host" ${memberId === getHostFellowId(group) ? "disabled" : ""}>设为群主</button>
+          <button type="button" data-group-member-action="remove" ${memberFellowIds(group).length <= 1 ? "disabled" : ""}>移除群聊</button>
+        `;
+        actionButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          membersBox.querySelectorAll(".group-info-member-action-menu").forEach((menu) => {
+            if (menu !== actionMenu) menu.classList.add("hidden");
+          });
+          actionMenu.classList.toggle("hidden");
+        });
+        actionMenu.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-group-member-action]");
+          if (!button || button.disabled) return;
+          actionMenu.classList.add("hidden");
+          if (button.dataset.groupMemberAction === "set-host") setHostMember(group, memberId);
+          if (button.dataset.groupMemberAction === "remove") removeMember(group, memberId);
+        });
+        actions.appendChild(actionButton);
+        actions.appendChild(actionMenu);
+        row.appendChild(actions);
         membersBox.appendChild(row);
       }
     }
@@ -334,10 +451,12 @@
     refreshMembers();
 
     // Render addable-members section
-    const addableBox = document.getElementById("groupInfoAddable");
     function refreshAddable() {
       if (!addableBox) return;
       addableBox.innerHTML = "";
+      if (addMemberToggle) {
+        addMemberToggle.classList.toggle("hidden", memberFellowIds(group).length >= 5);
+      }
       if (memberFellowIds(group).length >= 5) {
         const full = document.createElement("p");
         full.className = "group-info-addable-full";
@@ -410,49 +529,14 @@
           triggerRender();
           const chatEl = document.getElementById("chat");
           if (chatEl) renderGroupMessagesIntoChat(group, msgs, chatEl);
-          openInfoDialog(group);
+          addableBox.classList.add("hidden");
+          refreshMembers();
+          refreshAddable();
         });
         addableBox.appendChild(row);
       }
     }
     refreshAddable();
-
-    hostSelect.innerHTML = "";
-    for (const memberId of memberFellowIds(group)) {
-      const opt = document.createElement("option");
-      opt.value = memberId;
-      opt.textContent = infoFellowNamesById[memberId] || memberId;
-      if (memberId === getHostFellowId(group)) opt.selected = true;
-      hostSelect.appendChild(opt);
-    }
-    hostSelect.onchange = async () => {
-      const newHost = hostSelect.value;
-      group.hostMember = fellowMember(newHost);
-      try {
-        Object.assign(group, await window.aimashi.groups.update(group.id, { hostMember: fellowMember(newHost) }));
-        triggerRender();
-      } catch (e) {
-        console.warn("[group] host switch failed:", e);
-        return;
-      }
-      renderActiveGroup(group);
-      refreshMembers();
-    };
-
-    goalInput.value = (group.decorations && group.decorations.pinnedGoal) || "";
-    goalSaveBtn.onclick = async () => {
-      const goal = goalInput.value.trim();
-      const decorations = { ...(group.decorations || {}), pinnedGoal: goal || null };
-      group.decorations = decorations;
-      try {
-        Object.assign(group, await window.aimashi.groups.update(group.id, { decorations }));
-        goalSaveBtn.textContent = "已保存";
-        setTimeout(() => { goalSaveBtn.textContent = "保存目标"; }, 1500);
-        triggerRender();
-      } catch (e) {
-        console.warn("[group] save goal failed:", e);
-      }
-    };
 
     resetCtxBtn.onclick = async () => {
       if (!confirm("重置群上下文摘要？后续 Fellow 看不到旧摘要，得重新攒一遍。")) return;
@@ -465,11 +549,22 @@
       }
     };
 
+    function onAddMemberToggleClick() {
+      if (!addableBox) return;
+      addableBox.classList.toggle("hidden");
+    }
+
     dialog.classList.remove("hidden");
 
     function close() {
       dialog.classList.add("hidden");
       closeBtn.removeEventListener("click", onClose);
+      responseModeEl?.removeEventListener("click", onResponseModeClick);
+      addMemberToggle?.removeEventListener("click", onAddMemberToggleClick);
+      nameInput?.removeEventListener("blur", saveGroupNameIfChanged);
+      nameInput?.removeEventListener("change", saveGroupNameIfChanged);
+      goalInput?.removeEventListener("blur", saveGoalIfChanged);
+      goalInput?.removeEventListener("change", saveGoalIfChanged);
       document.removeEventListener("keydown", onEsc);
       dialog.removeEventListener("click", onBackdropClick);
     }
@@ -479,6 +574,12 @@
     function onBackdropClick(e) { if (e.target === dialog) close(); }
 
     closeBtn.addEventListener("click", onClose);
+    responseModeEl?.addEventListener("click", onResponseModeClick);
+    addMemberToggle?.addEventListener("click", onAddMemberToggleClick);
+    nameInput?.addEventListener("blur", saveGroupNameIfChanged);
+    nameInput?.addEventListener("change", saveGroupNameIfChanged);
+    goalInput?.addEventListener("blur", saveGoalIfChanged);
+    goalInput?.addEventListener("change", saveGoalIfChanged);
     document.addEventListener("keydown", onEsc);
     dialog.addEventListener("click", onBackdropClick);
   }
@@ -675,8 +776,11 @@
 
     const members = currentFellows().filter((f) => memberFellowIds(group).includes(f.id || f.key));
 
+    const mode = groupResponseMode ? groupResponseMode(group) : "conductor";
     let dispatch;
-    if (moduleState.conductor) {
+    if (mode === (GROUP_RESPONSE_MODE?.MentionsOnly || "mentions-only")) {
+      dispatch = { speak: mentions.filter((id) => memberFellowIds(group).includes(id)) };
+    } else if (moduleState.conductor) {
       try {
         dispatch = await moduleState.conductor.decideDispatch({
           group,
@@ -730,6 +834,7 @@
     while (
       relayedTurns < MAX_RELAY_TURNS &&
       moduleState.relayToken === myRelayToken &&
+      mode === (GROUP_RESPONSE_MODE?.Conductor || "conductor") &&
       moduleState.conductor &&
       typeof moduleState.conductor.decideRelay === "function"
     ) {

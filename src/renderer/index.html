@@ -791,39 +791,67 @@
 
   <!-- Group info dialog — native .skill-preview-dialog style -->
   <section id="groupInfoDialog" class="skill-preview-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="groupInfoTitle">
-    <div class="skill-preview-card" style="width: min(480px, calc(100vw - 68px)); height: auto;">
+    <div class="skill-preview-card group-create-card group-info-card">
       <div class="skill-preview-toolbar">
         <div class="skill-preview-title">
-          <h2 id="groupInfoTitle">群信息</h2>
+          <h2 id="groupInfoTitle">群设置</h2>
+          <p>成员、目标和 AI 回复方式</p>
         </div>
         <button id="groupInfoClose" class="icon-button" type="button" aria-label="关闭">×</button>
       </div>
-      <div class="group-create-body">
-        <section class="group-create-section">
-          <h3>群名</h3>
+      <div class="group-info-body group-info-settings-card">
+        <div class="settings-section-label">基础</div>
+        <section class="settings-row settings-group-start">
+          <div>
+            <strong>群名</strong>
+            <p>显示在会话列表和聊天顶部。</p>
+          </div>
           <input id="groupInfoName" class="group-create-input" type="text" maxlength="40" />
-          <button id="groupInfoNameSave" class="button-soft" type="button" style="margin-top:8px;">保存群名</button>
         </section>
-        <section class="group-create-section">
-          <h3>成员</h3>
-          <div id="groupInfoMembers" class="group-info-members"></div>
+        <section class="settings-row">
+          <div>
+            <strong>AI 回复模式</strong>
+            <p>没有 @ 时，是否让协调者判断。</p>
+          </div>
+          <div id="groupInfoResponseMode" class="group-response-mode-control" role="radiogroup" aria-label="AI 回复模式">
+            <button class="group-response-mode-option active" type="button" role="radio" aria-checked="true" data-group-response-mode="conductor">
+              <span>协调者模式</span>
+              <small>默认</small>
+            </button>
+            <button class="group-response-mode-option" type="button" role="radio" aria-checked="false" data-group-response-mode="mentions-only">
+              <span>仅 @ 模式</span>
+              <small>安静</small>
+            </button>
+          </div>
         </section>
-        <section class="group-create-section">
-          <h3>添加成员</h3>
-          <div id="groupInfoAddable" class="group-info-addable"></div>
+
+        <div class="settings-section-label">成员</div>
+        <section class="settings-row settings-group-start settings-group-end group-info-members-row">
+          <div>
+            <strong>当前成员</strong>
+            <p>点右侧菜单可设群主或移除。</p>
+          </div>
+          <div class="group-info-member-panel">
+            <div id="groupInfoMembers" class="group-info-members"></div>
+            <button id="groupInfoAddMemberToggle" class="group-info-add-member-toggle" type="button">+ 添加成员</button>
+            <div id="groupInfoAddable" class="group-info-addable hidden"></div>
+          </div>
         </section>
-        <section class="group-create-section">
-          <h3>群主</h3>
-          <select id="groupInfoHost" class="group-create-select"></select>
-        </section>
-        <section class="group-create-section">
-          <h3>目标 <span class="group-create-hint">(可选)</span></h3>
+
+        <div class="settings-section-label">上下文</div>
+        <section class="settings-row settings-group-start">
+          <div>
+            <strong>目标</strong>
+            <p>给群聊一个长期方向，供 AI 协作时参考。</p>
+          </div>
           <textarea id="groupInfoGoal" class="group-create-input group-info-goal-input" maxlength="200" placeholder="比如：今天把这个 PR 写完"></textarea>
-          <button id="groupInfoGoalSave" class="button-soft" type="button" style="margin-top:8px;">保存目标</button>
         </section>
-        <section class="group-create-section">
-          <h3>维护</h3>
-          <button id="groupInfoResetCtx" class="button-soft" type="button">重置群上下文</button>
+        <section class="settings-row settings-group-end">
+          <div>
+            <strong>维护</strong>
+            <p>清掉已压缩的群上下文摘要，后续重新积累。</p>
+          </div>
+          <button id="groupInfoResetCtx" class="button-soft danger-soft" type="button">重置群上下文</button>
         </section>
       </div>
     </div>
@@ -857,6 +885,7 @@
   <!-- Group (existing modules, kept as a unit) -->
   <script src="./group/group-prompts.js"></script>
   <script src="./group/conductor.js"></script>
+  <script src="./group/response-mode.js"></script>
   <script src="./group/group.js"></script>
   <!-- Toast notifier (used by social events and other in-app announcements) -->
   <div id="appToast" class="app-toast hidden" role="status" aria-live="polite"></div>

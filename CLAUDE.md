@@ -47,23 +47,28 @@
 
 ## 代码组织
 
-**核心原则：新功能 = 新文件 / 新目录，不要往已有大文件继续堆。**
+**核心原则：避免新增或继续扩大“大杂烩”文件。**
 
-`src/main.js`（~7800 行）和 `src/renderer/app.js`（~8000 行）已经过大——AI 并行改容易撞车、人审阅看不完、bug 难定位。继续往里加东西是反向工作。
+`src/main.js`、`src/renderer/app.js`、`src/renderer/styles.css` 已经承担了过多职责。新工作应该让这些入口逐步变薄，而不是继续把不相关逻辑塞进去。判断依据不是死板行数，而是职责是否混杂、审阅是否困难、是否会让并行改动更容易冲突。
 
-### 硬规则
+### 结构规则
 
-- **单文件目标 100–500 行**；超过 800 行就该切分。对比基准：Cherry Studio `src/main/index.ts` 319 行、AionUi `src/index.ts` 862 行，Lobster 主进程根本不存在单一大入口（拆成 `agentManager.ts` / `mcpStore.ts` / `coworkStore.ts` 等十几个小文件）。
-- **新功能优先建新文件**，按特性命名（`src/renderer/<feature>.js`、`src/main/<feature>/` 或 `src/main/<feature>-xxx.js`）。**禁止**起 `utils.js` / `helpers.js` / `common.js` 这种语义无关的"桶"文件——它们最后必然变成下一个大杂烩。
+- 新功能优先放进按领域/职责命名的模块，例如 `src/main/ipc/`、`src/main/<feature>/`、`src/renderer/<feature>/`、`src/renderer/styles/<feature>.css`，再由入口文件装配。
+- 修改已明显偏大的入口文件时，除非只是极小改动，否则优先抽出清晰的子模块、共享 contract、feature stylesheet 或窄 adapter，让入口文件净减少或至少不继续膨胀。
+- 允许启动入口、协议适配、生成文件、迁移脚本、测试 fixture 暂时偏大；但不要把它当作继续混入无关职责的理由。大文件存在时，后续改动应顺手减债。
+- **禁止**起 `utils.js` / `helpers.js` / `common.js` 这种语义无关的"桶"文件——它们最后必然变成下一个大杂烩。辅助代码也要按所属领域命名。
 - **不要为单次使用提前抽象**——最小可解决问题的代码，不写"将来可能用得上"的参数 / 配置项 / 抽象层（参考 Karpathy 守则 "Simplicity First"）。
 - **改动外科手术化**：只动本次任务必要的行；不要"顺手"重命名、重排、改注释、改格式。每一行改动都要能直接追溯到用户的请求。
 - 删自己改动产生的孤立 import / 变量；**不要**删既有死代码（除非被明确要求）——它可能是别人 in-progress 的工作。
 
 ### 已经在跑的拆分样板（照抄即可）
 
-- `src/renderer/group.js`（974 行）—— IIFE + `window.aimashiGroup.initGroupModule({...deps})` 接回 `app.js`；`index.html` 末尾 `<script src="./group.js"></script>` 引入。**这是当前 renderer 端推荐的样板。**
+- `src/shared/ipc-channels.js` / `src/shared/engine-contracts.js` —— main、preload、renderer、测试共用的 contract；新增跨进程字符串先收敛到这里或所属 feature 的 contract。
+- `src/main/ipc/window-ipc.js` / `tasks-ipc.js` —— IPC 按职责注册，`main.js` 只做装配。
 - `src/main/codex-chat-adapter.js` / `claude-code-chat-adapter.js` / `hermes-chat-adapter.js` —— 三个引擎适配器各一文件，统一在 `chatEngineRegistry` 注册。
 - `src/main/scheduler*.js` + `tasks-*.js` —— 任务调度子系统，按职责分多文件。
+- `src/renderer/app-state.js`、`src/renderer/group/group.js`、`src/renderer/social/social.js` —— renderer feature 用 IIFE + `window.aimashiXxx.init...({...deps})` 接回 `app.js`。
+- `src/renderer/styles/chat.css`、`groups.css`、`tasks.css`、`responsive.css` —— CSS 按界面职责拆分，由 `index.html` 组合。
 - `src/cloud/` / `src/relay/` / `src/mobile/` / `src/web/` —— 跨设备 / 多端能力独立子目录。
 
 新功能直接照这些接口形状写新文件，不要发明新抽象层。
@@ -72,12 +77,13 @@
 
 ```
 src/
-├── main.js              ← 启动 + 装配，目标 < 500 行
+├── main.js              ← 启动 + 装配，持续变薄
 ├── main/<feature>/      ← 主进程按业务领域分子目录（chat / ipc / hermes / cloud / permissions / window 等）
 ├── renderer/
-│   ├── app.js           ← 装配 + 路由，目标 < 800 行
-│   ├── <feature>.js     ← 单特性独立文件（同 group.js 形状）
-│   └── <feature>/       ← 复杂特性给独立目录
+│   ├── app.js           ← 装配 + 路由，持续变薄
+│   ├── <feature>.js     ← 小特性单文件（同 app-state 形状）
+│   ├── <feature>/       ← 复杂特性独立目录（同 group / social 形状）
+│   └── styles/<feature>.css
 ├── preload.js
 └── cloud/  relay/  mobile/  web/  ← 已有独立子系统保持隔离
 ```
