@@ -893,6 +893,11 @@
   <!-- Shared avatar renderer (one entry point for every avatar display) -->
   <script src="./contact-avatar.js"></script>
 
+  <!-- Message source adapters (raw schema → RenderableMessageSpec) -->
+  <script src="./message-sources/fellow-session-source.js"></script>
+  <script src="./message-sources/local-group-source.js"></script>
+  <script src="./message-sources/cloud-room-source.js"></script>
+
   <!-- Unified sidebar card renderer (private / group). Used by app.js to
        render fellow chats, DM rooms, local groups and cloud rooms with the
        same path — no special-casing real-friend conversations. -->

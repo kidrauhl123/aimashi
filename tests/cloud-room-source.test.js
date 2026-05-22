@@ -1,0 +1,79 @@
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+function loadSource() {
+  const sharedSpec = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "message-spec.js"), "utf8");
+  const sharedContact = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "contact.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "message-sources", "cloud-room-source.js"), "utf8");
+  const window = {};
+  const ctx = vm.createContext({ window, globalThis: window, console });
+  vm.runInContext("globalThis.aimashiMessageSpec = (function(){ const module = { exports: {} }; " + sharedSpec + "; return module.exports; })();", ctx);
+  vm.runInContext("globalThis.aimashiContact = (function(){ const module = { exports: {} }; " + sharedContact + "; return module.exports; })();", ctx);
+  vm.runInContext(src, ctx);
+  return window.aimashiCloudRoomSource;
+}
+
+test("CloudRoomSource DM friend message uses friend avatar", () => {
+  const src = loadSource();
+  const room = { id: "dm:user_me:user_friend", name: null };
+  const messages = [
+    { id: "msg1", sender_kind: "user", sender_ref: "user_friend", body_md: "hi", created_at: "2026-05-22T01:00:00.000Z", seq: 1 }
+  ];
+  const ctx = {
+    self: { id: "user_me", username: "me" },
+    fellows: [],
+    friends: [{ id: "user_friend", username: "alice", avatarImage: "data:alice" }]
+  };
+  const source = src.createCloudRoomSource({ room, messages, members: [], ctx });
+  const spec = source.listMessages()[0];
+  assert.equal(spec.source, "cloud-room");
+  assert.equal(spec.role, "user");
+  assert.equal(spec.authorName, "alice");
+  assert.equal(spec.avatar.image, "data:alice");
+  assert.equal(spec.isOwn, false);
+});
+
+test("CloudRoomSource own message marks isOwn=true", () => {
+  const src = loadSource();
+  const room = { id: "dm:user_me:user_friend" };
+  const messages = [{ id: "msg2", sender_kind: "user", sender_ref: "user_me", body_md: "ok", created_at: "", seq: 2 }];
+  const ctx = { self: { id: "user_me", username: "me" }, fellows: [], friends: [] };
+  const source = src.createCloudRoomSource({ room, messages, members: [], ctx });
+  const spec = source.listMessages()[0];
+  assert.equal(spec.isOwn, true);
+  assert.equal(spec.authorName, "me");
+});
+
+test("CloudRoomSource group fellow message resolves fellow contact via members", () => {
+  const src = loadSource();
+  const room = { id: "g_room1", name: "Mixed" };
+  const messages = [{ id: "msg3", sender_kind: "fellow", sender_ref: "codex", body_md: "yo", created_at: "", seq: 3 }];
+  const members = [
+    { member_kind: "fellow", member_ref: "codex", owner_id: "user_friend" },
+    { member_kind: "user", member_ref: "user_friend" }
+  ];
+  const ctx = {
+    self: { id: "user_me", username: "me" },
+    fellows: [],
+    friends: [{ id: "user_friend", username: "alice" }]
+  };
+  const source = src.createCloudRoomSource({ room, messages, members, ctx });
+  const spec = source.listMessages()[0];
+  assert.equal(spec.role, "assistant");
+  assert.equal(spec.authorName, "codex (alice)");
+});
+
+test("CloudRoomSource capabilities include copy + reply but pin/delete false (no endpoint yet)", () => {
+  const src = loadSource();
+  const room = { id: "dm:a:b" };
+  const messages = [{ id: "m", sender_kind: "user", sender_ref: "a", body_md: "x", created_at: "", seq: 1 }];
+  const source = src.createCloudRoomSource({ room, messages, members: [], ctx: { self: {}, fellows: [], friends: [] } });
+  const cap = source.listMessages()[0].capabilities;
+  assert.equal(cap.copy, true);
+  assert.equal(cap.reply, true);
+  assert.equal(cap.pin, false);
+  assert.equal(cap.delete, false);
+});
