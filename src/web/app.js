@@ -412,6 +412,8 @@ function desktopConvSortKey(conv) {
 }
 
 // Unified item shape so the renderer doesn't have to branch every time.
+// Pinned items sort to the top regardless of recency, mirroring the
+// ChatGPT-style pin behavior the user asked for.
 function combinedConversationItems() {
   const room = state.rooms.map((r) => ({
     kind: "room",
@@ -419,7 +421,8 @@ function combinedConversationItems() {
     title: roomDisplayTitle(r),
     preview: roomLastMessageText(r),
     sortKey: roomSortKey(r),
-    isDM: r.id?.startsWith("dm:")
+    isDM: r.id?.startsWith("dm:"),
+    pinned: false
   }));
   const desktop = state.workspace.conversations.map((c) => ({
     kind: "desktop",
@@ -427,9 +430,13 @@ function combinedConversationItems() {
     title: c.title || "本地对话",
     preview: desktopConvLastMessageText(c),
     sortKey: desktopConvSortKey(c),
-    avatar: c.avatar
+    avatar: c.avatar,
+    pinned: Boolean(c.pinned)
   }));
-  return [...room, ...desktop].sort((a, b) => b.sortKey - a.sortKey);
+  return [...room, ...desktop].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.sortKey - a.sortKey;
+  });
 }
 
 function renderConversationList() {
@@ -458,16 +465,128 @@ function renderConversationList() {
       ? `background-image:url('${escapeHtml(it.avatar)}'); background-size:cover; background-position:center;`
       : `background-color:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
     const avatarText = useAvatar ? "" : escapeHtml(avatarLabel);
+    // ⋯ menu is only meaningful for workspace conversations right now
+    // (cloud rooms don't have a delete/rename endpoint yet).
+    const hasMenu = it.kind === "desktop";
     return `
-      <button class="persona ${it.id === state.activeConversationId ? "active" : ""}" type="button" data-conv-id="${escapeHtml(it.id)}" data-conv-kind="${it.kind}">
-        <span class="avatar" style="${avatarStyle}">${avatarText}</span>
-        <span class="persona-main">
-          <strong class="persona-name">${escapeHtml(it.title)}</strong>
-          <span class="persona-preview">${escapeHtml(it.preview)}</span>
-        </span>
-      </button>
+      <div class="persona-row${it.pinned ? " pinned" : ""}${it.id === state.activeConversationId ? " active" : ""}">
+        <button class="persona" type="button" data-conv-id="${escapeHtml(it.id)}" data-conv-kind="${it.kind}">
+          <span class="avatar" style="${avatarStyle}">${avatarText}</span>
+          <span class="persona-main">
+            <strong class="persona-name">${it.pinned ? "📌 " : ""}${escapeHtml(it.title)}</strong>
+            <span class="persona-preview">${escapeHtml(it.preview)}</span>
+          </span>
+        </button>
+        ${hasMenu ? `<button class="persona-more" type="button" data-conv-more="${escapeHtml(it.id)}" aria-label="更多操作" title="更多操作">⋯</button>` : ""}
+      </div>
     `;
   }).join("");
+}
+
+// ── per-conversation ⋯ menu ────────────────────────────────────────────────
+
+let _convMenuEl = null;
+let _convMenuTargetId = "";
+
+function ensureConvMenuEl() {
+  if (_convMenuEl) return _convMenuEl;
+  _convMenuEl = document.createElement("div");
+  _convMenuEl.className = "conv-menu hidden";
+  document.body.appendChild(_convMenuEl);
+  document.addEventListener("click", (event) => {
+    if (_convMenuEl?.contains(event.target)) return;
+    if (event.target.closest("[data-conv-more]")) return;
+    closeConvMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeConvMenu();
+  });
+  return _convMenuEl;
+}
+
+function openConvMenu(convId, anchorButton) {
+  const el = ensureConvMenuEl();
+  _convMenuTargetId = convId;
+  const conv = state.workspace.conversations.find((c) => c.id === convId);
+  if (!conv) return;
+  const pinned = Boolean(conv.pinned);
+  el.innerHTML = `
+    <button type="button" data-conv-action="pin">${pinned ? "取消置顶" : "置顶"}</button>
+    <button type="button" data-conv-action="rename">编辑</button>
+    <button type="button" data-conv-action="delete" class="conv-menu-danger">删除</button>
+  `;
+  el.classList.remove("hidden");
+  // Anchor under-right of the ⋯ button.
+  const rect = anchorButton.getBoundingClientRect();
+  const menuW = 130;
+  const left = Math.min(window.innerWidth - menuW - 8, Math.max(8, rect.right - menuW));
+  const top = rect.bottom + 4;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function closeConvMenu() {
+  if (!_convMenuEl) return;
+  _convMenuEl.classList.add("hidden");
+  _convMenuTargetId = "";
+}
+
+// Concurrency-safe write path: send ONLY the touched conversation (and
+// optional remove list) to /api/workspace/sync. Server merges by id so a
+// stale local snapshot from this tab can't clobber updates another device
+// pushed in between.
+async function syncWorkspaceChange({ upsert = [], remove = [] }) {
+  // Optimistic local update so the UI reacts immediately.
+  const removeSet = new Set(remove);
+  const byId = new Map(upsert.map((c) => [c.id, c]));
+  const optimistic = state.workspace.conversations
+    .filter((c) => !removeSet.has(c.id))
+    .map((c) => byId.has(c.id) ? { ...c, ...byId.get(c.id) } : c);
+  for (const c of byId.values()) {
+    if (!optimistic.some((x) => x.id === c.id)) optimistic.unshift(c);
+  }
+  applyWorkspace({ ...state.workspace, conversations: optimistic });
+  if (state.activeConversationId && removeSet.has(state.activeConversationId)) {
+    state.activeConversationId = "";
+  }
+  renderConversationList();
+  renderActiveChat();
+  try {
+    const res = await api("/api/workspace/sync", {
+      method: "POST",
+      body: { conversations: upsert, removeConversationIds: remove }
+    });
+    if (res?.workspace) applyWorkspace(res.workspace);
+    renderConversationList();
+    if (state.activeConversationId) renderActiveChat();
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+async function handleConvAction(action, convId) {
+  const conv = state.workspace.conversations.find((c) => c.id === convId);
+  if (!conv) return;
+  // Metadata-only patches: send just the fields that change + id. Stripping
+  // `messages` is critical — including a stale local copy would trigger
+  // server-side merge against the latest cloud history.
+  if (action === "pin") {
+    await syncWorkspaceChange({ upsert: [{ id: conv.id, pinned: !conv.pinned }] });
+    return;
+  }
+  if (action === "rename") {
+    const title = window.prompt("新会话名称：", conv.title || "");
+    if (title === null) return;
+    const trimmed = String(title).trim();
+    if (!trimmed) return;
+    await syncWorkspaceChange({ upsert: [{ id: conv.id, title: trimmed }] });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm(`确认删除"${conv.title || "本地对话"}"？此操作会从云端永久移除该会话历史。`)) return;
+    await syncWorkspaceChange({ remove: [convId] });
+    return;
+  }
 }
 
 // ── active chat view ───────────────────────────────────────────────────────
@@ -1008,10 +1127,24 @@ els.loginForm.addEventListener("submit", (event) => {
 els.conversationSearch.addEventListener("input", renderConversationList);
 
 els.conversationList.addEventListener("click", (event) => {
+  const moreBtn = event.target.closest("[data-conv-more]");
+  if (moreBtn) {
+    event.stopPropagation();
+    openConvMenu(moreBtn.dataset.convMore, moreBtn);
+    return;
+  }
   const button = event.target.closest("[data-conv-id]");
   if (!button) return;
   setActiveConversation(button.dataset.convId);
   setPane("chat");
+});
+
+document.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-conv-action]");
+  if (!action || !_convMenuTargetId) return;
+  const id = _convMenuTargetId;
+  closeConvMenu();
+  handleConvAction(action.dataset.convAction, id);
 });
 
 els.newConversation.addEventListener("click", (event) => {

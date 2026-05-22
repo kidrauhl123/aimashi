@@ -992,6 +992,78 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { workspace });
     }
 
+    // POST /api/workspace/sync — concurrency-safe merge upsert.
+    // Body: { conversations?: [...], removeConversationIds?: [...] }
+    // Merge semantics:
+    //   - For each incoming conversation:
+    //     * If id exists in current: merge field-by-field (incoming wins
+    //       for title/pinned/avatar/meta/updatedAt). If the incoming has a
+    //       messages array, merge it with existing messages by content-key
+    //       (role|createdAt|text), preferring id-bearing copies on collision;
+    //       if not, leave existing messages untouched (metadata-only patch).
+    //     * If id is new: insert.
+    //   - removeConversationIds always wins (removed even if also in upsert).
+    if (req.method === "POST" && url.pathname === "/api/workspace/sync") {
+      const body = await readJson(req);
+      const incomingConvs = Array.isArray(body.conversations) ? body.conversations : [];
+      const removeIds = new Set(
+        (Array.isArray(body.removeConversationIds) ? body.removeConversationIds : [])
+          .map((x) => String(x))
+          .filter(Boolean)
+      );
+      const sanitizedIncoming = sanitizeCloudWorkspaceAttachments(
+        cloudStore,
+        auth.user.id,
+        { conversations: incomingConvs }
+      ).conversations || [];
+      const incomingById = new Map(
+        sanitizedIncoming
+          .filter((c) => !removeIds.has(c.id))
+          .map((c) => [c.id, c])
+      );
+      // Dedup messages by content-key (role + createdAt + text). The id is
+      // not a reliable primary key here because desktop bulk syncs send the
+      // same logical message without an id (cloudMessageFromDesktopMessage
+      // drops it). When two messages have the same content, prefer the one
+      // with an id so we keep the cloud-canonical record. Collisions only
+      // happen if a user fires two identical messages within the same ms,
+      // which is effectively impossible.
+      function contentKey(m) {
+        return `${String(m?.role || "")}|${String(m?.createdAt || "")}|${String(m?.text || "")}`;
+      }
+      function mergeMessages(existing, incoming) {
+        const map = new Map();
+        function add(m) {
+          const ck = contentKey(m);
+          const prev = map.get(ck);
+          if (!prev) { map.set(ck, m); return; }
+          if (!prev.id && m?.id) map.set(ck, m);
+        }
+        for (const m of Array.isArray(existing) ? existing : []) add(m);
+        for (const m of Array.isArray(incoming) ? incoming : []) add(m);
+        return [...map.values()].sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+      }
+      const current = cloudStore.getWorkspace(auth.user.id);
+      const merged = (Array.isArray(current.conversations) ? current.conversations : [])
+        .filter((c) => !removeIds.has(c.id))
+        .map((c) => {
+          const next = incomingById.get(c.id);
+          if (!next) return c;
+          incomingById.delete(c.id);
+          const hasMessages = Array.isArray(next.messages);
+          return {
+            ...c,
+            ...next,
+            messages: hasMessages ? mergeMessages(c.messages, next.messages) : (c.messages || [])
+          };
+        });
+      // Anything left in incomingById is brand new — prepend.
+      for (const c of incomingById.values()) merged.unshift(c);
+      const workspace = cloudStore.putWorkspace(auth.user.id, { ...current, conversations: merged });
+      broadcastEvent(context.eventHub, auth.user.id, { type: "workspace_updated", workspace });
+      return writeJson(res, 200, { workspace });
+    }
+
     if (req.method === "GET" && url.pathname === "/api/bridge/devices") {
       return writeJson(res, 200, { devices: bridgeDevices(bridgeHub, auth.user.id) });
     }

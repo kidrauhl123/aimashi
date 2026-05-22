@@ -1494,6 +1494,85 @@ p {
   color: inherit;
 }
 
+/* ── per-conversation row + ⋯ menu ──────────────────────────────────────── */
+
+.persona-row {
+  position: relative;
+  display: block;
+}
+
+.persona-row > .persona {
+  width: 100%;
+}
+
+.persona-more {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s ease-out, background 0.12s ease-out;
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.persona-row:hover .persona-more,
+.persona-more:focus-visible {
+  opacity: 1;
+}
+
+.persona-more:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.conv-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 130px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+}
+
+.conv-menu.hidden {
+  display: none;
+}
+
+.conv-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.conv-menu button:hover {
+  background: var(--hover);
+}
+
+.conv-menu .conv-menu-danger {
+  color: #ff3b30;
+}
+
+.conv-menu .conv-menu-danger:hover {
+  background: rgba(255, 59, 48, 0.12);
+}
+
 /* ── settings modal ────────────────────────────────────────────────────── */
 
 .settings-modal {

@@ -4516,10 +4516,57 @@ async function cloudApi(pathSegment, { method = "GET", body = null, token = "" }
   return data;
 }
 
+// Bulk push: build the full cloud workspace from every local chat session
+// (per persona, including messages) and PUT it to /api/workspace. This is
+// what the user expects from clicking "同步" — they want existing fellow
+// chats to appear on web/mobile, not just messages typed after login.
+function buildCloudWorkspaceFromLocalSessions() {
+  const manifest = loadFellowManifest();
+  const fellowByKey = new Map(
+    (Array.isArray(manifest.fellows) ? manifest.fellows : [])
+      .map((f) => [String(f?.key || f?.id || ""), f])
+      .filter(([key]) => key)
+  );
+  const store = loadChatStore();
+  const conversations = [];
+  for (const [personaKey, sessions] of Object.entries(store.sessions || {})) {
+    if (!Array.isArray(sessions)) continue;
+    const fellow = fellowByKey.get(personaKey) || {};
+    for (const session of sessions) {
+      if (!session?.id) continue;
+      const base = cloudConversationFromDesktopSession(session, fellow);
+      const messages = Array.isArray(session.messages)
+        ? session.messages.map(cloudMessageFromDesktopMessage)
+        : [];
+      conversations.push({ ...base, messages });
+    }
+  }
+  return { conversations };
+}
+
 async function syncAimashiCloudWorkspace() {
   const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return cloudStatus(false);
-  const data = await cloudApi("/api/me");
+  // 1. Push the full local history up to the cloud so web/mobile can see
+  //    everything that existed before this login (or before the last sync).
+  const localWorkspace = buildCloudWorkspaceFromLocalSessions();
+  let pushed = null;
+  try {
+    // Concurrency-safe sync: server merges by conversation id rather than
+    // replacing the whole array, so pushing this desktop's local sessions
+    // can't delete conversations another device already uploaded.
+    pushed = await cloudApi("/api/workspace/sync", {
+      method: "POST",
+      body: { conversations: localWorkspace.conversations }
+    });
+  } catch (error) {
+    appendCloudLog(`Aimashi Cloud sync push failed: ${error?.message || error}`);
+  }
+  // 2. Pull the merged result back so any cloud-only conversations (DM peers,
+  //    other-device sessions) also land in the local chat store.
+  const data = pushed && pushed.workspace
+    ? { user: settings.user, workspace: pushed.workspace }
+    : await cloudApi("/api/me");
   settingsStore.writeCloudSettings({ user: data.user || settings.user });
   settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
