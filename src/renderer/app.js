@@ -54,7 +54,7 @@ const state = {
   isNarrowWindow: window.innerWidth <= 720,
   sidebarWidth: savedSidebarWidth(),
   sidebarResize: { dragging: false, startX: 0, startWidth: 0 },
-  activeSettingsTab: "appearance",
+  activeSettingsTab: "account",
   mobileLanLinkExpanded: false,
   mobileRelayLinkExpanded: false,
   personaFilter: "",
@@ -68,6 +68,7 @@ const state = {
   messageContextMenu: { open: false, x: 0, y: 0, messageIndex: -1, selectionText: "" },
   replyDraft: null,
   fellowMenuOpen: false,
+  contactMenuOpen: false,
   profileDialogOpen: false,
   fellowDialogOpen: false,
   fellowDialogMode: "create",
@@ -155,7 +156,8 @@ const els = {
   personaCount: document.getElementById("personaCount"),
   fellowCreateMenu: document.getElementById("fellowCreateMenu"),
   addFellow: document.getElementById("addFellow"),
-  createGroup: document.getElementById("createGroup"),
+  convMenuAddFriend: document.getElementById("convMenuAddFriend"),
+  convMenuNewGroup: document.getElementById("convMenuNewGroup"),
   fellowDialog: document.getElementById("fellowDialog"),
   fellowForm: document.getElementById("fellowForm"),
   fellowDialogTitle: document.getElementById("fellowDialogTitle"),
@@ -197,6 +199,10 @@ const els = {
   personaList: document.getElementById("personaList"),
   contactSearch: document.getElementById("contactSearch"),
   newContact: document.getElementById("newContact"),
+  contactCreateMenu: document.getElementById("contactCreateMenu"),
+  contactMenuAddFriend: document.getElementById("contactMenuAddFriend"),
+  contactMenuAddFellow: document.getElementById("contactMenuAddFellow"),
+  contactMenuNewGroup: document.getElementById("contactMenuNewGroup"),
   contactList: document.getElementById("contactList"),
   contactPageTitle: document.getElementById("contactPageTitle"),
   contactPageMeta: document.getElementById("contactPageMeta"),
@@ -1337,8 +1343,9 @@ function render() {
 function renderView() {
   if (state.activeSettingsTab === "profile") state.activeSettingsTab = "appearance";
   if (state.activeSettingsTab === "runtime") state.activeSettingsTab = "model";
+  if (state.activeSettingsTab === "mobile") state.activeSettingsTab = "account";
   if (!document.querySelector(`[data-settings-tab="${state.activeSettingsTab}"]`)) {
-    state.activeSettingsTab = "appearance";
+    state.activeSettingsTab = "account";
   }
   syncNarrowLayout();
   els.conversationSidebar?.classList.toggle("hidden", state.activeView !== "chat");
@@ -1352,6 +1359,7 @@ function renderView() {
   els.settingsView.classList.toggle("hidden", !state.settingsOpen);
   els.profileDialog?.classList.toggle("hidden", !state.profileDialogOpen);
   els.fellowCreateMenu?.classList.toggle("hidden", !state.fellowMenuOpen);
+  els.contactCreateMenu?.classList.toggle("hidden", !state.contactMenuOpen);
   els.fellowDialog?.classList.toggle("hidden", !state.fellowDialogOpen);
   els.petGenerateDialog?.classList.toggle("hidden", !state.petGenerateOpen);
   els.avatarCropDialog?.classList.toggle("hidden", !state.avatarCropEditor.open);
@@ -2273,7 +2281,7 @@ els.openSettings.addEventListener("click", () => {
   state.settingsOpen = true;
   if (state.activeSettingsTab === "profile") state.activeSettingsTab = "appearance";
   renderView();
-  if (state.activeSettingsTab === "mobile") {
+  if (state.activeSettingsTab === "account") {
     window.aimashiSettingsRemote.refreshDaemonPairing().catch(console.error);
     window.aimashiSettingsRemote.refreshRelayPairing().catch(console.error);
   }
@@ -2346,6 +2354,12 @@ document.addEventListener("click", (event) => {
   if (!state.fellowMenuOpen) return;
   if (els.fellowCreateMenu?.contains(event.target) || els.newPersona?.contains(event.target)) return;
   state.fellowMenuOpen = false;
+  renderView();
+});
+document.addEventListener("click", (event) => {
+  if (!state.contactMenuOpen) return;
+  if (els.contactCreateMenu?.contains(event.target) || els.newContact?.contains(event.target)) return;
+  state.contactMenuOpen = false;
   renderView();
 });
 document.addEventListener("click", (event) => {
@@ -2477,7 +2491,7 @@ document.querySelectorAll("[data-settings-tab]").forEach((button) => {
   button.addEventListener("click", () => {
     state.activeSettingsTab = button.dataset.settingsTab;
     renderView();
-    if (state.activeSettingsTab === "mobile") {
+    if (state.activeSettingsTab === "account") {
       window.aimashiSettingsRemote.refreshDaemonPairing().catch(console.error);
       window.aimashiSettingsRemote.refreshRelayPairing().catch(console.error);
     }
@@ -2949,32 +2963,41 @@ els.newPersona.addEventListener("click", (event) => {
   renderView();
 });
 
-els.addFellow?.addEventListener("click", () => window.aimashiFellowDialog.openFellowDialog());
-els.newContact?.addEventListener("click", () => window.aimashiFellowDialog.openFellowDialog());
-// Add-friend + new-group buttons: inject next to newContact in the contacts sidebar header
-(function injectSocialHeaderButtons() {
-  const container = els.newContact?.parentElement;
-  if (!container) return;
-  const friendBtn = document.createElement("button");
-  friendBtn.id = "addFriendBtn";
-  friendBtn.className = "icon-button";
-  friendBtn.type = "button";
-  friendBtn.title = "添加好友";
-  friendBtn.setAttribute("aria-label", "添加好友");
-  friendBtn.textContent = "🤝";
-  friendBtn.addEventListener("click", () => window.aimashiSocial?.openAddFriendDialog?.());
-  container.appendChild(friendBtn);
-
-  const groupBtn = document.createElement("button");
-  groupBtn.id = "newGroupRoomBtn";
-  groupBtn.className = "icon-button";
-  groupBtn.type = "button";
-  groupBtn.title = "新建群聊";
-  groupBtn.setAttribute("aria-label", "新建群聊");
-  groupBtn.textContent = "👥";
-  groupBtn.addEventListener("click", () => window.aimashiSocial?.openCreateGroupDialog?.());
-  container.appendChild(groupBtn);
-})();
+els.convMenuAddFriend?.addEventListener("click", () => {
+  state.fellowMenuOpen = false;
+  renderView();
+  window.aimashiSocial?.openAddFriendDialog?.();
+});
+els.addFellow?.addEventListener("click", () => {
+  state.fellowMenuOpen = false;
+  renderView();
+  window.aimashiFellowDialog.openFellowDialog();
+});
+els.convMenuNewGroup?.addEventListener("click", () => {
+  state.fellowMenuOpen = false;
+  renderView();
+  window.aimashiSocial?.openCreateGroupDialog?.();
+});
+els.newContact?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  state.contactMenuOpen = !state.contactMenuOpen;
+  renderView();
+});
+els.contactMenuAddFriend?.addEventListener("click", () => {
+  state.contactMenuOpen = false;
+  renderView();
+  window.aimashiSocial?.openAddFriendDialog?.();
+});
+els.contactMenuAddFellow?.addEventListener("click", () => {
+  state.contactMenuOpen = false;
+  renderView();
+  window.aimashiFellowDialog.openFellowDialog();
+});
+els.contactMenuNewGroup?.addEventListener("click", () => {
+  state.contactMenuOpen = false;
+  renderView();
+  window.aimashiSocial?.openCreateGroupDialog?.();
+});
 els.userAvatar?.addEventListener("click", () => window.aimashiFellowDialog.openProfileDialog());
 els.userAvatar?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;

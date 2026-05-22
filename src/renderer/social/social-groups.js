@@ -172,155 +172,167 @@
   }
 
   // ── openCreateGroupDialog ─────────────────────────────────────────────────
-
-  let _createGroupModal = null;
+  // Reuses the existing #groupCreateDialog DOM (rail #1's UI). Members are a
+  // single mixed list of friends + own fellows — the frontend treats them as
+  // unified "contacts"; the kind tag is only needed when posting to /api/rooms.
 
   function openCreateGroupDialog() {
-    if (!document.body) return;
-    if (!_createGroupModal) {
-      _createGroupModal = document.createElement("section");
-      _createGroupModal.className = "skill-preview-dialog hidden";
-      _createGroupModal.setAttribute("role", "dialog");
-      _createGroupModal.setAttribute("aria-modal", "true");
-      document.body.appendChild(_createGroupModal);
+    const dialog = document.getElementById("groupCreateDialog");
+    if (!dialog) {
+      console.error("[social-groups] groupCreateDialog DOM missing");
+      return;
+    }
+    const { moduleState, deps, roomMembersCache, dedup } = ctx;
+    const membersBox = document.getElementById("groupCreateMembers");
+    const hostSection = document.getElementById("groupCreateHost")?.closest(".group-create-section");
+    const nameInput = document.getElementById("groupCreateName");
+    const countEl = document.getElementById("groupCreateCount");
+    const confirmBtn = document.getElementById("groupCreateConfirm");
+    const cancelBtn = document.getElementById("groupCreateCancel");
+    const closeBtn = document.getElementById("groupCreateClose");
+
+    const MAX_MEMBERS = 5;
+    const selected = new Map(); // key `${kind}:${id}` → { kind, id, name }
+
+    // Cloud rooms have no "host fellow" concept — hide that section while open.
+    const prevHostDisplay = hostSection ? hostSection.style.display : "";
+    if (hostSection) hostSection.style.display = "none";
+
+    function refreshCount() {
+      if (countEl) countEl.textContent = String(selected.size);
+      if (confirmBtn) confirmBtn.disabled = selected.size < 1;
     }
 
-    function onEsc(e) { if (e.key === "Escape") close(); }
-    function onBackdrop(e) { if (e.target === _createGroupModal) close(); }
-    function close() {
-      _createGroupModal.classList.add("hidden");
-      document.removeEventListener("keydown", onEsc);
-      _createGroupModal.removeEventListener("click", onBackdrop);
-    }
-    _createGroupModal._closeModal = close;
+    function buildRow(entry) {
+      const key = `${entry.kind}:${entry.id}`;
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "group-create-member-row";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", "false");
+      row.dataset.memberKey = key;
 
-    _renderCreateGroupModal(_createGroupModal);
-    _createGroupModal.classList.remove("hidden");
-    document.addEventListener("keydown", onEsc);
-    _createGroupModal.addEventListener("click", onBackdrop);
-  }
-
-  function _renderCreateGroupModal(modal) {
-    const { moduleState, deps, roomMembersCache, dedup, escapeHtml } = ctx;
-    const closeModal = modal._closeModal || (() => modal.classList.add("hidden"));
-    modal.innerHTML = "";
-
-    const card = document.createElement("div");
-    card.className = "skill-preview-card";
-    card.style.cssText = "width:min(480px,calc(100vw - 68px)); height:auto; max-height:85vh; overflow-y:auto;";
-
-    const toolbar = document.createElement("div");
-    toolbar.className = "skill-preview-toolbar";
-    toolbar.innerHTML = `<div class="skill-preview-title"><h2>新建群聊</h2></div>`;
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "icon-button";
-    closeBtn.type = "button";
-    closeBtn.setAttribute("aria-label", "关闭");
-    closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", closeModal);
-    toolbar.appendChild(closeBtn);
-    card.appendChild(toolbar);
-
-    const body = document.createElement("div");
-    body.className = "group-create-body";
-
-    // Group name input
-    const nameSection = document.createElement("section");
-    nameSection.className = "group-create-section";
-    nameSection.innerHTML = `
-      <div class="group-create-section-header"><span class="group-create-section-title">群名</span></div>
-      <input id="cgGroupNameInput" class="group-create-input" type="text" maxlength="80" placeholder="输入群聊名称（必填）" style="width:100%; margin-top:6px;">
-    `;
-    body.appendChild(nameSection);
-
-    // Select friends section
-    const friendsSection = document.createElement("section");
-    friendsSection.className = "group-create-section";
-    const friendsHeader = document.createElement("div");
-    friendsHeader.className = "group-create-section-header";
-    friendsHeader.innerHTML = `<span class="group-create-section-title">选择朋友</span>`;
-    friendsSection.appendChild(friendsHeader);
-    const friendsList = document.createElement("div");
-    friendsList.id = "cgFriendsList";
-    if (moduleState.friends.length === 0) {
-      friendsList.innerHTML = `<p style="color:var(--fg-muted,#888); font-size:13px; margin:6px 0;">暂无好友</p>`;
-    } else {
-      for (const friend of moduleState.friends) {
-        const row = document.createElement("label");
-        row.style.cssText = "display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer;";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.value = friend.id;
-        cb.dataset.kind = "friend";
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = friend.username || friend.account || friend.id;
-        row.appendChild(cb);
-        row.appendChild(nameSpan);
-        friendsList.appendChild(row);
+      const avatarEl = document.createElement("span");
+      avatarEl.className = "member-avatar";
+      if (entry.image && typeof window.aimashiAvatar?.avatarThumbBackgroundStyle === "function") {
+        avatarEl.style.cssText = window.aimashiAvatar.avatarThumbBackgroundStyle(entry.image, entry.crop, entry.color);
+      } else {
+        avatarEl.style.background = entry.color;
       }
-    }
-    friendsSection.appendChild(friendsList);
-    body.appendChild(friendsSection);
 
-    // Select own fellows section
-    const fellowsSection = document.createElement("section");
-    fellowsSection.className = "group-create-section";
-    const fellowsHeader = document.createElement("div");
-    fellowsHeader.className = "group-create-section-header";
-    fellowsHeader.innerHTML = `<span class="group-create-section-title">拉自己的 Fellow</span>`;
-    fellowsSection.appendChild(fellowsHeader);
-    const fellowsList = document.createElement("div");
-    fellowsList.id = "cgFellowsList";
+      const nameEl = document.createElement("span");
+      nameEl.className = "member-name";
+      nameEl.textContent = entry.name;
+
+      const checkEl = document.createElement("span");
+      checkEl.className = "member-check";
+      checkEl.setAttribute("aria-hidden", "true");
+
+      row.appendChild(avatarEl);
+      row.appendChild(nameEl);
+      row.appendChild(checkEl);
+
+      row.addEventListener("click", () => {
+        if (selected.has(key)) {
+          selected.delete(key);
+          row.classList.remove("is-selected");
+          row.setAttribute("aria-selected", "false");
+        } else {
+          if (selected.size >= MAX_MEMBERS) return;
+          selected.set(key, entry);
+          row.classList.add("is-selected");
+          row.setAttribute("aria-selected", "true");
+        }
+        refreshCount();
+      });
+      return row;
+    }
+
+    // Build mixed contact list: friends + own fellows in a single section.
+    membersBox.innerHTML = "";
+    const friends = moduleState.friends || [];
     const localFellows = deps ? (deps.getState().runtime?.fellows || deps.getState().runtime?.personas || []) : [];
-    if (localFellows.length === 0) {
-      fellowsList.innerHTML = `<p style="color:var(--fg-muted,#888); font-size:13px; margin:6px 0;">暂无本地 Fellow</p>`;
-    } else {
-      for (const fellow of localFellows) {
-        const row = document.createElement("label");
-        row.style.cssText = "display:flex; align-items:center; gap:8px; padding:5px 0; cursor:pointer;";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.value = fellow.key || fellow.id;
-        cb.dataset.kind = "fellow";
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = fellow.name || fellow.key || fellow.id;
-        row.appendChild(cb);
-        row.appendChild(nameSpan);
-        fellowsList.appendChild(row);
-      }
+
+    if (friends.length === 0 && localFellows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "group-create-members-empty";
+      empty.textContent = "还没有联系人";
+      membersBox.appendChild(empty);
     }
-    fellowsSection.appendChild(fellowsList);
-    body.appendChild(fellowsSection);
+    for (const friend of friends) {
+      membersBox.appendChild(buildRow({
+        kind: "friend",
+        id: friend.id,
+        name: friend.username || friend.account || friend.id,
+        color: "#34c759"
+      }));
+    }
+    for (const fellow of localFellows) {
+      const id = fellow.key || fellow.id;
+      membersBox.appendChild(buildRow({
+        kind: "fellow",
+        id,
+        name: fellow.name || id,
+        color: fellow.color || "#5e5ce6",
+        image: fellow.avatarImage,
+        crop: fellow.avatarCrop
+      }));
+    }
 
-    // Error + create button
-    const errorEl = document.createElement("p");
-    errorEl.id = "cgError";
-    errorEl.style.cssText = "color:#ff3b30; font-size:13px; margin:6px 0; min-height:18px;";
-    body.appendChild(errorEl);
+    nameInput.value = "";
+    refreshCount();
+    dialog.classList.remove("hidden");
+    setTimeout(() => { try { membersBox.querySelector(".group-create-member-row")?.focus(); } catch {} }, 0);
 
-    const createBtn = document.createElement("button");
-    createBtn.type = "button";
-    createBtn.className = "button-primary";
-    createBtn.style.cssText = "width:100%; margin-top:8px;";
-    createBtn.textContent = "创建";
-    createBtn.addEventListener("click", async () => {
-      const nameInput = card.querySelector("#cgGroupNameInput");
-      const name = (nameInput?.value || "").trim();
-      if (!name) { errorEl.textContent = "请输入群名"; return; }
-      if (name.length > 80) { errorEl.textContent = "群名不能超过 80 个字符"; return; }
+    function close() {
+      dialog.classList.add("hidden");
+      if (hostSection) hostSection.style.display = prevHostDisplay;
+      confirmBtn.removeEventListener("click", onConfirm);
+      cancelBtn.removeEventListener("click", onClose);
+      closeBtn.removeEventListener("click", onClose);
+      document.removeEventListener("keydown", onEsc);
+      dialog.removeEventListener("click", onBackdropClick);
+    }
+    function onClose() { close(); }
+    function onEsc(e) { if (e.key === "Escape") close(); }
+    function onBackdropClick(e) { if (e.target === dialog) close(); }
 
-      const checkedFriends = Array.from(card.querySelectorAll("#cgFriendsList input[type=checkbox]:checked")).map((cb) => cb.value);
-      const checkedFellows = Array.from(card.querySelectorAll("#cgFellowsList input[type=checkbox]:checked")).map((cb) => cb.value);
+    async function onConfirm() {
+      if (selected.size < 1) { alert("至少选择 1 位联系人"); return; }
 
-      errorEl.textContent = "";
-      createBtn.disabled = true;
+      const entries = Array.from(selected.values());
+      const name = (nameInput.value || "").trim() || entries.map((e) => e.name).join(" · ");
+      const memberFriendUserIds = entries.filter((e) => e.kind === "friend").map((e) => e.id);
+      const fellowEntries = entries.filter((e) => e.kind === "fellow");
+
+      confirmBtn.disabled = true;
       try {
-        const res = await window.aimashi.social.createRoom({
-          name,
-          memberFellows: checkedFellows.map((fid) => ({ fellowId: fid })),
-          memberFriendUserIds: checkedFriends
-        });
-        if (!res.ok) { errorEl.textContent = res.error || "创建失败"; return; }
+        // No friends selected → local fellow-only group (no cloud login required).
+        if (memberFriendUserIds.length === 0) {
+          if (fellowEntries.length < 2) {
+            alert("本地群聊至少需要 2 位智能体");
+            confirmBtn.disabled = false;
+            return;
+          }
+          const members = fellowEntries.map((e) => ({ kind: "fellow", fellowId: String(e.id), ownerId: null }));
+          const hostMember = members[0];
+          const group = await window.aimashi.groups.create({ name, members, hostMember });
+          if (window.aimashiGroup?.moduleState) {
+            window.aimashiGroup.moduleState.groups = window.aimashiGroup.moduleState.groups || [];
+            window.aimashiGroup.moduleState.groups.push(group);
+            if (typeof window.aimashiGroup.openGroup === "function") {
+              window.aimashiGroup.openGroup(group.id);
+            }
+          }
+          close();
+          if (deps && typeof deps.render === "function") deps.render();
+          return;
+        }
+
+        // Has friends → cloud room (requires login).
+        const memberFellows = fellowEntries.map((e) => ({ fellowId: e.id }));
+        const res = await window.aimashi.social.createRoom({ name, memberFellows, memberFriendUserIds });
+        if (!res.ok) { alert("创建失败：" + (res.error || "")); confirmBtn.disabled = false; return; }
         const newRoom = res.data?.room || res.data;
         if (newRoom && newRoom.id) {
           moduleState.rooms = dedup([...moduleState.rooms, newRoom]);
@@ -330,21 +342,23 @@
           if (res.data?.members && Array.isArray(res.data.members)) {
             roomMembersCache.set(newRoom.id, res.data.members);
           }
-          closeModal();
+          close();
           if (deps && typeof deps.render === "function") deps.render();
         } else {
-          errorEl.textContent = "创建失败：无效响应";
+          alert("创建失败：无效响应");
+          confirmBtn.disabled = false;
         }
       } catch (err) {
-        errorEl.textContent = String(err?.message || err);
-      } finally {
-        createBtn.disabled = false;
+        alert("创建失败：" + (err?.message || err));
+        confirmBtn.disabled = false;
       }
-    });
-    body.appendChild(createBtn);
+    }
 
-    card.appendChild(body);
-    modal.appendChild(card);
+    confirmBtn.addEventListener("click", onConfirm);
+    cancelBtn.addEventListener("click", onClose);
+    closeBtn.addEventListener("click", onClose);
+    document.addEventListener("keydown", onEsc);
+    dialog.addEventListener("click", onBackdropClick);
   }
 
   // ── wire up to aimashiSocial ──────────────────────────────────────────────

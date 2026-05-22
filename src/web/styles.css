@@ -206,7 +206,7 @@ p {
 
 .nav-rail {
   display: grid;
-  grid-template-rows: 54px repeat(5, 44px) minmax(0, 1fr) 44px;
+  grid-template-rows: 54px 44px minmax(0, 1fr) 44px;
   justify-items: center;
   align-items: center;
   gap: 4px;
@@ -1437,5 +1437,344 @@ p {
 
   .utility-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ── create-menu (＋ dropdown in sidebar header) ─────────────────────────── */
+
+.sidebar-tools {
+  position: relative;
+}
+
+.create-menu {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  z-index: 18;
+  display: grid;
+  width: max-content;
+  min-width: 128px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.create-menu.hidden {
+  display: none;
+}
+
+.create-menu button {
+  display: grid;
+  grid-template-columns: 16px max-content;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.create-menu button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.create-menu-icon,
+.create-menu-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.create-menu-label {
+  color: inherit;
+}
+
+/* ── settings modal ────────────────────────────────────────────────────── */
+
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.settings-modal.hidden {
+  display: none;
+}
+
+.settings-dialog {
+  position: relative;
+  width: min(720px, calc(100vw - 40px));
+  max-height: calc(100vh - 80px);
+  display: grid;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.settings-close-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.settings-close-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  min-height: 360px;
+  max-height: calc(100vh - 80px);
+}
+
+.settings-tabs {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 18px 8px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-muted);
+}
+
+.settings-tab {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: left;
+}
+
+.settings-tab:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.settings-tab.active {
+  background: var(--list-active);
+  color: var(--accent);
+}
+
+.settings-content {
+  padding: 22px 22px 28px;
+  overflow: auto;
+}
+
+.settings-panel.hidden {
+  display: none;
+}
+
+.runtime-card.mobile-pairing-card {
+  display: grid;
+  gap: 18px;
+}
+
+.connection-row {
+  display: grid;
+  gap: 10px;
+}
+
+.connection-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.connection-row-head strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.connection-row-head p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.connection-details {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.cloud-login-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.cloud-login-grid input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pairing-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.cloud-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.primary {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.secondary {
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.settings-row strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-row p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-row select {
+  min-width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0);
+  overflow: hidden;
+}
+
+.message-sender {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+/* ── narrow viewport: rail → bottom bar ──────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .main-view {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 56px;
+    padding: 0;
+  }
+
+  .nav-rail {
+    grid-column: 1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 56px;
+    align-items: center;
+    justify-items: center;
+    gap: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .nav-rail .rail-logo,
+  .nav-rail .rail-spacer {
+    display: none;
+  }
+
+  .nav-rail .rail-button {
+    width: 48px;
+    height: 48px;
+  }
+
+  .sidebar,
+  .workspace {
+    grid-column: 1;
+    grid-row: 1;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .main-view[data-pane="chat"] .sidebar {
+    display: none;
+  }
+
+  .main-view:not([data-pane="chat"]) .workspace {
+    display: none;
   }
 }

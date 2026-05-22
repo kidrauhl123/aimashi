@@ -4882,14 +4882,14 @@ body.topbar-click-capture .topbar {
 }
 
 .settings-panel[data-settings-panel="model"] .form-grid,
-.settings-panel[data-settings-panel="mobile"] .runtime-card {
+.settings-panel[data-settings-panel="account"] .runtime-card {
   gap: 12px;
   padding: 0;
 }
 
 .settings-panel[data-settings-panel="model"] .primary,
-.settings-panel[data-settings-panel="mobile"] .primary,
-.settings-panel[data-settings-panel="mobile"] .secondary {
+.settings-panel[data-settings-panel="account"] .primary,
+.settings-panel[data-settings-panel="account"] .secondary {
   margin: 0;
 }
 

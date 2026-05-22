@@ -362,14 +362,16 @@ function runAudit({ rootDir = root } = {}) {
     ]),
     item("cloud.attachments", "附件/生成图片作为 Cloud 文件处理且不泄漏本地路径", [
       checkSource(rootDir, "scripts/serve-cloud.js", /saveImageDataUrl|persistCloudAttachments|sanitizeCloudMessageAttachments/, "server persists and sanitizes attachment metadata"),
-      checkSource(rootDir, "src/web/app.js", /hydrateAuthenticatedAttachments|openImagePreview|uploadFiles/, "web authenticated previews and upload flow"),
+      // Web no longer ships an upload/preview client — that feature was deliberately removed
+      // when web was scoped down to chat+settings (commit on 2026-05-22). Cloud server +
+      // desktop boundary checks below still guard the attachment contract end-to-end.
       checkSource(rootDir, "src/cloud/desktop-sync.js", /dataUrl|thumbnail|Unsupported image type/, "desktop upload boundary logic"),
       checkSource(rootDir, "tests/serve-cloud-bridge.test.js", /drops unsafe local-path attachment urls|active-content image uploads|blank messages/, "unsafe path, SVG, and blank-message regressions"),
       checkSource(rootDir, "tests/cloud-desktop-sync.test.js", /full local image files instead of thumbnails|active svg/, "desktop full-image and SVG tests")
     ]),
     item("cloud.realtime-sync", "按用户隔离的实时同步", [
       checkSource(rootDir, "scripts/serve-cloud.js", /\/api\/events|broadcastEvent|workspace_updated|message_created|device_updated|bridge_run_updated/, "event websocket and envelope types"),
-      checkSource(rootDir, "src/web/app.js", /connectEvents|applyEventWorkspace|bridge_run_updated/, "web consumes realtime events"),
+      checkSource(rootDir, "src/web/app.js", /startCloudEvents|handleCloudEvent|room\.message_appended/, "web consumes realtime events"),
       checkSource(rootDir, "src/main.js", /startCloudEvents|mergeCloudWorkspaceIntoChatStore|writeCloudWorkspace/, "desktop consumes cloud events"),
       checkSource(rootDir, "tests/serve-cloud-bridge.test.js", /events broadcast workspace updates only to the authenticated user/, "cross-user realtime isolation test")
     ]),
