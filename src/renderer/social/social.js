@@ -634,11 +634,12 @@
       const row = document.createElement("div");
       row.style.cssText = "display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border,rgba(0,0,0,.08));";
 
-      const fromUser = req.from || {};
+      // Cloud REST hydrates the request with `other` (the user on the
+      // opposite end). Live WS events use `from` instead — accept either.
+      const otherUser = req.other || req.from || {};
+      const fallbackId = direction === "incoming" ? req.from_user : req.to_user;
       const displayName = escapeHtml(
-        direction === "incoming"
-          ? (fromUser.username || fromUser.account || req.from_user || "—")
-          : (req.to_user || "—")
+        otherUser.username || otherUser.account || fallbackId || "—"
       );
       const nameSpan = document.createElement("span");
       nameSpan.style.cssText = "flex:1; font-weight:500;";

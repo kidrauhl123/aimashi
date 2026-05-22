@@ -6390,10 +6390,19 @@ const socialApi = createSocialApi({
 });
 registerSocialIpc({ ipcMain, socialApi });
 ipcMain.handle("social:my-username", () => {
-  // cloudSettings().user shape: { id, username, account, ... } or null
-  const settings = settingsStore.cloudSettings();
-  const user = settings && settings.user;
-  return { username: user?.username || user?.account || "", id: user?.id || "" };
+  // Wrap in the same {ok, data} envelope safeCall uses for the other
+  // social IPCs so the renderer's destructure path is consistent and
+  // `meRes.ok` actually flips true when a session is present.
+  try {
+    const settings = settingsStore.cloudSettings();
+    const user = settings && settings.user;
+    return {
+      ok: true,
+      data: { username: user?.username || user?.account || "", id: user?.id || "" }
+    };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
 });
 ipcMain.handle("engine:install", () => installEngine());
 ipcMain.handle("engine:start", () => startEngine());
