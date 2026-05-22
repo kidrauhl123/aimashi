@@ -81,6 +81,47 @@ function shortTime(value) {
   return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
+// Avatar preset crop table — mirrors src/renderer/helpers/avatar-helpers.js
+// so web renders fellow avatars the same as desktop. Pet avatars are square
+// (default crop); human avatars have face-centered crops that need explicit
+// background-size + background-position.
+const AVATAR_PRESETS = {
+  "./assets/avatars/01.png": { x: 50.0687, y: 14.5495, zoom: 2.04 },
+  "./assets/avatars/02.png": { x: 57.2536, y: 8.1635, zoom: 1.56 },
+  "./assets/avatars/03.png": { x: 50, y: 14, zoom: 1.48 },
+  "./assets/avatars/04.png": { x: 49.0079, y: 23.5736, zoom: 1.72 },
+  "./assets/avatars/05.png": { x: 47.6785, y: 11.3611, zoom: 1.88 },
+  "./assets/avatars/06.png": { x: 46.8749, y: 10.4285, zoom: 1.64 },
+  "./assets/avatars/07.png": { x: 51.6741, y: 8.0209, zoom: 1.72 },
+  "./assets/avatars/08.png": { x: 50.974, y: 12.8636, zoom: 1.88 },
+  "./assets/avatars/09.png": { x: 47.4999, y: 12.2142, zoom: 1.8 },
+  "./assets/avatars/10.png": { x: 50, y: 14, zoom: 1.8 },
+  "./assets/avatars/11.png": { x: 55.8037, y: 7.9731, zoom: 1.64 },
+  "./assets/avatars/12.png": { x: 47.3214, y: 16.9763, zoom: 1.8 },
+  "./assets/avatars/13.png": { x: 50, y: 14, zoom: 1.8 },
+  "./assets/avatars/14.png": { x: 50, y: 14, zoom: 1.72 },
+  "./assets/avatars/15.png": { x: 45.1848, y: 5.1022, zoom: 1.56 },
+  "./assets/avatars/16.png": { x: 51.0913, y: 15.7858, zoom: 1.72 }
+};
+
+function avatarBackgroundStyle(image, customCrop, fallbackColor) {
+  if (!image) return `background-color:${fallbackColor};color:#fff;display:inline-flex;align-items:center;justify-content:center;`;
+  const preset = AVATAR_PRESETS[image] || null;
+  // Treat (50, 50, 1) as "no crop set" so we fall back to the preset crop
+  // for human avatars even when the synced conversation didn't carry one.
+  const isNeutral = !customCrop || (
+    Math.abs(Number(customCrop.x) - 50) < 0.01 &&
+    Math.abs(Number(customCrop.y) - 50) < 0.01 &&
+    Math.abs(Number(customCrop.zoom || 1) - 1) < 0.001
+  );
+  const crop = (!isNeutral && customCrop) || preset || { x: 50, y: 50, zoom: 1 };
+  const x = Number.isFinite(Number(crop.x)) ? Number(crop.x) : 50;
+  const y = Number.isFinite(Number(crop.y)) ? Number(crop.y) : 50;
+  const zoom = Number.isFinite(Number(crop.zoom)) ? Number(crop.zoom) : 1;
+  const size = Math.round(zoom * 100);
+  return `background-color:transparent;background-image:url('${image}');background-size:${size}%;background-position:${x}% ${y}%;background-repeat:no-repeat;`;
+}
+
 function showToast(text) {
   els.toast.textContent = text;
   els.toast.classList.remove("hidden");
@@ -431,6 +472,8 @@ function combinedConversationItems() {
     preview: desktopConvLastMessageText(c),
     sortKey: desktopConvSortKey(c),
     avatar: c.avatar,
+    avatarCrop: c.avatarCrop || null,
+    color: c.color || "",
     pinned: Boolean(c.pinned)
   }));
   return [...room, ...desktop].sort((a, b) => {
@@ -456,13 +499,13 @@ function renderConversationList() {
     const avatarLabel = (it.title[0] || "?").toUpperCase();
     let color = "#5e5ce6";
     if (it.kind === "room") color = it.isDM ? "#5e5ce6" : "#34c759";
-    if (it.kind === "desktop") color = "#ff9f0a"; // desktop fellow = orange tint
+    if (it.kind === "desktop") color = it.color || "#ff9f0a";
     // Accept absolute URLs, data URLs, and relative ./assets/... paths
     // (the cloud release bundles preset avatars under web/assets/ so
     // ./assets/avatars-pet/05.png resolves against the web origin).
     const useAvatar = it.avatar && (/^(https?:|data:|\.?\/assets\/)/i.test(it.avatar));
     const avatarStyle = useAvatar
-      ? `background-image:url('${escapeHtml(it.avatar)}'); background-size:cover; background-position:center;`
+      ? avatarBackgroundStyle(it.avatar, it.avatarCrop, color)
       : `background-color:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
     const avatarText = useAvatar ? "" : escapeHtml(avatarLabel);
     // ⋯ menu is only meaningful for workspace conversations right now
@@ -685,13 +728,21 @@ function renderActiveChat() {
     els.activeAvatar.textContent = "";
     const useAvatar = conv.avatar && (/^(https?:|data:|\.?\/assets\/)/i.test(conv.avatar));
     if (useAvatar) {
+      const preset = AVATAR_PRESETS[conv.avatar];
+      const cropToUse = conv.avatarCrop && !(
+        Math.abs(Number(conv.avatarCrop.x) - 50) < 0.01 &&
+        Math.abs(Number(conv.avatarCrop.y) - 50) < 0.01 &&
+        Math.abs(Number(conv.avatarCrop.zoom || 1) - 1) < 0.001
+      ) ? conv.avatarCrop : preset || { x: 50, y: 50, zoom: 1 };
+      const zoom = Number(cropToUse.zoom) || 1;
       els.activeAvatar.style.backgroundImage = `url('${conv.avatar}')`;
-      els.activeAvatar.style.backgroundSize = "cover";
-      els.activeAvatar.style.backgroundPosition = "center";
+      els.activeAvatar.style.backgroundSize = `${Math.round(zoom * 100)}%`;
+      els.activeAvatar.style.backgroundPosition = `${Number(cropToUse.x) || 50}% ${Number(cropToUse.y) || 50}%`;
+      els.activeAvatar.style.backgroundRepeat = "no-repeat";
       els.activeAvatar.style.backgroundColor = "transparent";
     } else {
       els.activeAvatar.style.backgroundImage = "";
-      els.activeAvatar.style.backgroundColor = "#ff9f0a";
+      els.activeAvatar.style.backgroundColor = conv.color || "#ff9f0a";
       els.activeAvatar.style.color = "#fff";
       els.activeAvatar.style.display = "inline-flex";
       els.activeAvatar.style.alignItems = "center";

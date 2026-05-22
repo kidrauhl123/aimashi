@@ -50,7 +50,7 @@ function cloudConversationFromDesktopSession(session = {}, fellow = {}) {
   const personaKey = String(
     session.personaKey || fellow.key || fellow.id || ""
   ).trim();
-  return {
+  const conversation = {
     id: cloudConversationIdForSession(session),
     title: String(session.title || "新对话").trim() || "新对话",
     meta: "Aimashi Desktop · 已同步",
@@ -60,6 +60,19 @@ function cloudConversationFromDesktopSession(session = {}, fellow = {}) {
     messages: [],
     personaKey
   };
+  // Forward fellow display knobs so non-desktop clients (web/mobile) can
+  // render the avatar with the same crop and fallback color as the desktop.
+  // Both fields are optional; when absent the renderer falls back to its
+  // own preset crop table.
+  if (fellow.avatarCrop && typeof fellow.avatarCrop === "object") {
+    conversation.avatarCrop = {
+      x: Number(fellow.avatarCrop.x),
+      y: Number(fellow.avatarCrop.y),
+      zoom: Number(fellow.avatarCrop.zoom)
+    };
+  }
+  if (fellow.color) conversation.color = String(fellow.color);
+  return conversation;
 }
 
 function cloudAttachmentFromDesktopAttachment(attachment = {}) {
