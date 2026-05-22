@@ -39,6 +39,13 @@ const els = {
   cloudAccountUsername: document.getElementById("cloudAccountUsername"),
   cloudLogoutFromSettings: document.getElementById("cloudLogoutFromSettings"),
   appearanceTheme: document.getElementById("appearanceTheme"),
+  appearanceListStyle: document.getElementById("appearanceListStyle"),
+  appearanceSelectionStyle: document.getElementById("appearanceSelectionStyle"),
+  appearanceHoverBackground: document.getElementById("appearanceHoverBackground"),
+  appearanceAccentColor: document.getElementById("appearanceAccentColor"),
+  appearanceUserBubbleColor: document.getElementById("appearanceUserBubbleColor"),
+  appearanceShowUserAvatar: document.getElementById("appearanceShowUserAvatar"),
+  appearanceShowAssistantAvatar: document.getElementById("appearanceShowAssistantAvatar"),
 
   toast: document.getElementById("toast"),
 };
@@ -83,6 +90,22 @@ function escapeHtml(value) {
 function shortTime(value) {
   const date = value ? new Date(value) : new Date();
   return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// Desktop-style relative timestamp for conversation cards:
+// today → HH:MM, yesterday → "昨天", else M/D.
+function formatConversationTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "昨天";
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 // Avatar preset crop table — mirrors src/renderer/helpers/avatar-helpers.js
@@ -197,7 +220,8 @@ async function api(path, options = {}) {
 
 function setAuthView() {
   els.root.dataset.auth = state.token ? "signed-in" : "signed-out";
-  document.documentElement.dataset.theme = state.theme || "light";
+  // Theme now lives in window.aimashiAppearance (see web/appearance.js).
+  // It applies on script load so the page doesn't flash; don't override here.
 }
 
 async function handleLogin(register) {
@@ -570,6 +594,12 @@ function renderConversationList() {
     const unreadHtml = unread > 0
       ? `<span class="persona-unread" aria-label="${unread} 条未读">${unread > 99 ? "99+" : unread}</span>`
       : "";
+    const timeLabel = it.sortKey ? formatConversationTime(it.sortKey) : "";
+    // Right-side column: when unread, show the red badge; otherwise show the
+    // last-activity timestamp (HH:MM / 昨天 / M/D) like desktop cards.
+    const sideHtml = unread > 0
+      ? unreadHtml
+      : (timeLabel ? `<span class="persona-time">${escapeHtml(timeLabel)}</span>` : "");
     return `
       <div class="persona-row${it.pinned ? " pinned" : ""}${it.id === state.activeConversationId ? " active" : ""}${unread > 0 ? " has-unread" : ""}">
         <button class="persona" type="button" data-conv-id="${escapeHtml(it.id)}" data-conv-kind="${it.kind}">
@@ -578,7 +608,7 @@ function renderConversationList() {
             <strong class="persona-name">${it.pinned ? "📌 " : ""}${escapeHtml(it.title)}</strong>
             <span class="persona-preview">${escapeHtml(it.preview)}</span>
           </span>
-          ${unreadHtml}
+          ${sideHtml}
         </button>
         ${hasMenu ? `<button class="persona-more" type="button" data-conv-more="${escapeHtml(it.id)}" aria-label="更多操作" title="更多操作">⋯</button>` : ""}
       </div>
@@ -1263,9 +1293,17 @@ function renderSettings() {
   if (els.cloudAccountUsername) {
     els.cloudAccountUsername.textContent = state.user?.username ? `已登录：${state.user.username}` : "未登录";
   }
-  if (els.appearanceTheme) {
-    els.appearanceTheme.value = state.theme || "light";
-  }
+  // Reflect current appearance state into the inputs every time the dialog
+  // opens so it survives external mutations (multiple tabs, reset action).
+  const ap = window.aimashiAppearance?.get?.() || {};
+  if (els.appearanceTheme) els.appearanceTheme.value = ap.theme || "light";
+  if (els.appearanceListStyle) els.appearanceListStyle.value = ap.listStyle || "card";
+  if (els.appearanceSelectionStyle) els.appearanceSelectionStyle.value = ap.selectionStyle || "soft";
+  if (els.appearanceHoverBackground) els.appearanceHoverBackground.checked = ap.hoverBackground !== false;
+  if (els.appearanceAccentColor) els.appearanceAccentColor.value = ap.accentColor || "#5e5ce6";
+  if (els.appearanceUserBubbleColor) els.appearanceUserBubbleColor.value = ap.userBubbleColor || "#0162db";
+  if (els.appearanceShowUserAvatar) els.appearanceShowUserAvatar.checked = ap.showUserAvatar !== false;
+  if (els.appearanceShowAssistantAvatar) els.appearanceShowAssistantAvatar.checked = ap.showAssistantAvatar !== false;
 }
 
 function openSettings() {
@@ -1361,11 +1399,26 @@ document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
   });
 });
 els.cloudLogoutFromSettings?.addEventListener("click", handleLogout);
-els.appearanceTheme?.addEventListener("change", () => {
-  state.theme = els.appearanceTheme.value;
-  document.documentElement.dataset.theme = state.theme;
-  saveSession();
-});
+function bindAppearanceInput(el, key, getValue) {
+  if (!el) return;
+  el.addEventListener("change", () => {
+    window.aimashiAppearance?.update({ [key]: getValue(el) });
+  });
+  // Color pickers also fire "input" — capture so the page reacts live.
+  if (el.type === "color") {
+    el.addEventListener("input", () => {
+      window.aimashiAppearance?.update({ [key]: getValue(el) });
+    });
+  }
+}
+bindAppearanceInput(els.appearanceTheme, "theme", (e) => e.value);
+bindAppearanceInput(els.appearanceListStyle, "listStyle", (e) => e.value);
+bindAppearanceInput(els.appearanceSelectionStyle, "selectionStyle", (e) => e.value);
+bindAppearanceInput(els.appearanceHoverBackground, "hoverBackground", (e) => e.checked);
+bindAppearanceInput(els.appearanceAccentColor, "accentColor", (e) => e.value);
+bindAppearanceInput(els.appearanceUserBubbleColor, "userBubbleColor", (e) => e.value);
+bindAppearanceInput(els.appearanceShowUserAvatar, "showUserAvatar", (e) => e.checked);
+bindAppearanceInput(els.appearanceShowAssistantAvatar, "showAssistantAvatar", (e) => e.checked);
 
 // rail rail-rail button → chat is the only view; already active by default
 

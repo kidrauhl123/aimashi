@@ -146,7 +146,7 @@
               </section>
               <section class="settings-panel hidden" data-settings-panel="appearance">
                 <form id="appearanceForm" class="form-grid">
-                  <section class="settings-row settings-group-start settings-group-end">
+                  <section class="settings-row">
                     <div>
                       <strong>界面主题</strong>
                       <p>切换浅色或深色界面。</p>
@@ -155,6 +155,70 @@
                       <option value="light">浅色</option>
                       <option value="dark">深色</option>
                     </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>中栏列表</strong>
+                      <p>卡片样式或贯通样式。</p>
+                    </div>
+                    <select id="appearanceListStyle">
+                      <option value="card">卡片</option>
+                      <option value="flush">贯通</option>
+                    </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>选中态</strong>
+                      <p>柔和或实色。</p>
+                    </div>
+                    <select id="appearanceSelectionStyle">
+                      <option value="soft">柔和</option>
+                      <option value="solid">实色</option>
+                    </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>悬停底色</strong>
+                      <p>鼠标移到卡片上时显示浅色底。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceHoverBackground" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>主题色</strong>
+                      <p>影响选中状态、链接和按钮。</p>
+                    </div>
+                    <input id="appearanceAccentColor" type="color" value="#5e5ce6" aria-label="主题色">
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>用户气泡</strong>
+                      <p>只影响你发出的消息气泡底色。</p>
+                    </div>
+                    <input id="appearanceUserBubbleColor" type="color" value="#0162db" aria-label="用户气泡色">
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>用户头像</strong>
+                      <p>在聊天里显示你自己的头像。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceShowUserAvatar" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>伙伴头像</strong>
+                      <p>在聊天里显示对方 / 智能体的头像。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceShowAssistantAvatar" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
                   </section>
                 </form>
               </section>
@@ -165,6 +229,7 @@
 
       <div id="toast" class="toast hidden" role="status"></div>
     </main>
-    <script src="./app.js?v=20260522-web-polish"></script>
+    <script src="./appearance.js?v=20260522-1"></script>
+    <script src="./app.js?v=20260522-web-appearance"></script>
   </body>
 </html>

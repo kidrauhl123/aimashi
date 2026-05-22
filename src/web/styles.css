@@ -19,6 +19,86 @@
   --sidebar-width: 286px;
 }
 
+/* Appearance overrides. Setting attributes on :root keeps the rules cheap
+   and avoids running JS to update individual elements when the user flips
+   a toggle in settings. */
+:root[data-hover-background="off"] {
+  --hover: transparent;
+}
+:root[data-list-style="flush"] .persona-row {
+  margin: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+}
+:root[data-list-style="flush"] .persona {
+  border-radius: 0;
+  min-height: 66px;
+}
+:root[data-list-style="flush"] .persona-row.active {
+  border-bottom-color: transparent;
+}
+:root[data-selection-style="solid"] .persona-row.active {
+  background: var(--accent);
+}
+:root[data-selection-style="solid"] .persona-row.active .persona-name,
+:root[data-selection-style="solid"] .persona-row.active .persona-preview,
+:root[data-selection-style="solid"] .persona-row.active .persona-time {
+  color: #fff;
+}
+:root[data-show-user-avatar="off"] .chat .message.user .avatar,
+:root[data-show-assistant-avatar="off"] .chat .message.assistant .avatar {
+  display: none !important;
+}
+.chat .message.user .bubble {
+  background: var(--user-bubble-color, var(--accent));
+  color: #fff;
+}
+
+/* Simple switch widget styled like the desktop settings switches. */
+.settings-switch-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+}
+.settings-switch-wrap input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.settings-switch-text {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 11px;
+  background: var(--field);
+  transition: background 0.16s ease;
+}
+.settings-switch-text::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.16s ease;
+}
+.settings-switch-wrap input:checked + .settings-switch-text {
+  background: var(--accent);
+}
+.settings-switch-wrap input:checked + .settings-switch-text::after {
+  transform: translateX(16px);
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --chrome: #121318;

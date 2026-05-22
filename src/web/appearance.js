@@ -1,0 +1,109 @@
+// Aimashi Web — appearance settings.
+// Persists in localStorage and applies on document.documentElement via
+// data-* attributes + CSS custom properties. The shape mirrors a subset
+// of desktop's userAppearance (font preset deliberately omitted per the
+// user's instruction).
+(function (global) {
+  "use strict";
+
+  const STORAGE_KEY = "aimashi.web.appearance";
+  const DEFAULT_ACCENT = "#5e5ce6";
+  const DEFAULT_USER_BUBBLE = "#0162db";
+
+  const defaults = {
+    theme: "light",            // "light" | "dark"
+    listStyle: "card",         // "card" | "flush"
+    selectionStyle: "soft",    // "soft" | "solid"
+    hoverBackground: true,
+    accentColor: DEFAULT_ACCENT,
+    userBubbleColor: DEFAULT_USER_BUBBLE,
+    showUserAvatar: true,
+    showAssistantAvatar: true
+  };
+
+  let current = { ...defaults };
+  const subscribers = new Set();
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { ...defaults };
+      const parsed = JSON.parse(raw);
+      return { ...defaults, ...(parsed && typeof parsed === "object" ? parsed : {}) };
+    } catch {
+      return { ...defaults };
+    }
+  }
+
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(current)); } catch {}
+  }
+
+  // "#5e5ce6" → "94 92 230". Used to derive --accent-rgb so rgb(var(--accent-rgb) / 0.16)
+  // works for hover/active translucent backgrounds without picking colors by hand.
+  function hexToRgbTriplet(hex) {
+    const m = /^#?([a-fA-F0-9]{6})$/.exec(String(hex || "").trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return `${(n >> 16) & 0xff} ${(n >> 8) & 0xff} ${n & 0xff}`;
+  }
+
+  function applyToDom(next) {
+    const root = document.documentElement;
+    root.dataset.theme = next.theme === "dark" ? "dark" : "light";
+    root.dataset.listStyle = next.listStyle === "flush" ? "flush" : "card";
+    root.dataset.selectionStyle = next.selectionStyle === "solid" ? "solid" : "soft";
+    root.dataset.hoverBackground = next.hoverBackground ? "on" : "off";
+    root.dataset.showUserAvatar = next.showUserAvatar ? "on" : "off";
+    root.dataset.showAssistantAvatar = next.showAssistantAvatar ? "on" : "off";
+    if (next.accentColor) {
+      root.style.setProperty("--accent", next.accentColor);
+      const rgb = hexToRgbTriplet(next.accentColor);
+      if (rgb) root.style.setProperty("--accent-rgb", rgb);
+    }
+    if (next.userBubbleColor) {
+      root.style.setProperty("--user-bubble-color", next.userBubbleColor);
+    }
+  }
+
+  function init() {
+    current = load();
+    applyToDom(current);
+  }
+
+  function get() { return { ...current }; }
+
+  function update(patch) {
+    current = { ...current, ...(patch && typeof patch === "object" ? patch : {}) };
+    applyToDom(current);
+    save();
+    for (const cb of subscribers) {
+      try { cb(get()); } catch (err) { console.warn("[appearance] subscriber error:", err); }
+    }
+  }
+
+  function reset() {
+    current = { ...defaults };
+    applyToDom(current);
+    save();
+    for (const cb of subscribers) {
+      try { cb(get()); } catch (err) { console.warn("[appearance] subscriber error:", err); }
+    }
+  }
+
+  function subscribe(cb) {
+    subscribers.add(cb);
+    return () => subscribers.delete(cb);
+  }
+
+  // Apply immediately on script load so the page doesn't flash light→dark.
+  init();
+
+  global.aimashiAppearance = {
+    get,
+    update,
+    reset,
+    subscribe,
+    defaults: { ...defaults }
+  };
+})(typeof window !== "undefined" ? window : globalThis);
