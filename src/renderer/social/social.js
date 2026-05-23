@@ -96,6 +96,33 @@
     });
   }
 
+  // Resolve "is this message from me?" through shared/contact (resolveContact
+  // returns kind="self" only when ref matches ctx.self.id). Falls back to
+  // false when the helper isn't loaded (test sandbox or pre-bootstrap).
+  function _isMessageFromSelf(msg) {
+    const helper = (typeof window !== "undefined" && window.aimashiContact) || null;
+    if (!helper || typeof helper.resolveContact !== "function") return false;
+    const { resolveContact, ContactKind } = helper;
+    const contact = resolveContact(
+      { kind: ContactKind.User, ref: msg && msg.sender_ref },
+      { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends }
+    );
+    return contact && contact.kind === ContactKind.Self;
+  }
+
+  // Resolve "is this a user-role message?" by routing through the canonical
+  // cloud-room-source adapter and reading spec.role. Falls back to false when
+  // the adapter isn't loaded (test sandbox or pre-bootstrap).
+  function _isUserRoleMessage(msg) {
+    const factory = (typeof window !== "undefined" && window.aimashiCloudRoomSource) || null;
+    if (!factory || typeof factory.createCloudRoomSource !== "function") return false;
+    const room = moduleState.rooms.find((r) => r.id === moduleState.activeRoomId) || { id: moduleState.activeRoomId || "" };
+    const ctx = { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends, fellows: [] };
+    const source = factory.createCloudRoomSource({ room, messages: [msg], members: [], ctx });
+    const spec = source.listMessages()[0];
+    return !!spec && spec.role === "user";
+  }
+
   // ── initSocialModule ──────────────────────────────────────────────────────
 
   function initSocialModule(d) {
@@ -239,7 +266,7 @@
 
       // Unread bookkeeping: count messages that aren't mine and didn't land
       // in the currently open room.
-      const isMine = message.sender_kind === "user" && message.sender_ref === moduleState.myUserId;
+      const isMine = _isMessageFromSelf(message);
       if (fresh && !isMine && roomId !== moduleState.activeRoomId) {
         moduleState.unreadByRoom.set(roomId, (moduleState.unreadByRoom.get(roomId) || 0) + 1);
       }
@@ -397,7 +424,7 @@
 
   function _buildMessageArticle(msg, accentColor) {
     const article = document.createElement("article");
-    const isUser = msg.sender_kind === "user";
+    const isUser = _isUserRoleMessage(msg);
     article.className = "message " + (isUser ? "user" : "assistant");
     const bodyHtml = _renderMsgBody(msg.body_md || "");
     const color = isUser ? "#111827" : (accentColor || "#5e5ce6");
