@@ -29,6 +29,12 @@ try {
 } catch {
   ({ createEventLogStore } = require("./src/cloud/event-log-store.js"));
 }
+let createFellowsStore = null;
+try {
+  ({ createFellowsStore } = require("../src/cloud/fellows-store.js"));
+} catch {
+  ({ createFellowsStore } = require("./src/cloud/fellows-store.js"));
+}
 let dmRoomId = null;
 let ensureDmRoom = null;
 try {
@@ -1208,12 +1214,65 @@ async function handleRequest(req, res, context) {
     // their desktop uses. Body: { avatarImage?, avatarCrop?, avatarColor? }
     if (req.method === "PATCH" && url.pathname === "/api/me/profile") {
       const body = await readJson(req);
+      if (replayIfCached(context, res, auth.user.id, body)) return;
       const updated = cloudStore.updateUserProfile(auth.user.id, {
         avatarImage: typeof body.avatarImage === "string" ? body.avatarImage : undefined,
         avatarCrop: body.avatarCrop === null || (body.avatarCrop && typeof body.avatarCrop === "object") ? body.avatarCrop : undefined,
         avatarColor: typeof body.avatarColor === "string" ? body.avatarColor : undefined
       });
-      return writeJson(res, 200, { user: updated });
+      const payload = { user: updated };
+      rememberOp(context, auth.user.id, body, 200, payload);
+      return writeJson(res, 200, payload);
+    }
+
+    // GET /api/me/fellows — list this user's cloud-mirrored fellow
+    // definitions. Phase 2 of the sync redesign: fellow identity (name +
+    // avatar + persona + capabilities) lives in cloud so web / a freshly-
+    // installed desktop / another machine can render fellow chats with
+    // proper attribution. Runtime config (engine, model) stays local.
+    if (req.method === "GET" && url.pathname === "/api/me/fellows") {
+      const fellows = context.fellowsStore.listFellows(auth.user.id);
+      return writeJson(res, 200, { fellows });
+    }
+
+    // PUT /api/me/fellows/:id — upsert one fellow. Body shape mirrors the
+    // desktop fellow-manifest's identity fields (key→id is supplied via
+    // URL). Broadcasts fellow.upserted so other devices stream it in.
+    const fellowDetailMatch = url.pathname.match(/^\/api\/me\/fellows\/([A-Za-z0-9_.-]+)$/);
+    if (req.method === "PUT" && fellowDetailMatch) {
+      const id = fellowDetailMatch[1];
+      const body = await readJson(req);
+      if (replayIfCached(context, res, auth.user.id, body)) return;
+      if (!body.name || typeof body.name !== "string") return writeError(res, 400, "name is required");
+      const fellow = context.fellowsStore.upsertFellow(auth.user.id, {
+        id,
+        name: body.name,
+        color: body.color,
+        avatarImage: body.avatarImage,
+        avatarCrop: body.avatarCrop,
+        bio: body.bio,
+        capabilities: body.capabilities,
+        personaText: body.personaText
+      });
+      broadcastPersistedEvent(context, auth.user.id, { type: "fellow.upserted", fellow });
+      const payload = { fellow };
+      rememberOp(context, auth.user.id, body, 200, payload);
+      return writeJson(res, 200, payload);
+    }
+
+    // DELETE /api/me/fellows/:id
+    if (req.method === "DELETE" && fellowDetailMatch) {
+      const id = fellowDetailMatch[1];
+      let body = {};
+      try { body = await readJson(req); } catch { /* empty */ }
+      if (replayIfCached(context, res, auth.user.id, body)) return;
+      const existing = context.fellowsStore.getFellow(auth.user.id, id);
+      if (!existing) return writeError(res, 404, "fellow not found");
+      context.fellowsStore.deleteFellow(auth.user.id, id);
+      broadcastPersistedEvent(context, auth.user.id, { type: "fellow.deleted", fellowId: id });
+      const payload = { ok: true };
+      rememberOp(context, auth.user.id, body, 200, payload);
+      return writeJson(res, 200, payload);
     }
 
     if (req.method === "GET" && url.pathname === "/api/workspace") {
@@ -1512,6 +1571,7 @@ function createAimashiCloudServer(options = {}) {
   context.socialStore = createSocialStore(context.cloudStore.getDb());
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
+  context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => handleBridgeUpgrade(req, socket, head, context, wss));

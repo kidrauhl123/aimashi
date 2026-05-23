@@ -765,6 +765,29 @@ function migrate(db) {
       PRIMARY KEY (user_id, client_op)
     );
     CREATE INDEX IF NOT EXISTS idx_op_idempotency_created ON op_idempotency(created_at);
+
+    -- v5: per-user fellow definitions on cloud. A fellow is the "identity"
+    -- (name + avatar + persona text + capabilities) of an AI participant
+    -- the user has authored. Runtime config (engineConfig, agentEngine,
+    -- platform) stays desktop-local because it pins to a specific host
+    -- machine. Without this table, fellow chat history viewed on another
+    -- device (e.g., web after login on a new browser) would show "unknown
+    -- sender" for every assistant turn.
+    CREATE TABLE IF NOT EXISTS fellows (
+      id              TEXT NOT NULL,
+      owner_user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name            TEXT NOT NULL,
+      color           TEXT NOT NULL DEFAULT '',
+      avatar_image    TEXT NOT NULL DEFAULT '',
+      avatar_crop_json TEXT NOT NULL DEFAULT '',
+      bio             TEXT NOT NULL DEFAULT '',
+      capabilities_json TEXT NOT NULL DEFAULT '[]',
+      persona_text    TEXT NOT NULL DEFAULT '',
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      PRIMARY KEY (owner_user_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_fellows_owner ON fellows(owner_user_id);
   `);
   if (!hasColumn(db, "bridge_runs", "request_attachments_json")) {
     db.exec("ALTER TABLE bridge_runs ADD COLUMN request_attachments_json TEXT NOT NULL DEFAULT '[]'");
@@ -793,6 +816,8 @@ function migrate(db) {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (3, ?)")
     .run(nowIso());
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (4, ?)")
+    .run(nowIso());
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (5, ?)")
     .run(nowIso());
 }
 

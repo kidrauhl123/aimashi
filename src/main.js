@@ -4632,6 +4632,57 @@ function buildCloudWorkspaceFromLocalSessions() {
   return { conversations };
 }
 
+// Phase 2: mirror a local fellow's identity to /api/me/fellows so other
+// devices (web, fresh desktop install, etc.) see proper attribution on
+// chat history. Runtime engine config stays local. Best-effort — sync
+// failure logs and continues; next manual "同步" or fellow edit will
+// re-push.
+async function pushFellowToCloud(fellow) {
+  const settings = settingsStore.cloudSettings();
+  if (!settings.enabled || !settings.token || !fellow || !fellow.key) return;
+  try {
+    let personaText = "";
+    try {
+      if (typeof fellowPersonaPath === "function" && fs.existsSync(fellowPersonaPath(fellow.key))) {
+        personaText = readFellowPersona(fellow.key, fellow.name, fellow.bio);
+      }
+    } catch { /* persona read best-effort */ }
+    await cloudApi(`/api/me/fellows/${encodeURIComponent(fellow.key)}`, {
+      method: "PUT",
+      body: {
+        name: fellow.name,
+        color: fellow.color || "",
+        avatarImage: fellow.avatarImage || "",
+        avatarCrop: fellow.avatarCrop || null,
+        bio: fellow.bio || "",
+        capabilities: Object.keys(fellow.capabilities || {}).filter((k) => fellow.capabilities[k]),
+        personaText
+      }
+    });
+  } catch (error) {
+    appendCloudLog(`Cloud fellow push failed for ${fellow.key}: ${error?.message || error}`);
+  }
+}
+
+async function deleteFellowFromCloud(fellowKey) {
+  const settings = settingsStore.cloudSettings();
+  if (!settings.enabled || !settings.token || !fellowKey) return;
+  try {
+    await cloudApi(`/api/me/fellows/${encodeURIComponent(fellowKey)}`, { method: "DELETE" });
+  } catch (error) {
+    appendCloudLog(`Cloud fellow delete failed for ${fellowKey}: ${error?.message || error}`);
+  }
+}
+
+async function pushAllFellowsToCloud() {
+  const settings = settingsStore.cloudSettings();
+  if (!settings.enabled || !settings.token) return;
+  const manifest = loadFellowManifest();
+  for (const fellow of (manifest.fellows || [])) {
+    await pushFellowToCloud(fellow);
+  }
+}
+
 async function pushUserProfileToCloud() {
   const settings = settingsStore.cloudSettings();
   if (!settings.enabled || !settings.token) return;
@@ -4680,6 +4731,10 @@ async function syncAimashiCloudWorkspace() {
   //    yet. From the user's view there is no "local group" vs "cloud
   //    group" — they're just groups; sync handles the storage promotion.
   await pushLocalGroupsToCloud();
+  // 2b. Push fellow identities to cloud (Phase 2). Without this, fellow
+  //     chat history viewed on web shows assistant turns with no name /
+  //     avatar — sender is just a fellow id the cloud doesn't know.
+  await pushAllFellowsToCloud();
   // 3. Pull the merged result back so any cloud-only conversations (DM peers,
   //    other-device sessions) also land in the local chat store.
   const data = pushed && pushed.workspace
@@ -6756,6 +6811,9 @@ function saveFellow(fellowInput) {
       : fellowPersonaBody(name, fellowInput.description || fellowInput.bio || "");
   fs.writeFileSync(path.join(p.fellowDir, `${key}.md`), body);
   fs.writeFileSync(path.join(p.fellowDir, `${key}.fellow.json`), JSON.stringify(fellowMetadata(next), null, 2) + "\n");
+  // Phase 2: push identity to cloud so other devices can render this
+  // fellow's chats coherently. Best-effort.
+  pushFellowToCloud(next).catch((e) => appendCloudLog(`Cloud fellow push failed: ${e?.message || e}`));
   return getRuntimeStatus();
 }
 
@@ -6842,6 +6900,9 @@ function deleteFellow(input = {}) {
     console.warn("[tasks] orphan-by-fellow failed", error);
   }
   recallFellowPet(key);
+  // Phase 2: propagate delete to cloud so other devices stop showing
+  // this fellow.
+  deleteFellowFromCloud(key).catch((e) => appendCloudLog(`Cloud fellow delete failed: ${e?.message || e}`));
   return getRuntimeStatus();
 }
 
