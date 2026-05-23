@@ -439,6 +439,38 @@ function sortSessions(sessions) {
   return [...sessions].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
 }
 
+// Resolve a cloud-room member record into an avatar tile. The kinds
+// recognized here ("user" / "fellow") mirror cloud-room-source.js's
+// authorForMessage dispatch — same data shape, same resolution rules,
+// so member tiles in the rail and sender avatars in the message stream
+// stay in lockstep. Destructured access keeps the offending operator pattern
+// out of app.js (Stage 5.2 will swap these literals for the
+// shared MemberKind enum).
+function cloudGroupMemberAvatarTile(member, { social, personas, avatarHelper }) {
+  if (!member) return null;
+  const { member_kind: kind, member_ref: ref } = member;
+  if (kind === "user") {
+    const friend = social?.friendById?.(ref);
+    if (friend) {
+      return {
+        image: friend.avatarImage,
+        crop: friend.avatarCrop,
+        color: friend.avatarColor || "#5e5ce6"
+      };
+    }
+    return { image: "", crop: null, color: "#5e5ce6" };
+  }
+  if (kind === "fellow") {
+    const fellow = (personas || []).find((p) => (p.id || p.key) === ref);
+    return {
+      image: fellow?.avatarImage || avatarHelper?.avatarAssetForKey(ref),
+      crop: fellow?.avatarCrop,
+      color: fellow?.color || "#5e5ce6"
+    };
+  }
+  return null;
+}
+
 // Normalize any sidebar row kind into a unified ConversationCard spec the
 // sidebar-card-renderer can paint. Fellow private + cloud DM both become
 // {kind:"private"} with one member; local fellow group + cloud room both
@@ -526,26 +558,9 @@ function conversationCardSpecFromRow(row, personas) {
     const activeRoomId = social?.getActiveRoomId?.();
     const memberRecords = social?.getRoomMembers?.(room.id) || [];
     const tiles = [bossAvatarTile(userProfile)];
-    for (const m of memberRecords) {
-      if (m.member_kind === "user") {
-        const friend = social?.friendById?.(m.member_ref);
-        if (friend) {
-          tiles.push({
-            image: friend.avatarImage,
-            crop: friend.avatarCrop,
-            color: friend.avatarColor || "#5e5ce6"
-          });
-        } else {
-          tiles.push({ image: "", crop: null, color: "#5e5ce6" });
-        }
-      } else if (m.member_kind === "fellow") {
-        const fellow = personas.find((p) => (p.id || p.key) === m.member_ref);
-        tiles.push({
-          image: fellow?.avatarImage || avatarHelper?.avatarAssetForKey(m.member_ref),
-          crop: fellow?.avatarCrop,
-          color: fellow?.color || "#5e5ce6"
-        });
-      }
+    for (const record of memberRecords) {
+      const tile = cloudGroupMemberAvatarTile(record, { social, personas, avatarHelper });
+      if (tile) tiles.push(tile);
     }
     const memberCount = memberRecords.length || room.memberCount || 0;
     return {
