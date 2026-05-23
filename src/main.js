@@ -13,6 +13,7 @@ const WebSocket = require("ws");
 const { normalizePermissionMode, permissionModeLabel } = require("./permission-modes");
 const { IpcChannel } = require("./shared/ipc-channels");
 const { CloudEvent } = require("./shared/cloud-events");
+const { MemberKind } = require("./shared/conversation-kinds");
 const runtimeResources = require("./runtime-resource-paths");
 const { createGroupStore } = require("./main/group-store.js");
 const { buildHermesGroupHeader, injectGroupContextForSdk } = require("./main/group-adapters.js");
@@ -4700,19 +4701,67 @@ async function pushLocalGroupsToCloud() {
   let groupList = [];
   try { groupList = ensureGroupStore().list(); }
   catch (error) { appendCloudLog(`Cloud group sync: failed to list local groups (${error?.message || error})`); return; }
+
+  // Two layers of dedup so this function can never create a duplicate
+  // cloud room:
+  //   (a) Server-side idempotency on body.clientGroupId — server checks
+  //       existing rooms' decorations.clientGroupId before creating.
+  //   (b) Heuristic recovery for groups whose cloud counterpart was created
+  //       BEFORE clientGroupId existed (e.g., the briefly-shipped per-group
+  //       "上传到云端" action). Match by name + identical fellow member set
+  //       against existing cloud rooms; if found, link without POST.
+  let existingRooms = [];
+  try {
+    const data = await cloudApi("/api/rooms", { method: "GET" });
+    existingRooms = Array.isArray(data?.rooms) ? data.rooms : [];
+  } catch { /* sync continues without the heuristic if list fails */ }
+
+  function fellowIdSet(arr) {
+    const out = new Set();
+    for (const m of (Array.isArray(arr) ? arr : [])) {
+      const id = String(m?.fellowId || m?.member_ref || m?.id || m?.key || "").trim();
+      if (id) out.add(id);
+    }
+    return out;
+  }
+
   for (const group of groupList) {
     if (!group || group.cloudRoomId) continue;
     const memberFellows = (Array.isArray(group.members) ? group.members : [])
       .map((m) => ({ fellowId: m?.fellowId || m?.id || m?.key || "" }))
       .filter((m) => m.fellowId);
     if (!memberFellows.length) continue;
+
+    // (b) Heuristic match against pre-clientGroupId rooms — same-named
+    //     non-DM rooms get a detail fetch to compare member sets.
+    const localIds = fellowIdSet(memberFellows);
+    const sameNameCloud = existingRooms.find((r) => r && !r.id?.startsWith("dm:") && (r.name || "").trim() === (group.name || "").trim());
+    if (sameNameCloud) {
+      try {
+        const detail = await cloudApi(`/api/rooms/${sameNameCloud.id}`, { method: "GET" });
+        const remoteFellows = (detail?.members || []).filter((m) => m.member_kind === MemberKind.Fellow).map((m) => m.member_ref);
+        const remoteSet = new Set(remoteFellows);
+        const sameMembers = remoteSet.size === localIds.size && [...localIds].every((id) => remoteSet.has(id));
+        if (sameMembers) {
+          ensureGroupStore().updateGroup(group.id, { cloudRoomId: sameNameCloud.id });
+          appendCloudLog(`Cloud group sync: linked existing room ${sameNameCloud.id} to local group ${group.id} (legacy duplicate avoided)`);
+          continue;
+        }
+      } catch (error) {
+        appendCloudLog(`Cloud group sync: detail fetch failed for ${sameNameCloud.id}: ${error?.message || error}`);
+      }
+    }
+
+    // (a) Server-side idempotent create. Server returns existing if any
+    //     room has decorations.clientGroupId === group.id.
     try {
       const res = await cloudApi("/api/rooms", {
         method: "POST",
         body: {
           name: group.name || "未命名群聊",
           memberFellows,
-          memberFriendUserIds: []
+          memberFriendUserIds: [],
+          clientGroupId: group.id
         }
       });
       const roomId = res?.room?.id;

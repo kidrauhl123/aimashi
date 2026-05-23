@@ -816,13 +816,29 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { rooms });
     }
 
-    // POST /api/rooms — create a group room
+    // POST /api/rooms — create a group room. Idempotent on optional
+    // `clientGroupId`: if any room this user is in already has decorations
+    // .clientGroupId === clientGroupId, return that room instead of creating
+    // a new one. This prevents the desktop sync from re-creating duplicates
+    // when the local group was uploaded earlier through a different path.
     if (req.method === "POST" && url.pathname === "/api/rooms") {
       const body = await readJson(req);
       const name = String(body.name || "").trim();
       if (!name || name.length > 80) return writeError(res, 400, "name is required and must be 1..80 chars");
       const memberFellows = Array.isArray(body.memberFellows) ? body.memberFellows : [];
       const memberFriendUserIds = Array.isArray(body.memberFriendUserIds) ? body.memberFriendUserIds : [];
+      const clientGroupId = String(body.clientGroupId || "").trim() || null;
+
+      // Idempotency check
+      if (clientGroupId) {
+        const userRooms = context.socialStore.listRoomsForUser(auth.user.id);
+        const existing = userRooms.find((r) => r && r.decorations && r.decorations.clientGroupId === clientGroupId);
+        if (existing) {
+          const members = context.socialStore.listRoomMembers(existing.id);
+          return writeJson(res, 200, { room: existing, members, reused: true });
+        }
+      }
+
       // Validate friend membership before creating anything
       for (const friendId of memberFriendUserIds) {
         if (!context.socialStore.areFriends(auth.user.id, String(friendId))) {
@@ -830,7 +846,8 @@ async function handleRequest(req, res, context) {
         }
       }
       const roomId = "g_" + require("node:crypto").randomBytes(8).toString("hex");
-      context.socialStore.createRoom({ id: roomId, name });
+      const decorations = clientGroupId ? { clientGroupId } : null;
+      context.socialStore.createRoom({ id: roomId, name, decorations });
       context.socialStore.addRoomMember({ roomId, memberKind: "user", memberRef: auth.user.id });
       for (const fellow of memberFellows) {
         const fellowId = String(fellow.fellowId || "").trim();
