@@ -77,7 +77,7 @@
     const cursor = els.chatInput.selectionStart || 0;
     const before = value.slice(0, cursor);
     const line = before.split(/\n/).pop() || "";
-    const shouldOpen = /^\/[A-Za-z0-9_/-]*$/.test(line);
+    const shouldOpen = /^\/[A-Za-z0-9_:/.-]*$/.test(line);
     state.slashMenuOpen = shouldOpen;
     state.slashFilter = shouldOpen ? line : "";
     if (shouldOpen && state.slashFilter.length <= 1) state.slashSelectedIndex = 0;
@@ -262,7 +262,7 @@
     const trigger = `/${name} `;
     const current = els.chatInput.value || "";
     els.chatInput.value = current.trim().startsWith("/")
-      ? current.replace(/^\s*\/[A-Za-z0-9_/-]+(?:\s+)?/, trigger)
+      ? current.replace(/^\s*\/[A-Za-z0-9_:/.-]+(?:\s+)?/, trigger)
       : `${trigger}${current}`;
     els.chatInput.focus();
     resizeChatInput();

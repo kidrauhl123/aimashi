@@ -29,6 +29,10 @@ const {
 } = require("./main/chat-engine-adapters.js");
 const { createChatEventEmitter } = require("./main/chat-events.js");
 const { chatCompletionResponse, responseMessageContent } = require("./main/chat-response.js");
+const {
+  createAgentCommandProvider,
+  parseCommandFrontmatter
+} = require("./main/agent-command-provider.js");
 const { requireFellow } = require("./main/fellow-registry.js");
 const { createClaudeCodeChatAdapter } = require("./main/claude-code-chat-adapter.js");
 const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
@@ -190,6 +194,14 @@ const skillsLoader = createSkillsLoader({
   apiKey,
   appendEngineLog,
   isChildPath,
+});
+const agentCommandProvider = createAgentCommandProvider({
+  appendEngineLog,
+  claudeAgentSdk,
+  cwd: () => process.cwd(),
+  homeDir: () => app.getPath("home"),
+  normalizeFellowAgentEngine,
+  shellCommandPath,
 });
 let authProcess = null;
 let codexOAuthCancelled = false;
@@ -2558,89 +2570,12 @@ const externalAgentBuiltInCommands = [
   { command: "/rewind", name: "/rewind", description: "提示如何回退当前对话", namespace: "builtin", type: "builtin" }
 ];
 
-function parseCommandFrontmatter(markdown = "") {
-  const raw = String(markdown || "");
-  if (!raw.startsWith("---\n") && !raw.startsWith("---\r\n")) return { data: {}, content: raw };
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!match) return { data: {}, content: raw };
-  const data = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const item = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
-    if (!item) continue;
-    let value = item[2] || "";
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    data[item[1]] = value;
-  }
-  return { data, content: raw.slice(match[0].length) };
-}
-
-function commandFromMarkdownFile(filePath, baseDir, namespace) {
-  const content = fs.readFileSync(filePath, "utf8");
-  const parsed = parseCommandFrontmatter(content);
-  const relativePath = path.relative(baseDir, filePath);
-  const command = `/${relativePath.replace(/\.md$/i, "").replace(/\\/g, "/")}`;
-  const firstLine = parsed.content.trim().split(/\r?\n/)[0] || "";
-  const description = String(parsed.data.description || firstLine.replace(/^#+\s*/, "").trim() || "自定义 Claude Code 命令");
-  return {
-    command,
-    name: command,
-    path: filePath,
-    relativePath,
-    description,
-    namespace,
-    type: "custom",
-    metadata: parsed.data
-  };
-}
-
-function scanAgentCommandsDirectory(dir, baseDir, namespace) {
-  const commands = [];
-  try {
-    if (!fs.existsSync(dir)) return commands;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        commands.push(...scanAgentCommandsDirectory(fullPath, baseDir, namespace));
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-        try {
-          commands.push(commandFromMarkdownFile(fullPath, baseDir, namespace));
-        } catch (error) {
-          appendEngineLog(`Agent command parse failed: ${fullPath}: ${error.message}`);
-        }
-      }
-    }
-  } catch (error) {
-    if (error.code !== "ENOENT" && error.code !== "EACCES") {
-      appendEngineLog(`Agent command scan failed: ${dir}: ${error.message}`);
-    }
-  }
-  return commands;
-}
-
 function agentCommandRoots(engine, projectPath = process.cwd()) {
-  const normalized = normalizeFellowAgentEngine(engine);
-  if (normalized !== "claude-code") return [];
-  const roots = [];
-  const project = String(projectPath || "").trim() || process.cwd();
-  if (project) roots.push({ namespace: "project", root: path.join(project, ".claude", "commands") });
-  roots.push({ namespace: "user", root: path.join(app.getPath("home"), ".claude", "commands") });
-  return roots;
+  return agentCommandProvider.agentCommandRoots(engine, projectPath);
 }
 
-function loadExternalAgentCommands(input = {}) {
-  const engine = normalizeFellowAgentEngine(input.engine);
-  const projectPath = String(input.projectPath || process.cwd()).trim() || process.cwd();
-  const builtIn = externalAgentBuiltInCommands.map((item) => ({ ...item, engine }));
-  const custom = [];
-  for (const root of agentCommandRoots(engine, projectPath)) {
-    custom.push(...scanAgentCommandsDirectory(root.root, root.root, root.namespace));
-  }
-  custom.sort((a, b) => a.command.localeCompare(b.command));
-  const rows = [...builtIn, ...custom.map((item) => ({ ...item, engine }))];
-  return { builtIn, custom: custom.map((item) => ({ ...item, engine })), count: rows.length, rows };
+async function loadExternalAgentCommands(input = {}) {
+  return agentCommandProvider.loadExternalAgentCommands(input);
 }
 
 function splitCommandInvocation(text = "") {
@@ -2766,7 +2701,7 @@ function isSlashCommandText(messages) {
   const lastUserIndex = dialogue.map((message) => message.role).lastIndexOf("user");
   if (lastUserIndex < 0) return "";
   const input = dialogue[lastUserIndex].content.trim();
-  return /^\/[A-Za-z0-9_/-]+(?:\s|$)/.test(input) ? input : "";
+  return /^\/[A-Za-z0-9_:/.-]+(?:\s|$)/.test(input) ? input : "";
 }
 
 function externalAgentStatus({ fellow, engine, sessionId }) {
@@ -4154,7 +4089,7 @@ async function handleControlRequest(req, res) {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/commands/agent-list") {
-      writeControlJson(res, 200, loadExternalAgentCommands({ engine: url.searchParams.get("engine") || "" }));
+      writeControlJson(res, 200, await loadExternalAgentCommands({ engine: url.searchParams.get("engine") || "" }));
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/relay/status") {
@@ -5047,7 +4982,7 @@ async function handleRelayRpc(message = {}) {
     }
     if (method === "GET" && requestPath.startsWith("/api/commands/agent-list")) {
       const rpcUrl = new URL(requestPath, "http://127.0.0.1");
-      relayRpcResult(clientId, id, true, loadExternalAgentCommands({ engine: rpcUrl.searchParams.get("engine") || "" }));
+      relayRpcResult(clientId, id, true, await loadExternalAgentCommands({ engine: rpcUrl.searchParams.get("engine") || "" }));
       return;
     }
     if (method === "POST" && requestPath === "/api/chat/session") {
@@ -6423,7 +6358,7 @@ ipcMain.handle(IpcChannel.ChatStop, () => stopChat());
 ipcMain.handle(IpcChannel.ChatAttachmentSave, (_event, payload) => saveChatAttachment(payload));
 ipcMain.handle(IpcChannel.ChatFileFetch, (_event, payload) => safeFetchFileAttachment(payload));
 ipcMain.handle(IpcChannel.CommandsSlash, () => loadHermesSlashCommands());
-ipcMain.handle(IpcChannel.CommandsAgentList, (_event, payload) => loadExternalAgentCommands(payload));
+ipcMain.handle(IpcChannel.CommandsAgentList, async (_event, payload) => loadExternalAgentCommands(payload));
 ipcMain.handle(IpcChannel.CommandsAgentExecute, (_event, payload) => executeExternalAgentCommand(payload));
 ipcMain.handle(IpcChannel.ChatSessionsLoad, () => loadChatSessions());
 ipcMain.handle(IpcChannel.ChatSessionSave, (_event, payload) => saveChatSession(payload));
