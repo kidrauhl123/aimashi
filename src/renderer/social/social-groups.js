@@ -14,30 +14,55 @@
     ctx = internalCtx;
   }
 
+  // Build the adapter-facing ctx ({ self, fellows, friends }) from
+  // social's internal ctx + the renderer's runtime state. All cloud-room
+  // sender resolution must go through this; raw cloud-message schema fields
+  // (sender kind / member kind / refs) are off-limits to this file —
+  // consume MessageSpec from cloud-room-source.js instead.
+  function _adapterCtx() {
+    const { moduleState, deps } = ctx;
+    const runtimeState = deps && typeof deps.getState === "function" ? deps.getState() : {};
+    const fellows = runtimeState.runtime?.fellows || runtimeState.runtime?.personas || [];
+    return {
+      self: { id: moduleState.myUserId || "", username: moduleState.myUsername || "" },
+      fellows,
+      friends: moduleState.friends || []
+    };
+  }
+
+  function _cloudRoomSourceFor(roomId, msgs, members) {
+    const factory = global.aimashiCloudRoomSource;
+    if (!factory || typeof factory.createCloudRoomSource !== "function") return null;
+    return factory.createCloudRoomSource({
+      room: { id: roomId },
+      messages: msgs,
+      members: members || [],
+      ctx: _adapterCtx()
+    });
+  }
+
   // ── group message article (with sender attribution) ───────────────────────
 
   function buildGroupMessageArticle(msg, accentColor, members) {
     const { moduleState, escapeHtml, renderMsgBody } = ctx;
     const article = document.createElement("article");
-    const isOwn = msg.sender_kind === "user" && msg.sender_ref === moduleState.myUserId;
+    const roomId = moduleState.activeRoomId || "";
+    const source = _cloudRoomSourceFor(roomId, [msg], members);
+    const spec = source ? source.listMessages()[0] : null;
+    const isOwn = Boolean(spec && spec.isOwn);
     article.className = "message " + (isOwn ? "user" : "assistant");
-    const bodyHtml = renderMsgBody(msg.body_md || "");
+    const bodyHtml = renderMsgBody((spec ? spec.bodyMd : msg.body_md) || "");
     const color = isOwn ? "#111827" : (accentColor || "#5e5ce6");
 
-    let senderLabel = "";
-    if (msg.sender_kind === "user") {
-      const friend = ctx.friendById(msg.sender_ref) || { username: msg.sender_ref };
-      senderLabel = escapeHtml(friend.username || msg.sender_ref || "");
-    } else if (msg.sender_kind === "fellow") {
-      const m = (members || []).find((mem) => mem.member_kind === "fellow" && mem.member_ref === msg.sender_ref);
-      // M1: prefer enriched owner object from server, fallback to legacy fields
-      const ownerUsername = m ? (m.owner?.username || m.owner?.account || m.owner_username || m.owner_id || "") : "";
-      senderLabel = escapeHtml(msg.sender_ref || "") + (ownerUsername ? escapeHtml(` (${ownerUsername})`) : "");
-    }
+    // Own messages: hide the sender label (the bubble alignment already
+    // tells the user "this is me"). Non-own: show the spec's authorName,
+    // which already encodes fellow-with-owner formatting ("codex (alice)").
+    const authorName = spec ? spec.authorName : "";
+    const senderLabel = isOwn ? "" : escapeHtml(authorName || "");
 
     const initial = isOwn
-      ? (moduleState.myUsername[0] || "M").toUpperCase()
-      : (msg.sender_ref ? msg.sender_ref[0].toUpperCase() : "?");
+      ? ((moduleState.myUsername || "M")[0] || "M").toUpperCase()
+      : ((authorName && authorName[0]) ? authorName[0].toUpperCase() : "?");
     article.innerHTML = `
       <div class="avatar" style="background-color:${escapeHtml(color)}; color:#fff;">${escapeHtml(initial)}</div>
       <div class="message-stack">
@@ -71,13 +96,18 @@
     if (!roomId || !text) return;
     const members = roomMembersCache.get(roomId) || [];
 
+    // Mention resolution lives in the cloud-room adapter — see resolveMention
+    // there. social-groups must not crack open the member list itself.
+    const source = _cloudRoomSourceFor(roomId, [], members);
     const mentionPattern = new RegExp(MENTION_REGEX.source, MENTION_REGEX.flags);
     let match;
     const mentions = [];
     while ((match = mentionPattern.exec(text)) !== null) {
       const word = match[1];
-      const m = members.find((mem) => mem.member_kind === "fellow" && mem.member_ref === word);
-      if (m) mentions.push({ kind: "fellow", fellowId: word });
+      const resolved = source && typeof source.resolveMention === "function"
+        ? source.resolveMention(word)
+        : null;
+      if (resolved) mentions.push(resolved);
     }
 
     try {
@@ -133,10 +163,16 @@
       return;
     }
 
-    const contextLines = (recentMessages || []).map((m) => {
-      if (m.sender_kind === "user") return `[user:${m.sender_ref}] ${m.body_md}`;
-      if (m.sender_kind === "fellow") return `[fellow:${m.sender_ref}] ${m.body_md}`;
-      return `[system] ${m.body_md}`;
+    // Build context lines from the cloud-room adapter's MessageSpec output
+    // instead of inspecting raw cloud schema fields here.
+    const members = ctx.roomMembersCache.get(roomId) || [];
+    const ctxSource = _cloudRoomSourceFor(roomId, recentMessages || [], members);
+    const specs = ctxSource ? ctxSource.listMessages() : [];
+    const contextLines = specs.map((s) => {
+      const tag = s.role === "assistant"
+        ? `fellow:${s.authorName}`
+        : (s.role === "system" ? "system" : `user:${s.authorName}`);
+      return `[${tag}] ${s.bodyMd}`;
     }).join("\n");
 
     const invokerName = (invokedBy && (invokedBy.username || invokedBy.account || invokedBy.id)) || "someone";

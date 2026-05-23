@@ -71,7 +71,19 @@
       });
     }
 
-    return { kind: "cloud-room", id: room.id, listMessages };
+    // Resolve a raw `@word` mention token (without the leading "@") against
+    // this room's member list. Returns `{ kind: "fellow", fellowId }` when
+    // the token matches a fellow member, or `null` otherwise. Consumers must
+    // NOT reach into `members` themselves — go through this resolver so the
+    // fellow membership rule lives in one place.
+    function resolveMention(token) {
+      if (!token) return null;
+      const fellow = memberArr.find((mem) => mem.member_kind === "fellow" && mem.member_ref === token);
+      if (fellow) return { kind: ContactKind.Fellow, fellowId: token };
+      return null;
+    }
+
+    return { kind: "cloud-room", id: room.id, listMessages, resolveMention };
   }
 
   global.aimashiCloudRoomSource = { createCloudRoomSource };
