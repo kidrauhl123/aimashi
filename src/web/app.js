@@ -192,7 +192,7 @@ function clearSession() {
 // and both route their sends through the desktop bridge in Phase B (since
 // fellow runtime is local to the owner's desktop regardless of id prefix).
 function isRoomId(id) {
-  return typeof id === "string" && (id.startsWith("dm:") || id.startsWith("g_"));
+  return typeof id === "string" && (id.startsWith("dm:") || id.startsWith("g_") || id.startsWith("fellow:"));
 }
 function isWorkspaceConversationId(id) {
   if (!id || typeof id !== "string") return false;
@@ -570,6 +570,14 @@ function roomDisplayTitle(room) {
     const otherId = parts[1] === state.user?.id ? parts[2] : parts[1];
     return friendUsernameById(otherId);
   }
+  if (room.type === "fellow" || room.id?.startsWith("fellow:")) {
+    // Title = room.name (the session title); fall back to fellow name
+    // resolved from cloud-mirrored fellow definitions.
+    if (room.name) return room.name;
+    const fellowKey = room.decorations?.fellowKey || (room.id?.split(":")[2] || "");
+    const fellow = state.fellows?.find((f) => f.id === fellowKey);
+    return fellow?.name || fellowKey || "对话";
+  }
   return room.name || "未命名群聊";
 }
 
@@ -603,6 +611,7 @@ function desktopConvSortKey(conv) {
 function combinedConversationItems() {
   const room = state.rooms.map((r) => {
     const isDM = r.id?.startsWith("dm:");
+    const isFellow = r.type === "fellow" || r.id?.startsWith("fellow:");
     let avatar = "";
     let avatarCrop = null;
     let color = "";
@@ -615,6 +624,16 @@ function combinedConversationItems() {
         avatarCrop = friend.avatarCrop || null;
         color = friend.avatarColor || "";
       }
+    } else if (isFellow) {
+      // Phase 4: resolve fellow avatar from cloud-mirrored definitions
+      // so fellow chat cards look the same as DMs and groups.
+      const fellowKey = r.decorations?.fellowKey || (r.id?.split(":")[2] || "");
+      const fellow = state.fellows?.find((f) => f.id === fellowKey);
+      if (fellow) {
+        avatar = fellow.avatarImage || "";
+        avatarCrop = fellow.avatarCrop || null;
+        color = fellow.color || "";
+      }
     }
     return {
       kind: "room",
@@ -623,6 +642,7 @@ function combinedConversationItems() {
       preview: roomLastMessageText(r),
       sortKey: roomSortKey(r),
       isDM,
+      isFellow,
       avatar,
       avatarCrop,
       color,
