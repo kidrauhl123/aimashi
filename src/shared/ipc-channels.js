@@ -107,6 +107,8 @@
     SocialPostRoomMessage: "social:post-room-message",
     SocialMyUsername: "social:my-username",
     SocialCreateRoom: "social:create-room",
+    SocialUpdateRoom: "social:update-room",
+    SocialDeleteRoom: "social:delete-room",
     SocialAddRoomMember: "social:add-room-member",
     SocialPostMessageAsFellow: "social:post-message-as-fellow"
   });

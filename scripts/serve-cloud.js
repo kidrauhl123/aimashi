@@ -906,6 +906,61 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { room, members: enriched });
     }
 
+    // PATCH /api/rooms/:id — update room metadata (name, decorations).
+    // Used by sidebar context menu for rename and pin. Any member of the
+    // room can edit metadata; this is intentionally lenient because the
+    // operations are non-destructive and aimashi has no group-admin model.
+    if (req.method === "PATCH" && roomDetailMatch) {
+      const roomId = roomDetailMatch[1];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const existing = context.socialStore.getRoom(roomId);
+      if (!existing) return writeError(res, 404, "room not found");
+      const body = await readJson(req);
+      const patch = {};
+      if (Object.prototype.hasOwnProperty.call(body, "name")) {
+        const name = String(body.name || "").trim();
+        if (!name || name.length > 80) return writeError(res, 400, "name must be 1..80 chars");
+        if (roomId.startsWith("dm:")) return writeError(res, 400, "DM rooms cannot be renamed");
+        patch.name = name;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, "decorations")) {
+        patch.decorations = body.decorations && typeof body.decorations === "object" ? body.decorations : null;
+      }
+      const room = context.socialStore.updateRoom(roomId, patch);
+      const members = context.socialStore.listRoomMembers(roomId);
+      // Broadcast room.updated to all user-members so other devices/clients refresh.
+      for (const m of members) {
+        if (m.member_kind === "user") {
+          broadcastEvent(context.eventHub, m.member_ref, { type: "room.updated", room });
+        }
+      }
+      return writeJson(res, 200, { room });
+    }
+
+    // DELETE /api/rooms/:id — remove the room. ON DELETE CASCADE in the
+    // schema removes room_members + messages automatically. Any member can
+    // initiate (same lenient rule as PATCH).
+    if (req.method === "DELETE" && roomDetailMatch) {
+      const roomId = roomDetailMatch[1];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const existing = context.socialStore.getRoom(roomId);
+      if (!existing) return writeError(res, 404, "room not found");
+      const members = context.socialStore.listRoomMembers(roomId);
+      context.socialStore.deleteRoom(roomId);
+      // Broadcast room.deleted BEFORE removing connections — let clients
+      // close any open subscriptions on this room.
+      for (const m of members) {
+        if (m.member_kind === "user") {
+          broadcastEvent(context.eventHub, m.member_ref, { type: "room.deleted", roomId });
+        }
+      }
+      return writeJson(res, 200, { ok: true });
+    }
+
     if (req.method === "GET" && roomMsgsMatch) {
       const roomId = roomMsgsMatch[1];
       if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {

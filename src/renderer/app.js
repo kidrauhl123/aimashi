@@ -566,7 +566,16 @@ function conversationCardSpecFromRow(row, personas) {
         {
           togglePinned: () => { social.setRoomPinned(room.id, !dmPinned); render(); },
           markRead: () => { social.markRoomRead(room.id); render(); },
-          notSupported: { rename: "云端房间重命名暂不支持", remove: "云端房间删除暂不支持" }
+          remove: async () => {
+            if (!confirm(`确定删除与「${name}」的对话？此操作不可撤销。`)) return;
+            const res = await social.deleteCloudRoom(room.id);
+            if (!res?.ok) alert(`删除失败：${res?.error || "未知错误"}`);
+          },
+          // DM display name comes from the peer's profile, not the room
+          // record, so server rejects PATCH name on dm:* rooms. Leave
+          // rename as not supported here — fixing it would mean editing
+          // the peer's username, which is a different feature.
+          notSupported: { rename: "私聊对方名称由对方用户名决定，无法在此重命名" }
         },
         x, y
       )
@@ -622,7 +631,17 @@ function conversationCardSpecFromRow(row, personas) {
             });
             alert(`${cgName}\n\n${lines.join("\n") || "（无成员信息）"}`);
           },
-          notSupported: { remove: "云端群删除暂不支持" }
+          rename: async () => {
+            const next = window.prompt("编辑群组名称", cgName);
+            if (!next || next.trim() === cgName) return;
+            const res = await social.renameRoom(room.id, next.trim());
+            if (!res?.ok) alert(`重命名失败：${res?.error || "未知错误"}`);
+          },
+          remove: async () => {
+            if (!confirm(`确定删除群组「${cgName}」？此操作不可撤销，所有成员都将无法访问。`)) return;
+            const res = await social.deleteCloudRoom(room.id);
+            if (!res?.ok) alert(`删除失败：${res?.error || "未知错误"}`);
+          }
         },
         x, y
       )

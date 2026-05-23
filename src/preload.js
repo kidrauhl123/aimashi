@@ -129,6 +129,8 @@ contextBridge.exposeInMainWorld("aimashi", {
     postRoomMessage: (roomId, body) => ipcRenderer.invoke(IpcChannel.SocialPostRoomMessage, roomId, body),
     myUsername: () => ipcRenderer.invoke(IpcChannel.SocialMyUsername),
     createRoom: (payload) => ipcRenderer.invoke(IpcChannel.SocialCreateRoom, payload),
+    updateRoom: (roomId, patch) => ipcRenderer.invoke(IpcChannel.SocialUpdateRoom, roomId, patch),
+    deleteRoom: (roomId) => ipcRenderer.invoke(IpcChannel.SocialDeleteRoom, roomId),
     addRoomMember: (roomId, member) => ipcRenderer.invoke(IpcChannel.SocialAddRoomMember, roomId, member),
     postRoomMessageAsFellow: (roomId, body) => ipcRenderer.invoke(IpcChannel.SocialPostMessageAsFellow, roomId, body)
   },

@@ -298,6 +298,34 @@
       return;
     }
 
+    // PATCH /api/rooms/:id from any device. Merge the patched room back in
+    // by id; broadcast originator includes ourselves so this also handles
+    // multi-tab consistency.
+    if (type === "room.updated") {
+      const { room } = payload || {};
+      if (!room || !room.id) return;
+      moduleState.rooms = moduleState.rooms.map((r) => (r.id === room.id ? { ...r, ...room } : r));
+      if (deps && typeof deps.render === "function") deps.render();
+      return;
+    }
+
+    // DELETE /api/rooms/:id from any device.
+    if (type === "room.deleted") {
+      const { roomId } = payload || {};
+      if (!roomId) return;
+      moduleState.rooms = moduleState.rooms.filter((r) => r.id !== roomId);
+      moduleState.messageCache.delete(roomId);
+      moduleState.unreadByRoom.delete(roomId);
+      _roomMembersCache.delete(roomId);
+      if (roomId === moduleState.activeRoomId) moduleState.activeRoomId = null;
+      if (moduleState.pinnedRooms) {
+        moduleState.pinnedRooms.delete(roomId);
+        _savePinnedRooms();
+      }
+      if (deps && typeof deps.render === "function") deps.render();
+      return;
+    }
+
     if (type === "room.fellow_invocation_requested") {
       handleFellowInvocation(payload).catch((err) => {
         console.warn("[social] handleFellowInvocation error:", err?.message || err);
@@ -876,6 +904,42 @@
     else moduleState.pinnedRooms.delete(roomId);
     _savePinnedRooms();
   }
+
+  // PATCH /api/rooms/:id — rename the cloud room (groups only; DM rename
+  // is rejected server-side because DM display name is derived from the
+  // peer's profile). Optimistically updates local rooms list; the
+  // room.updated WS event will reconcile from canonical state.
+  async function renameRoom(roomId, name) {
+    if (!roomId || !name) return { ok: false, error: "missing arg" };
+    const res = await window.aimashi.social.updateRoom(roomId, { name });
+    if (res?.ok && res.data?.room) {
+      const room = res.data.room;
+      moduleState.rooms = moduleState.rooms.map((r) => (r.id === room.id ? { ...r, ...room } : r));
+      if (deps && typeof deps.render === "function") deps.render();
+    }
+    return res;
+  }
+
+  // DELETE /api/rooms/:id — remove the cloud room. Server cascades members
+  // + messages. WS room.deleted will sync other tabs; this also cleans up
+  // local state immediately.
+  async function deleteCloudRoom(roomId) {
+    if (!roomId) return { ok: false, error: "missing arg" };
+    const res = await window.aimashi.social.deleteRoom(roomId);
+    if (res?.ok) {
+      moduleState.rooms = moduleState.rooms.filter((r) => r.id !== roomId);
+      moduleState.messageCache.delete(roomId);
+      moduleState.unreadByRoom.delete(roomId);
+      _roomMembersCache.delete(roomId);
+      if (roomId === moduleState.activeRoomId) moduleState.activeRoomId = null;
+      if (moduleState.pinnedRooms) {
+        moduleState.pinnedRooms.delete(roomId);
+        _savePinnedRooms();
+      }
+      if (deps && typeof deps.render === "function") deps.render();
+    }
+    return res;
+  }
   function getUnreadForRoom(roomId) {
     return unreadShared().computeUnreadForConversation({ id: roomId }, moduleState.unreadByRoom);
   }
@@ -917,6 +981,8 @@
     markRoomRead,
     isRoomPinned,
     setRoomPinned,
+    renameRoom,
+    deleteCloudRoom,
     getUnreadForRoom,
     getTotalRoomUnread,
     getRoomMembers,

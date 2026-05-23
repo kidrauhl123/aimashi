@@ -115,8 +115,11 @@
     if (actions.togglePinned) {
       items.push({ icon: "pin", label: conversation.pinned ? "取消置顶" : "置顶", key: "pin" });
     }
-    if (actions.openInfo || actions.rename || actions.notSupported?.rename) {
+    if (actions.openInfo) {
       items.push({ icon: "edit", label: "群信息", key: "info" });
+    }
+    if (actions.rename || actions.notSupported?.rename) {
+      items.push({ icon: "edit", label: "重命名", key: "rename" });
     }
     if (actions.markRead) {
       items.push({ icon: "message", label: "标记已读", key: "mark-read", disabled: !conversation.unread });
@@ -128,8 +131,8 @@
     render(menu, items, async (key) => {
       closeMenu();
       if (key === "pin") return actions.togglePinned?.();
-      if (key === "info") {
-        if (actions.openInfo) return actions.openInfo();
+      if (key === "info") return actions.openInfo?.();
+      if (key === "rename") {
         if (actions.rename) return actions.rename();
         return alert(actions.notSupported?.rename || "暂未支持");
       }

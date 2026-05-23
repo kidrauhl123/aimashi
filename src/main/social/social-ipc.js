@@ -23,6 +23,8 @@ function registerSocialIpc({ ipcMain, socialApi }) {
   ipcMain.handle(IpcChannel.SocialListRoomMessages, safeCall((roomId, sinceSeq, limit) => socialApi.listRoomMessages(roomId, sinceSeq, limit)));
   ipcMain.handle(IpcChannel.SocialPostRoomMessage, safeCall((roomId, body) => socialApi.postRoomMessage(roomId, body)));
   ipcMain.handle(IpcChannel.SocialCreateRoom, safeCall((payload) => socialApi.createRoom(payload)));
+  ipcMain.handle(IpcChannel.SocialUpdateRoom, safeCall((roomId, patch) => socialApi.updateRoom(roomId, patch)));
+  ipcMain.handle(IpcChannel.SocialDeleteRoom, safeCall((roomId) => socialApi.deleteRoom(roomId)));
   ipcMain.handle(IpcChannel.SocialAddRoomMember, safeCall((roomId, member) => socialApi.addRoomMember(roomId, member)));
   ipcMain.handle(IpcChannel.SocialPostMessageAsFellow, safeCall((roomId, body) => socialApi.postRoomMessageAsFellow(roomId, body)));
 }
