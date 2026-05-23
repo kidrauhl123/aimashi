@@ -23,6 +23,12 @@ try {
 } catch {
   ({ createMessagesStore } = require("./src/cloud/messages-store.js"));
 }
+let createEventLogStore = null;
+try {
+  ({ createEventLogStore } = require("../src/cloud/event-log-store.js"));
+} catch {
+  ({ createEventLogStore } = require("./src/cloud/event-log-store.js"));
+}
 let dmRoomId = null;
 let ensureDmRoom = null;
 try {
@@ -323,7 +329,44 @@ function attachEventSocket(hub, ws, userId) {
   sendWsJson(ws, { type: "events_ready" });
 }
 
-function broadcastEvent(hub, userId, payload) {
+// Push a state-changing event: persist it in the user_events log so that
+// disconnected clients can replay it on reconnect via since_seq, AND
+// broadcast it to currently-connected sockets with the assigned seq
+// attached. ALL caller paths that mutate shared state (social.*, room.*,
+// workspace_updated, message_created) must go through this — bridges
+// only see the seq-tagged version so duplicate detection works.
+//
+// Returns the persisted event (so callers may use its seq in responses).
+function broadcastPersistedEvent(context, userId, payload) {
+  if (!userId || !payload || !payload.type) return null;
+  let event = null;
+  try {
+    event = context.eventLog.appendEvent(userId, {
+      kind: payload.type,
+      scopeKind: payload.scopeKind || null,
+      scopeRef: payload.scopeRef || null,
+      payload
+    });
+  } catch (err) {
+    // Persistence is the source of truth — if we can't write the event we
+    // should not advertise it either, otherwise reconnect replay would
+    // miss it forever.
+    console.error("[event-log] appendEvent failed", { userId, kind: payload.type, err: err?.message });
+    return null;
+  }
+  const tagged = { ...payload, seq: event.seq, eventId: event.id };
+  for (const ws of context.eventHub.socketsByUser.get(userId) || []) {
+    sendWsJson(ws, tagged);
+  }
+  return event;
+}
+
+// Push a transient event (no replay needed): bridge run progress, device
+// online/offline. These describe momentary process state, not durable
+// user-facing state, so persistence would just inflate the event log
+// without value. If the client missed it, the next bridge_run_updated /
+// device_updated supersedes anyway.
+function broadcastTransientEvent(hub, userId, payload) {
   for (const ws of hub.socketsByUser.get(userId) || []) {
     sendWsJson(ws, payload);
   }
@@ -367,7 +410,7 @@ function removeBridgeDevice(hub, device) {
   try {
     device.cloudStore?.removeBridgeDevice(device.userId, device.id);
     if (device.eventHub) {
-      broadcastEvent(device.eventHub, device.userId, {
+      broadcastTransientEvent(device.eventHub, device.userId, {
         type: "device_updated",
         devices: bridgeDevices(hub, device.userId)
       });
@@ -417,7 +460,7 @@ function attachBridgeDevice(hub, ws, { userId, deviceName, engine, capabilities,
     if (message.type === "run_event") {
       const pending = hub.pendingRuns.get(String(message.runId || ""));
       if (!pending || pending.deviceId !== device.id) return;
-      broadcastEvent(device.eventHub, device.userId, {
+      broadcastTransientEvent(device.eventHub, device.userId, {
         type: "bridge_run_event",
         runId: pending.runId,
         event: sanitizeBridgeRunEvent(message.event)
@@ -725,7 +768,7 @@ async function handleRequest(req, res, context) {
         return writeError(res, 409, e.message);
       }
       // notify the addressee
-      broadcastEvent(context.eventHub, toUser.id, {
+      broadcastPersistedEvent(context, toUser.id, {
         type: "social.friend_request_received",
         request: { ...created, from: context.cloudStore.getUserPublic(auth.user.id) }
       });
@@ -769,12 +812,12 @@ async function handleRequest(req, res, context) {
         const senderPublic = context.cloudStore.getUserPublic(updated.from_user);
         const accepterPublic = context.cloudStore.getUserPublic(auth.user.id);
         // notify both
-        broadcastEvent(context.eventHub, updated.from_user, {
+        broadcastPersistedEvent(context, updated.from_user, {
           type: "social.friend_added",
           friend: accepterPublic,
           room
         });
-        broadcastEvent(context.eventHub, auth.user.id, {
+        broadcastPersistedEvent(context, auth.user.id, {
           type: "social.friend_added",
           friend: senderPublic,
           room
@@ -863,7 +906,7 @@ async function handleRequest(req, res, context) {
       // Broadcast social.room_invited to all user-members except creator
       for (const m of members) {
         if (m.member_kind === "user" && m.member_ref !== auth.user.id) {
-          broadcastEvent(context.eventHub, m.member_ref, { type: "social.room_invited", room, invitedBy: creatorPublic });
+          broadcastPersistedEvent(context, m.member_ref, { type: "social.room_invited", room, invitedBy: creatorPublic });
         }
       }
       return writeJson(res, 201, { room, members });
@@ -894,7 +937,7 @@ async function handleRequest(req, res, context) {
         const member = context.socialStore.getRoomMember(roomId, "user", memberRef);
         const room = context.socialStore.getRoom(roomId);
         const inviterPublic = context.cloudStore.getUserPublic(auth.user.id);
-        broadcastEvent(context.eventHub, memberRef, { type: "social.room_invited", room, invitedBy: inviterPublic });
+        broadcastPersistedEvent(context, memberRef, { type: "social.room_invited", room, invitedBy: inviterPublic });
         return writeJson(res, 201, { ok: true, member });
       }
       // memberKind === 'fellow'
@@ -931,7 +974,7 @@ async function handleRequest(req, res, context) {
       });
       for (const m of context.socialStore.listRoomMembers(roomId)) {
         if (m.member_kind === "user") {
-          broadcastEvent(context.eventHub, m.member_ref, { type: "room.message_appended", roomId, message });
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.message_appended", roomId, message });
         }
       }
       return writeJson(res, 201, { message });
@@ -982,7 +1025,7 @@ async function handleRequest(req, res, context) {
       // Broadcast room.updated to all user-members so other devices/clients refresh.
       for (const m of members) {
         if (m.member_kind === "user") {
-          broadcastEvent(context.eventHub, m.member_ref, { type: "room.updated", room });
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.updated", room });
         }
       }
       return writeJson(res, 200, { room });
@@ -1004,7 +1047,7 @@ async function handleRequest(req, res, context) {
       // close any open subscriptions on this room.
       for (const m of members) {
         if (m.member_kind === "user") {
-          broadcastEvent(context.eventHub, m.member_ref, { type: "room.deleted", roomId });
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.deleted", roomId });
         }
       }
       return writeJson(res, 200, { ok: true });
@@ -1048,7 +1091,7 @@ async function handleRequest(req, res, context) {
       const allMembers = context.socialStore.listRoomMembers(roomId);
       for (const m of allMembers) {
         if (m.member_kind === "user") {
-          broadcastEvent(context.eventHub, m.member_ref, { type: "room.message_appended", roomId, message });
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.message_appended", roomId, message });
         }
       }
       // 2. Handle fellow mentions — dispatch invocation request to fellow owner (cross-user)
@@ -1062,7 +1105,7 @@ async function handleRequest(req, res, context) {
         // Only dispatch cross-user invocations (owner is not the sender)
         if (fellowMember.owner_id === auth.user.id) continue;
         const recentMessages = context.messagesStore.listMessagesSince(roomId, Math.max(0, message.seq - 6), 6);
-        broadcastEvent(context.eventHub, fellowMember.owner_id, {
+        broadcastPersistedEvent(context, fellowMember.owner_id, {
           type: "room.fellow_invocation_requested",
           roomId,
           fellowId,
@@ -1105,7 +1148,7 @@ async function handleRequest(req, res, context) {
       const rawWorkspace = body.workspace && typeof body.workspace === "object" ? body.workspace : {};
       const incoming = sanitizeCloudWorkspaceAttachments(cloudStore, auth.user.id, rawWorkspace);
       const workspace = cloudStore.putWorkspace(auth.user.id, incoming);
-      broadcastEvent(context.eventHub, auth.user.id, { type: "workspace_updated", workspace });
+      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
       return writeJson(res, 200, { workspace });
     }
 
@@ -1177,7 +1220,7 @@ async function handleRequest(req, res, context) {
       // Anything left in incomingById is brand new — prepend.
       for (const c of incomingById.values()) merged.unshift(c);
       const workspace = cloudStore.putWorkspace(auth.user.id, { ...current, conversations: merged });
-      broadcastEvent(context.eventHub, auth.user.id, { type: "workspace_updated", workspace });
+      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
       return writeJson(res, 200, { workspace });
     }
 
@@ -1195,7 +1238,7 @@ async function handleRequest(req, res, context) {
       const wasPending = cancelBridgeRunDevice(bridgeHub, auth.user.id, runId);
       const run = cloudStore.cancelBridgeRun(auth.user.id, runId);
       if (!run) return writeError(res, 404, "Bridge run not found.");
-      broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run });
+      broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run });
       return writeJson(res, wasPending || run.status === "cancelled" ? 200 : 409, { run });
     }
 
@@ -1219,7 +1262,7 @@ async function handleRequest(req, res, context) {
         activeConversationId: conversation.id,
         conversations
       });
-      broadcastEvent(context.eventHub, auth.user.id, { type: "workspace_updated", workspace });
+      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
       return writeJson(res, 201, { workspace, conversation });
     }
 
@@ -1253,7 +1296,7 @@ async function handleRequest(req, res, context) {
         conversationId: String(body.conversationId || ""),
         message
       });
-      broadcastEvent(context.eventHub, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
+      broadcastPersistedEvent(context, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
       return writeJson(res, 201, appended);
     }
 
@@ -1272,10 +1315,10 @@ async function handleRequest(req, res, context) {
         text: String(body.text || ""),
         attachments: requestAttachments
       });
-      broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: bridgeRun });
+      broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: bridgeRun });
       try {
         const running = cloudStore.startBridgeRun(auth.user.id, bridgeRun.id);
-        broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: running });
+        broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: running });
         const result = await runBridgeDevice(bridgeHub, device, {
           runId: bridgeRun.id,
           conversationId: bridgeRun.conversationId,
@@ -1287,7 +1330,7 @@ async function handleRequest(req, res, context) {
           text: result.text,
           attachments
         });
-        broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: completed });
+        broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: completed });
         const message = {
           id: id("msg"),
           role: "assistant",
@@ -1299,20 +1342,20 @@ async function handleRequest(req, res, context) {
           conversationId: String(body.conversationId || ""),
           message
         });
-        broadcastEvent(context.eventHub, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
+        broadcastPersistedEvent(context, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
         return writeJson(res, 200, { ...appended, run: completed });
       } catch (error) {
         if (error.code === "AIMASHI_BRIDGE_CANCELLED") {
           const cancelled = cloudStore.getBridgeRun(auth.user.id, bridgeRun.id)
             || cloudStore.cancelBridgeRun(auth.user.id, bridgeRun.id);
           const workspace = cloudStore.getWorkspace(auth.user.id);
-          broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: cancelled });
+          broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: cancelled });
           return writeJson(res, 200, { workspace, run: cancelled, cancelled: true });
         }
         const failed = error.code === "AIMASHI_BRIDGE_TIMEOUT"
           ? cloudStore.timeoutBridgeRun(auth.user.id, bridgeRun.id, error.message || "本机 Agent 响应超时。")
           : cloudStore.failBridgeRun(auth.user.id, bridgeRun.id, error.message || "本机 Agent 执行失败。");
-        broadcastEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: failed });
+        broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: failed });
         return writeError(res, 500, error.message || "本机 Agent 执行失败。");
       }
     }
@@ -1370,7 +1413,7 @@ function handleBridgeUpgrade(req, socket, head, context, wss) {
       cloudStore,
       eventHub: context.eventHub
     });
-    broadcastEvent(context.eventHub, auth.user.id, { type: "device_updated", devices: bridgeDevices(context.bridgeHub, auth.user.id) });
+    broadcastTransientEvent(context.eventHub, auth.user.id, { type: "device_updated", devices: bridgeDevices(context.bridgeHub, auth.user.id) });
   });
 }
 
@@ -1390,6 +1433,7 @@ function createAimashiCloudServer(options = {}) {
   };
   context.socialStore = createSocialStore(context.cloudStore.getDb());
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
+  context.eventLog = createEventLogStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => handleBridgeUpgrade(req, socket, head, context, wss));
