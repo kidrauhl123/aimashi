@@ -313,7 +313,7 @@ function sendWsJson(ws, payload) {
   });
 }
 
-function attachEventSocket(hub, ws, userId) {
+function attachEventSocket(hub, ws, userId, { eventLog, sinceSeq = 0 } = {}) {
   if (!hub.socketsByUser.has(userId)) hub.socketsByUser.set(userId, new Set());
   hub.socketsByUser.get(userId).add(ws);
   ws.on("close", () => {
@@ -326,7 +326,37 @@ function attachEventSocket(hub, ws, userId) {
     sockets?.delete(ws);
     if (sockets && !sockets.size) hub.socketsByUser.delete(userId);
   });
-  sendWsJson(ws, { type: "events_ready" });
+
+  // Replay any events the client missed while disconnected. Stream in
+  // 500-row batches so a multi-day-offline client doesn't choke a single
+  // socket frame; mark the last batch with `more:false`. The server's
+  // current seq is sent in events_ready so the client can detect "I'm
+  // up to date" even when there's nothing to replay.
+  const cursorStart = Number.isFinite(Number(sinceSeq)) ? Math.max(0, Number(sinceSeq)) : 0;
+  let serverSeq = cursorStart;
+  if (eventLog && typeof eventLog.maxSeqForUser === "function") {
+    try { serverSeq = eventLog.maxSeqForUser(userId); } catch { /* fall through with cursorStart */ }
+  }
+  sendWsJson(ws, { type: "events_ready", sinceSeq: cursorStart, serverSeq });
+
+  if (eventLog && serverSeq > cursorStart) {
+    let cursor = cursorStart;
+    const BATCH = 500;
+    while (cursor < serverSeq) {
+      let batch = [];
+      try { batch = eventLog.listEventsSince(userId, cursor, BATCH); }
+      catch (err) {
+        console.error("[event-log] replay failed", { userId, cursor, err: err?.message });
+        break;
+      }
+      if (!batch.length) break;
+      for (const ev of batch) {
+        sendWsJson(ws, { ...(ev.payload || {}), seq: ev.seq, eventId: ev.id, replay: true });
+      }
+      cursor = batch[batch.length - 1].seq;
+      if (batch.length < BATCH) break;
+    }
+  }
 }
 
 // Push a state-changing event: persist it in the user_events log so that
@@ -1402,7 +1432,8 @@ function handleBridgeUpgrade(req, socket, head, context, wss) {
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (url.pathname === "/api/events") {
-      attachEventSocket(context.eventHub, ws, auth.user.id);
+      const sinceSeq = Number(url.searchParams.get("since_seq") || 0);
+      attachEventSocket(context.eventHub, ws, auth.user.id, { eventLog: context.eventLog, sinceSeq });
       return;
     }
     attachBridgeDevice(context.bridgeHub, ws, {

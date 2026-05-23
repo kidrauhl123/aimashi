@@ -279,7 +279,11 @@ function createSettingsStore(deps = {}) {
       enabled: Boolean(saved.enabled && saved.token),
       url: normalizeCloudUrl(saved.url),
       token: String(saved.token || ""),
-      user: saved.user && typeof saved.user === "object" ? saved.user : null
+      user: saved.user && typeof saved.user === "object" ? saved.user : null,
+      // Tracks the last user_events.seq this device has applied. Sent on
+      // every WS connect via `?since_seq=N`; server replays everything
+      // newer so disconnect/reconnect/replay is transparent (Phase 1.C).
+      lastEventSeq: Number.isFinite(Number(saved.lastEventSeq)) ? Number(saved.lastEventSeq) : 0
     };
   }
 
@@ -290,11 +294,17 @@ function createSettingsStore(deps = {}) {
       enabled: settings.enabled !== undefined ? Boolean(settings.enabled) : current.enabled,
       url: normalizeCloudUrl(settings.url || current.url),
       token: String(settings.token !== undefined ? settings.token : current.token || ""),
-      user: settings.user !== undefined ? settings.user : current.user
+      user: settings.user !== undefined ? settings.user : current.user,
+      lastEventSeq: settings.lastEventSeq !== undefined
+        ? (Number.isFinite(Number(settings.lastEventSeq)) ? Number(settings.lastEventSeq) : current.lastEventSeq)
+        : current.lastEventSeq
     };
     if (!next.token) {
       next.enabled = false;
       next.user = null;
+      // Different user / logout → discard the seq cursor so the next
+      // login replays from 0 instead of trying to resume someone else's.
+      next.lastEventSeq = 0;
     }
     fs.mkdirSync(path.dirname(p.cloudSettings), { recursive: true });
     fs.writeFileSync(p.cloudSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });

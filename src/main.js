@@ -4835,7 +4835,12 @@ function cloudWebSocketProtocols(settings = settingsStore.cloudSettings()) {
 }
 
 function cloudEventsUrl(settings = settingsStore.cloudSettings()) {
-  return cloudWebSocketUrl("/api/events", settings).toString();
+  const url = cloudWebSocketUrl("/api/events", settings);
+  // Tell the server where we left off so it can replay any persisted
+  // events we missed while disconnected (Phase 1.C). 0 == replay from
+  // the start (login / fresh install).
+  url.searchParams.set("since_seq", String(Number(settings.lastEventSeq) || 0));
+  return url.toString();
 }
 
 function cloudBridgeUrl(settings = settingsStore.cloudSettings()) {
@@ -4898,8 +4903,23 @@ function handleCloudEventsMessage(raw) {
     appendCloudLog("Cloud events sent invalid JSON.");
     return;
   }
+  // Every persisted event from the server carries a `seq`. Track the
+  // highest one we've applied so the next reconnect resumes from there
+  // (Phase 1.C). events_ready carries serverSeq for the "already
+  // up-to-date" case; do the same persist there.
+  if (Number.isFinite(Number(message.seq))) {
+    const current = settingsStore.cloudSettings().lastEventSeq || 0;
+    if (Number(message.seq) > current) {
+      settingsStore.writeCloudSettings({ lastEventSeq: Number(message.seq) });
+    }
+  } else if (message.type === CloudEvent.EventsReady && Number.isFinite(Number(message.serverSeq))) {
+    const current = settingsStore.cloudSettings().lastEventSeq || 0;
+    if (Number(message.serverSeq) > current) {
+      settingsStore.writeCloudSettings({ lastEventSeq: Number(message.serverSeq) });
+    }
+  }
   if (message.type === CloudEvent.EventsReady) {
-    appendCloudLog("Aimashi Cloud events connected.");
+    appendCloudLog(`Aimashi Cloud events connected (since_seq=${message.sinceSeq || 0}, serverSeq=${message.serverSeq || 0}).`);
     broadcastRendererEvent(IpcChannel.CloudEvent, { type: CloudEvent.EventsReady, cloud: cloudStatus(false) });
     return;
   }

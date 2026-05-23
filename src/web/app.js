@@ -328,11 +328,22 @@ async function ensureRoomMembers(roomId) {
 
 // ── cloud events (WS) ──────────────────────────────────────────────────────
 
+// Resume cursor for replay (Phase 1.C). Per-account so logging out of A
+// and into B doesn't replay A's events to B's session.
+function lastEventSeqKey() { return `aimashi.web.lastEventSeq.${state.user?.id || "anon"}`; }
+function loadLastEventSeq() {
+  try { return Number(localStorage.getItem(lastEventSeqKey())) || 0; } catch { return 0; }
+}
+function saveLastEventSeq(n) {
+  try { localStorage.setItem(lastEventSeqKey(), String(Math.max(0, Number(n) || 0))); } catch { /* silent */ }
+}
+
 function startCloudEvents() {
   if (!state.token) return;
   stopCloudEvents();
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${proto}//${window.location.host}/api/events`;
+  const sinceSeq = loadLastEventSeq();
+  const url = `${proto}//${window.location.host}/api/events?since_seq=${sinceSeq}`;
   let socket;
   try {
     socket = new WebSocket(url, ["aimashi-token." + state.token]);
@@ -348,6 +359,13 @@ function startCloudEvents() {
     if (eventsSocket !== socket) return;
     let envelope;
     try { envelope = JSON.parse(event.data); } catch { return; }
+    // Track resume cursor (Phase 1.C). Persisted events carry `seq`;
+    // events_ready may carry `serverSeq` (no replay needed case).
+    if (Number.isFinite(Number(envelope.seq))) {
+      if (Number(envelope.seq) > loadLastEventSeq()) saveLastEventSeq(envelope.seq);
+    } else if (envelope.type === "events_ready" && Number.isFinite(Number(envelope.serverSeq))) {
+      if (Number(envelope.serverSeq) > loadLastEventSeq()) saveLastEventSeq(envelope.serverSeq);
+    }
     handleCloudEvent(envelope);
   });
   socket.addEventListener("close", () => {
