@@ -362,7 +362,7 @@
         // No friends selected → local fellow-only group (no cloud login required).
         if (memberFriendUserIds.length === 0) {
           if (fellowEntries.length < 2) {
-            alert("本地群聊至少需要 2 位智能体");
+            alert("群聊至少需要 2 位智能体");
             confirmBtn.disabled = false;
             return;
           }

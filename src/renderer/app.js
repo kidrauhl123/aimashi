@@ -648,7 +648,9 @@ function conversationCardSpecFromRow(row, personas) {
     };
   }
 
-  // ── local fellow group (existing) — composite avatar, full polish ────────
+  // ── group stored locally (used to be "local fellow group" — the name said
+  //     "local" but the user's experience shouldn't see that distinction:
+  //     it's just a group, and "upload to cloud" promotes it cross-device).
   if (row.type === "group") {
     const group = row.group;
     const preview = groupConversationPreview(group, personas);
@@ -661,12 +663,15 @@ function conversationCardSpecFromRow(row, personas) {
         color: fellow?.color || "#5e5ce6"
       });
     }
+    // Member count: include the user (boss) + fellow members, mirroring how
+    // cloud groups count (memberRecords already include the host user-member).
+    const localMemberCount = 1 + (group.members?.length || 0);
     return {
       kind: "group",
       active: group.id === state.activeKey,
       pinned: Boolean(group.pinned),
       name: group.name || "未命名群聊",
-      typeLabel: "群聊",
+      typeLabel: `群聊 · ${localMemberCount}人`,
       preview: preview.text,
       time: preview.time,
       unread: 0,
@@ -698,7 +703,24 @@ function conversationCardSpecFromRow(row, personas) {
               alert("保存群名失败：" + (err?.message || String(err)));
             }
           },
-          markRead: () => { /* local groups don't track unread separately — menu item shows disabled because unread=0 */ },
+          markRead: () => { /* local-store groups have no separate unread state — menu item renders disabled because unread=0 */ },
+          uploadToCloud: async () => {
+            if (!window.aimashi?.social) return alert("请先登录云端账号");
+            if (!confirm(`将群组「${group.name || "未命名群聊"}」上传到云端？\n上传后其他设备登录同账号即可看到，但本地副本仍会保留。`)) return;
+            try {
+              const memberFellows = (group.members || []).map((m) => ({ fellowId: m.fellowId })).filter((x) => x.fellowId);
+              const res = await window.aimashi.social.createRoom({
+                name: group.name || "未命名群聊",
+                memberFellows,
+                memberFriendUserIds: []
+              });
+              if (!res?.ok) return alert("上传失败：" + (res?.error || "未知错误"));
+              alert("已上传到云端。");
+              render();
+            } catch (err) {
+              alert("上传失败：" + (err?.message || String(err)));
+            }
+          },
           remove: () => deleteGroup(group.id)
         },
         x, y
@@ -1521,7 +1543,7 @@ async function setGroupPinned(groupId, pinned) {
 async function deleteGroup(groupId) {
   const group = groupById(groupId);
   if (!group) return;
-  const ok = window.confirm(`删除群组「${group.name || "未命名群聊"}」？\n\n这会移除该群组和本地群聊记录。`);
+  const ok = window.confirm(`删除群组「${group.name || "未命名群聊"}」？\n\n该群组和聊天记录将被移除，操作不可撤销。`);
   if (!ok) return;
   try {
     await window.aimashi.groups.delete(group.id);

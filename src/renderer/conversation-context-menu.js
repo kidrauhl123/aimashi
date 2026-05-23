@@ -124,6 +124,13 @@
     if (actions.markRead) {
       items.push({ icon: "message", label: "标记已读", key: "mark-read", disabled: !conversation.unread });
     }
+    // Cross-storage promotion: only shown for groups that exist solely
+    // in the local store. Cloud groups don't expose this — they're
+    // already cross-device. (One-directional: cloud→local sync isn't
+    // safe for groups containing real friends.)
+    if (actions.uploadToCloud) {
+      items.push({ icon: "message", label: "上传到云端", key: "upload-cloud" });
+    }
     if (actions.remove || actions.notSupported?.remove) {
       items.push({ separator: true });
       items.push({ icon: "delete", label: "删除群组", key: "remove", danger: true });
@@ -137,6 +144,7 @@
         return alert(actions.notSupported?.rename || "暂未支持");
       }
       if (key === "mark-read") return actions.markRead?.();
+      if (key === "upload-cloud") return actions.uploadToCloud?.();
       if (key === "remove") {
         if (actions.remove) return actions.remove();
         return alert(actions.notSupported?.remove || "暂未支持");
