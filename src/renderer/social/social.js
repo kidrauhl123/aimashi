@@ -180,6 +180,19 @@
           console.warn("[social] listRoomMessages failed for", room.id, err);
         }
       }));
+
+      // Prefetch members for every group room so the sidebar mosaic
+      // shows real avatars on first paint instead of an empty circle.
+      // Bounded by INITIAL_ROOMS_CAP just like the message fetch above.
+      const groupRoomsToFetch = roomsToFetch.filter((r) => {
+        const t = r.type
+          || (r.id?.startsWith("dm:") ? "dm"
+            : r.id?.startsWith("fellow:") ? "fellow"
+            : (r.id?.startsWith("g_") || r.id?.startsWith("g-")) ? "group"
+            : null);
+        return t === "group";
+      });
+      await Promise.all(groupRoomsToFetch.map((r) => _fetchAndCacheRoomMembers(r.id)));
     } catch (err) {
       console.error("[social] bootstrapAfterLogin failed:", err);
     }
@@ -415,7 +428,12 @@
     // module only owns the message list so the chat header stays in lockstep
     // with the sidebar's group-avatar mosaic for every room type.
 
-    if (room && room.type === "group") {
+    const roomType = room?.type
+      || (roomId.startsWith("dm:") ? "dm"
+        : roomId.startsWith("fellow:") ? "fellow"
+        : (roomId.startsWith("g_") || roomId.startsWith("g-")) ? "group"
+        : null);
+    if (room && roomType === "group") {
       const members = _roomMembersCache.get(roomId) || [];
       for (const msg of entry.messages) {
         const article = _buildGroupMessageArticle(msg, color, members);

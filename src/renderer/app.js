@@ -666,8 +666,17 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
   const userProfile = state.runtime?.user || {};
   const avatarHelper = window.aimashiAvatar;
   const groupAvatarHelper = window.aimashiGroupAvatar;
+  // id-prefix fallback for pre-v7 cloud deployments that don't yet return
+  // room.type. social.renderSidebarRows already normalizes this; mirror it
+  // here so a room loaded outside the sidebar pipeline (active room loaded
+  // from cache, etc.) still routes correctly.
+  const roomType = room.type
+    || (room.id?.startsWith("dm:") ? "dm"
+      : room.id?.startsWith("fellow:") ? "fellow"
+      : (room.id?.startsWith("g_") || room.id?.startsWith("g-")) ? "group"
+      : "dm");
 
-  if (room.type === "group") {
+  if (roomType === "group") {
     const members = social?.getRoomMembers?.(room.id) || [];
     const tiles = window.aimashiGroupTiles.resolveGroupMemberTiles(members, groupTilesCtx(personas));
     if (avatarEl) {
@@ -679,7 +688,7 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
     return;
   }
 
-  if (room.type === "fellow") {
+  if (roomType === "fellow") {
     const fellowKey = room.decorations?.fellowKey || (room.id?.split(":")[2] || "");
     const fellow = (personas || []).find((p) => (p.id || p.key) === fellowKey);
     if (avatarEl) {
@@ -3452,7 +3461,12 @@ els.chatForm.addEventListener("submit", async (event) => {
     els.chatInput.value = "";
     window.aimashiMessageHelpers.resizeChatInput();
     const activeRoomRecord = window.aimashiSocial.getRoomById?.(roomId);
-    const isGroupRoom = activeRoomRecord?.type === "group";
+    const recordType = activeRoomRecord?.type
+      || (roomId.startsWith("dm:") ? "dm"
+        : roomId.startsWith("fellow:") ? "fellow"
+        : (roomId.startsWith("g_") || roomId.startsWith("g-")) ? "group"
+        : null);
+    const isGroupRoom = recordType === "group";
     if (isGroupRoom && typeof window.aimashiSocial.sendInActiveGroupRoom === "function") {
       await window.aimashiSocial.sendInActiveGroupRoom(roomText);
     } else {
