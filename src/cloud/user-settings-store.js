@@ -25,49 +25,102 @@ function defaultSettings() {
 
 function createUserSettingsStore(db) {
   const selectStmt = db.prepare(
-    "SELECT pins_json, read_marks_json, appearance_json, updated_at FROM user_settings WHERE user_id = ?"
+    "SELECT pins_json, read_marks_json, appearance_json, version, updated_at FROM user_settings WHERE user_id = ?"
   );
-  const upsertStmt = db.prepare(
-    "INSERT INTO user_settings (user_id, pins_json, read_marks_json, appearance_json, updated_at) " +
-    "VALUES (?, ?, ?, ?, ?) " +
-    "ON CONFLICT (user_id) DO UPDATE SET " +
-    "  pins_json = excluded.pins_json, read_marks_json = excluded.read_marks_json, " +
-    "  appearance_json = excluded.appearance_json, updated_at = excluded.updated_at " +
-    "RETURNING pins_json, read_marks_json, appearance_json, updated_at"
+  // CAS-aware upsert. Caller supplies expectedVersion; we only write
+  // when the stored version matches. INSERT path is unconditional
+  // (no row yet, no race possible). The RETURNING clause hands back
+  // the new version so the caller's cache stays current.
+  const insertStmt = db.prepare(
+    "INSERT INTO user_settings (user_id, pins_json, read_marks_json, appearance_json, version, updated_at) " +
+    "VALUES (?, ?, ?, ?, 1, ?) " +
+    "RETURNING pins_json, read_marks_json, appearance_json, version, updated_at"
+  );
+  const updateStmt = db.prepare(
+    "UPDATE user_settings SET pins_json = ?, read_marks_json = ?, appearance_json = ?, " +
+    "  version = version + 1, updated_at = ? " +
+    "WHERE user_id = ? AND version = ? " +
+    "RETURNING pins_json, read_marks_json, appearance_json, version, updated_at"
   );
 
+  function _selectRow(userId) {
+    return selectStmt.get(String(userId));
+  }
+
   function getSettings(userId) {
-    const row = selectStmt.get(String(userId));
-    if (!row) return { ...defaultSettings(), updatedAt: "" };
+    const row = _selectRow(userId);
+    if (!row) return { ...defaultSettings(), version: 0, updatedAt: "" };
     return {
       pins: parseJsonOr(row.pins_json, []),
       readMarks: parseJsonOr(row.read_marks_json, {}),
       appearance: parseJsonOr(row.appearance_json, {}),
+      version: Number(row.version) || 0,
       updatedAt: row.updated_at
     };
   }
 
-  // Whole-bag replace. Caller is responsible for merging existing+incoming
-  // before calling — this keeps the store dumb and lets the HTTP layer
-  // decide policy (e.g., partial PATCH vs full PUT semantics).
-  function putSettings(userId, { pins, readMarks, appearance }) {
+  // Whole-bag replace with compare-and-swap. expectedVersion:
+  //   - 0  → caller expects no existing row (initial write).
+  //   - N>0 → caller read with version N and now writes N+1.
+  // Returns { ok, settings, conflict } — on conflict the caller should
+  // re-read, merge their delta with the server's latest, and retry.
+  function putSettings(userId, { pins, readMarks, appearance, expectedVersion = null }) {
     const safe = {
       pins: Array.isArray(pins) ? pins.map(String).slice(0, 1000) : [],
       readMarks: readMarks && typeof readMarks === "object" ? readMarks : {},
       appearance: appearance && typeof appearance === "object" ? appearance : {}
     };
-    const row = upsertStmt.get(
-      String(userId),
-      JSON.stringify(safe.pins),
-      JSON.stringify(safe.readMarks),
-      JSON.stringify(safe.appearance),
-      nowIso()
-    );
+    const existing = _selectRow(userId);
+    const expected = expectedVersion == null
+      ? (existing ? existing.version : 0)
+      : Number(expectedVersion) || 0;
+
+    let row;
+    if (!existing) {
+      // No row yet — only allowed if caller passed expectedVersion 0 (or omitted it).
+      if (expected !== 0) {
+        return { ok: false, conflict: true, settings: { ...defaultSettings(), version: 0, updatedAt: "" } };
+      }
+      row = insertStmt.get(
+        String(userId),
+        JSON.stringify(safe.pins),
+        JSON.stringify(safe.readMarks),
+        JSON.stringify(safe.appearance),
+        nowIso()
+      );
+    } else {
+      row = updateStmt.get(
+        JSON.stringify(safe.pins),
+        JSON.stringify(safe.readMarks),
+        JSON.stringify(safe.appearance),
+        nowIso(),
+        String(userId),
+        expected
+      );
+      if (!row) {
+        // Version mismatch — return current row so caller can retry.
+        return {
+          ok: false,
+          conflict: true,
+          settings: {
+            pins: parseJsonOr(existing.pins_json, []),
+            readMarks: parseJsonOr(existing.read_marks_json, {}),
+            appearance: parseJsonOr(existing.appearance_json, {}),
+            version: Number(existing.version) || 0,
+            updatedAt: existing.updated_at
+          }
+        };
+      }
+    }
     return {
-      pins: parseJsonOr(row.pins_json, []),
-      readMarks: parseJsonOr(row.read_marks_json, {}),
-      appearance: parseJsonOr(row.appearance_json, {}),
-      updatedAt: row.updated_at
+      ok: true,
+      settings: {
+        pins: parseJsonOr(row.pins_json, []),
+        readMarks: parseJsonOr(row.read_marks_json, {}),
+        appearance: parseJsonOr(row.appearance_json, {}),
+        version: Number(row.version) || 0,
+        updatedAt: row.updated_at
+      }
     };
   }
 

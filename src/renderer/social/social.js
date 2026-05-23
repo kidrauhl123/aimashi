@@ -913,7 +913,7 @@
     const s = _ensureCloudSettings();
     return Array.isArray(s.pins) && s.pins.includes(roomId);
   }
-  async function setRoomPinned(roomId, pinned) {
+  async function setRoomPinned(roomId, pinned, _retried = false) {
     if (!roomId) return;
     const s = _ensureCloudSettings();
     const current = Array.isArray(s.pins) ? s.pins : [];
@@ -922,14 +922,23 @@
     moduleState.cloudSettings = { ...s, pins: next };
     if (deps && typeof deps.render === "function") deps.render();
     try {
-      const updated = await window.aimashi.social.settingsPut({ pins: next, readMarks: s.readMarks, appearance: s.appearance });
+      const updated = await window.aimashi.social.settingsPut({
+        pins: next,
+        readMarks: s.readMarks,
+        appearance: s.appearance,
+        expectedVersion: s.version || 0
+      });
       if (updated && Array.isArray(updated.pins)) {
-        // Replace with server-confirmed truth.
         moduleState.cloudSettings = updated;
       }
     } catch (err) {
+      // CAS conflict — refresh and retry once with our delta on top.
+      if (!_retried && /409|version conflict/i.test(String(err?.message || ""))) {
+        await bootstrapCloudSettings();
+        return setRoomPinned(roomId, pinned, true);
+      }
       console.warn("[social] settingsPut failed:", err?.message || err);
-      // Roll back optimistic if server rejected.
+      // Roll back optimistic if server rejected for other reasons.
       moduleState.cloudSettings = s;
       if (deps && typeof deps.render === "function") deps.render();
     }

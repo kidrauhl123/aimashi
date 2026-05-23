@@ -341,15 +341,21 @@ function attachEventSocket(hub, ws, userId, { eventLog, sinceSeq = 0 } = {}) {
 
   // Replay any events the client missed while disconnected. Stream in
   // 500-row batches so a multi-day-offline client doesn't choke a single
-  // socket frame; mark the last batch with `more:false`. The server's
-  // current seq is sent in events_ready so the client can detect "I'm
-  // up to date" even when there's nothing to replay.
-  const cursorStart = Number.isFinite(Number(sinceSeq)) ? Math.max(0, Number(sinceSeq)) : 0;
+  // socket frame. The server's current seq is sent in events_ready so
+  // the client can detect "I'm up to date" even with no replay.
+  //
+  // Defensive clamp: if a client thinks its cursor is AHEAD of the
+  // server (which can happen after a server data wipe / DB restore),
+  // we tell the client to reset its cursor to serverSeq via `resetTo`
+  // so it doesn't sit forever waiting for events that no longer exist.
+  let cursorStart = Number.isFinite(Number(sinceSeq)) ? Math.max(0, Number(sinceSeq)) : 0;
   let serverSeq = cursorStart;
   if (eventLog && typeof eventLog.maxSeqForUser === "function") {
     try { serverSeq = eventLog.maxSeqForUser(userId); } catch { /* fall through with cursorStart */ }
   }
-  sendWsJson(ws, { type: "events_ready", sinceSeq: cursorStart, serverSeq });
+  const resetTo = cursorStart > serverSeq ? serverSeq : null;
+  if (resetTo !== null) cursorStart = serverSeq;
+  sendWsJson(ws, { type: "events_ready", sinceSeq: cursorStart, serverSeq, resetTo });
 
   if (eventLog && serverSeq > cursorStart) {
     let cursor = cursorStart;
@@ -1273,19 +1279,29 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, { settings: context.userSettingsStore.getSettings(auth.user.id) });
     }
 
-    // PUT /api/me/settings — whole-bag replace. Body merges client-side
-    // before sending; server stores verbatim. Triggers
-    // user_settings.updated to every connected device of this user.
+    // PUT /api/me/settings — CAS-aware whole-bag replace. Body MAY
+    // include expectedVersion; missing → server uses current version
+    // (treats request as best-effort). On conflict (some other device
+    // wrote between caller's GET and PUT) returns 409 with current
+    // settings so client can merge + retry. Broadcasts user_settings
+    // .updated only on actual write.
     if (req.method === "PUT" && url.pathname === "/api/me/settings") {
       const body = await readJson(req);
       if (replayIfCached(context, res, auth.user.id, body)) return;
-      const settings = context.userSettingsStore.putSettings(auth.user.id, {
+      const out = context.userSettingsStore.putSettings(auth.user.id, {
         pins: body.pins,
         readMarks: body.readMarks,
-        appearance: body.appearance
+        appearance: body.appearance,
+        expectedVersion: body.expectedVersion
       });
-      broadcastPersistedEvent(context, auth.user.id, { type: "user_settings.updated", settings });
-      const payload = { settings };
+      if (!out.ok) {
+        const conflictPayload = { error: "version conflict", settings: out.settings };
+        // Don't cache conflicts in op_idempotency — caller will retry
+        // with a new expectedVersion and a new clientOpId.
+        return writeJson(res, 409, conflictPayload);
+      }
+      broadcastPersistedEvent(context, auth.user.id, { type: "user_settings.updated", settings: out.settings });
+      const payload = { settings: out.settings };
       rememberOp(context, auth.user.id, body, 200, payload);
       return writeJson(res, 200, payload);
     }
@@ -1601,6 +1617,16 @@ function createAimashiCloudServer(options = {}) {
   context.socialStore = createSocialStore(context.cloudStore.getDb());
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
+  // Hourly purge of stale idempotency cache rows (Phase 1.D). Without
+  // this the table grows monotonically. Default cutoff 24h matches the
+  // store helper's default; tunable via env if pathological retries
+  // ever require a larger window.
+  context.eventLogPurgeTimer = setInterval(() => {
+    try { context.eventLog.purgeStaleOps(); } catch (err) {
+      console.warn("[event-log] purgeStaleOps failed:", err?.message || err);
+    }
+  }, 60 * 60 * 1000);
+  if (context.eventLogPurgeTimer.unref) context.eventLogPurgeTimer.unref();
   context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
   context.userSettingsStore = createUserSettingsStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));

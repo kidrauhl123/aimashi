@@ -392,8 +392,15 @@ function startCloudEvents() {
     // events_ready may carry `serverSeq` (no replay needed case).
     if (Number.isFinite(Number(envelope.seq))) {
       if (Number(envelope.seq) > loadLastEventSeq()) saveLastEventSeq(envelope.seq);
-    } else if (envelope.type === "events_ready" && Number.isFinite(Number(envelope.serverSeq))) {
-      if (Number(envelope.serverSeq) > loadLastEventSeq()) saveLastEventSeq(envelope.serverSeq);
+    } else if (envelope.type === "events_ready") {
+      // Defensive clamp: server tells us when our cursor is ahead of
+      // its log (DB wipe / restore). Always honor resetTo; otherwise
+      // bump if we're behind.
+      if (envelope.resetTo != null && Number.isFinite(Number(envelope.resetTo))) {
+        saveLastEventSeq(envelope.resetTo);
+      } else if (Number.isFinite(Number(envelope.serverSeq))) {
+        if (Number(envelope.serverSeq) > loadLastEventSeq()) saveLastEventSeq(envelope.serverSeq);
+      }
     }
     handleCloudEvent(envelope);
   });
@@ -756,21 +763,32 @@ async function setRoomPinned(roomId, pinned) {
   await pushSettings({ pins: nextPins });
 }
 
-// Optimistic settings update: stage the change locally, render, then PUT.
-// On WS user_settings.updated callback we replace with server truth
-// (handles multi-tab conflicts via last-writer-wins).
-async function pushSettings(patch) {
-  const base = state.settings || { pins: [], readMarks: {}, appearance: {} };
+// Optimistic settings update with CAS retry. Stages the patch locally,
+// PUTs with expectedVersion; on 409 conflict re-reads server state,
+// merges our delta on top (last-writer-wins per field), retries once.
+async function pushSettings(patch, _retried = false) {
+  const base = state.settings || { pins: [], readMarks: {}, appearance: {}, version: 0 };
   const next = {
     pins: patch.pins !== undefined ? patch.pins : base.pins,
-    readMarks: patch.readMarks !== undefined ? patch.readMarks : base.readMarks,
-    appearance: patch.appearance !== undefined ? patch.appearance : base.appearance
+    readMarks: patch.readMarks !== undefined ? { ...(base.readMarks || {}), ...patch.readMarks } : base.readMarks,
+    appearance: patch.appearance !== undefined ? { ...(base.appearance || {}), ...patch.appearance } : base.appearance,
+    expectedVersion: base.version || 0
   };
-  state.settings = next;
+  state.settings = { ...next, version: base.version };
   renderConversationList();
   try {
-    await api("/api/me/settings", { method: "PUT", body: next });
+    const res = await api("/api/me/settings", { method: "PUT", body: next });
+    if (res?.settings) state.settings = res.settings;
   } catch (err) {
+    // /HTTP 409/ → conflict: server state moved on; refresh + retry once
+    // with patch reapplied so our delta isn't lost.
+    if (!_retried && /409|version conflict/i.test(String(err?.message || ""))) {
+      try {
+        const fresh = await api("/api/me/settings", { method: "GET" });
+        if (fresh?.settings) state.settings = fresh.settings;
+        return pushSettings(patch, true);
+      } catch { /* fall through */ }
+    }
     console.warn("[web] settings PUT failed:", err);
   }
 }

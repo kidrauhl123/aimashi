@@ -31,7 +31,7 @@ test("getSettings returns defaults for users with no row", () => {
   } finally { ctx.cleanup(); }
 });
 
-test("putSettings whole-bag replace then read roundtrips", () => {
+test("putSettings whole-bag replace then read roundtrips, bumps version", () => {
   const ctx = freshStore();
   try {
     const s = createUserSettingsStore(ctx.store.getDb());
@@ -41,14 +41,22 @@ test("putSettings whole-bag replace then read roundtrips", () => {
       readMarks: { "g_abc": 17, "dm:a:b": 4 },
       appearance: { theme: "dark", accentColor: "#5e5ce6" }
     });
-    assert.deepEqual(put.pins, ["g_abc", "fellow:codex"]);
-    assert.deepEqual(put.readMarks, { "g_abc": 17, "dm:a:b": 4 });
-    assert.equal(put.appearance.theme, "dark");
+    assert.equal(put.ok, true);
+    assert.equal(put.settings.version, 1);
+    assert.deepEqual(put.settings.pins, ["g_abc", "fellow:codex"]);
+
+    const put2 = s.putSettings(u, {
+      pins: ["only-one"],
+      readMarks: {},
+      appearance: {},
+      expectedVersion: 1
+    });
+    assert.equal(put2.ok, true);
+    assert.equal(put2.settings.version, 2);
 
     const read = s.getSettings(u);
-    assert.deepEqual(read.pins, put.pins);
-    assert.deepEqual(read.readMarks, put.readMarks);
-    assert.deepEqual(read.appearance, put.appearance);
+    assert.deepEqual(read.pins, ["only-one"]);
+    assert.equal(read.version, 2);
   } finally { ctx.cleanup(); }
 });
 
@@ -59,7 +67,8 @@ test("putSettings rejects array length > 1000 pins (defensive cap)", () => {
     const u = makeUser(ctx.store);
     const giant = Array.from({ length: 1500 }, (_, i) => `room_${i}`);
     const put = s.putSettings(u, { pins: giant, readMarks: {}, appearance: {} });
-    assert.equal(put.pins.length, 1000);
+    assert.equal(put.ok, true);
+    assert.equal(put.settings.pins.length, 1000);
   } finally { ctx.cleanup(); }
 });
 
@@ -73,6 +82,23 @@ test("putSettings is per-user", () => {
     s.putSettings(b, { pins: ["y"], readMarks: {}, appearance: {} });
     assert.deepEqual(s.getSettings(a).pins, ["x"]);
     assert.deepEqual(s.getSettings(b).pins, ["y"]);
+  } finally { ctx.cleanup(); }
+});
+
+test("putSettings CAS: stale expectedVersion returns conflict + current settings", () => {
+  const ctx = freshStore();
+  try {
+    const s = createUserSettingsStore(ctx.store.getDb());
+    const u = makeUser(ctx.store);
+    s.putSettings(u, { pins: ["a"], readMarks: {}, appearance: {} });
+    // simulate device B writing v2
+    s.putSettings(u, { pins: ["a", "b"], readMarks: {}, appearance: {}, expectedVersion: 1 });
+    // simulate device A still thinks v1 — should fail CAS
+    const stale = s.putSettings(u, { pins: ["a", "z"], readMarks: {}, appearance: {}, expectedVersion: 1 });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.conflict, true);
+    assert.deepEqual(stale.settings.pins, ["a", "b"], "conflict response returns current server state for retry");
+    assert.equal(stale.settings.version, 2);
   } finally { ctx.cleanup(); }
 });
 

@@ -799,6 +799,7 @@ function migrate(db) {
       pins_json        TEXT NOT NULL DEFAULT '[]',
       read_marks_json  TEXT NOT NULL DEFAULT '{}',
       appearance_json  TEXT NOT NULL DEFAULT '{}',
+      version          INTEGER NOT NULL DEFAULT 0,
       updated_at       TEXT NOT NULL
     );
   `);
@@ -821,6 +822,11 @@ function migrate(db) {
   // the same transaction as the user_events insert.
   if (!hasColumn(db, "users", "event_seq")) {
     db.exec("ALTER TABLE users ADD COLUMN event_seq INTEGER NOT NULL DEFAULT 0");
+  }
+  // v6.1: user_settings.version for compare-and-swap. Multi-device
+  // PUTs without CAS silently dropped each other (codex review).
+  if (!hasColumn(db, "user_settings", "version")) {
+    db.exec("ALTER TABLE user_settings ADD COLUMN version INTEGER NOT NULL DEFAULT 0");
   }
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?)")
     .run(nowIso());

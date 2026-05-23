@@ -4825,6 +4825,33 @@ async function pushLocalGroupsToCloud() {
       appendCloudLog(`Cloud group sync failed for ${group.id}: ${error?.message || error}`);
     }
   }
+  // Phase 4 backfill: for every group that DOES have a cloudRoomId,
+  // re-push every local message via the message endpoint. Server-side
+  // clientOpId idempotency (Phase 1.D) means we never duplicate; messages
+  // that were lost in the live mirror's transient window or while
+  // offline get filled in by the next sync.
+  for (const group of groupList) {
+    if (!group || !group.cloudRoomId) continue;
+    let messages = [];
+    try { messages = ensureGroupStore().listMessages(group.id) || []; }
+    catch (error) { appendCloudLog(`Cloud group backfill: failed to list messages for ${group.id}: ${error?.message || error}`); continue; }
+    for (const message of messages) {
+      const text = String(message?.text || message?.bodyMd || message?.body_md || "").trim();
+      if (!text) continue;
+      const clientOpId = `op_grp_${group.id}_${message.id || message.createdAt || ""}`;
+      try {
+        await cloudApi(`/api/rooms/${encodeURIComponent(group.cloudRoomId)}/messages`, {
+          method: "POST",
+          body: { bodyMd: text, attachments: message.attachments || null, clientOpId }
+        });
+      } catch (error) {
+        // Stop the backfill for this group on first error; next sync
+        // retries. Avoid spamming failed POSTs.
+        appendCloudLog(`Cloud group backfill error (${group.cloudRoomId}): ${error?.message || error}`);
+        break;
+      }
+    }
+  }
 }
 
 async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = {}) {
@@ -4967,10 +4994,17 @@ function handleCloudEventsMessage(raw) {
     if (Number(message.seq) > current) {
       settingsStore.writeCloudSettings({ lastEventSeq: Number(message.seq) });
     }
-  } else if (message.type === CloudEvent.EventsReady && Number.isFinite(Number(message.serverSeq))) {
-    const current = settingsStore.cloudSettings().lastEventSeq || 0;
-    if (Number(message.serverSeq) > current) {
-      settingsStore.writeCloudSettings({ lastEventSeq: Number(message.serverSeq) });
+  } else if (message.type === CloudEvent.EventsReady) {
+    // Phase 1.C defensive: server tells us if our cursor is ahead of
+    // its log (DB wipe / restore). Clamp downward unconditionally so
+    // we don't sit waiting for events that don't exist.
+    if (message.resetTo != null && Number.isFinite(Number(message.resetTo))) {
+      settingsStore.writeCloudSettings({ lastEventSeq: Number(message.resetTo) });
+    } else if (Number.isFinite(Number(message.serverSeq))) {
+      const current = settingsStore.cloudSettings().lastEventSeq || 0;
+      if (Number(message.serverSeq) > current) {
+        settingsStore.writeCloudSettings({ lastEventSeq: Number(message.serverSeq) });
+      }
     }
   }
   if (message.type === CloudEvent.EventsReady) {
