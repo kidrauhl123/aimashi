@@ -12,6 +12,7 @@ const QRCode = require("qrcode");
 const WebSocket = require("ws");
 const { normalizePermissionMode, permissionModeLabel } = require("./permission-modes");
 const { IpcChannel } = require("./shared/ipc-channels");
+const { CloudEvent } = require("./shared/cloud-events");
 const runtimeResources = require("./runtime-resource-paths");
 const { createGroupStore } = require("./main/group-store.js");
 const { buildHermesGroupHeader, injectGroupContextForSdk } = require("./main/group-adapters.js");
@@ -3844,8 +3845,8 @@ function contentTypeForAsset(filePath) {
 }
 
 function serveMobileAsset(pathname, res) {
-  if (pathname === "/shared/engine-contracts.js") {
-    const filePath = path.join(__dirname, "shared", "engine-contracts.js");
+  if (pathname === "/shared/engine-contracts.js" || pathname === "/shared/time-format.js") {
+    const filePath = path.join(__dirname, "shared", path.basename(pathname));
     if (!fs.existsSync(filePath)) return false;
     writeControlText(res, 200, fs.readFileSync(filePath, "utf8"), "application/javascript; charset=utf-8");
     return true;
@@ -4722,7 +4723,7 @@ function handleCloudWorkspaceEvent(message = {}) {
   settingsStore.writeCloudWorkspace(workspace);
   mergeCloudWorkspaceIntoChatStore(workspace);
   broadcastRendererEvent(IpcChannel.CloudEvent, {
-    type: String(message.type || "workspace_updated"),
+    type: String(message.type || CloudEvent.WorkspaceUpdated),
     cloud: cloudStatus(false)
   });
 }
@@ -4735,24 +4736,24 @@ function handleCloudEventsMessage(raw) {
     appendCloudLog("Cloud events sent invalid JSON.");
     return;
   }
-  if (message.type === "events_ready") {
+  if (message.type === CloudEvent.EventsReady) {
     appendCloudLog("Aimashi Cloud events connected.");
-    broadcastRendererEvent(IpcChannel.CloudEvent, { type: "events_ready", cloud: cloudStatus(false) });
+    broadcastRendererEvent(IpcChannel.CloudEvent, { type: CloudEvent.EventsReady, cloud: cloudStatus(false) });
     return;
   }
   if (message.type && message.type.startsWith("social.")) {
     broadcastRendererEvent(IpcChannel.CloudEvent, { type: message.type, payload: message });
     return;
   }
-  if (message.type === "room.message_appended") {
-    broadcastRendererEvent(IpcChannel.CloudEvent, { type: "room.message_appended", payload: message });
+  if (message.type === CloudEvent.RoomMessageAppended) {
+    broadcastRendererEvent(IpcChannel.CloudEvent, { type: CloudEvent.RoomMessageAppended, payload: message });
     return;
   }
-  if (message.type === "workspace_updated" || message.type === "message_created") {
+  if (message.type === CloudEvent.WorkspaceUpdated || message.type === CloudEvent.MessageCreated) {
     handleCloudWorkspaceEvent(message);
     return;
   }
-  if (message.type === "bridge_run_updated" || message.type === "device_updated") {
+  if (message.type === CloudEvent.BridgeRunUpdated || message.type === CloudEvent.DeviceUpdated) {
     broadcastRendererEvent(IpcChannel.CloudEvent, {
       type: String(message.type || "cloud_event"),
       cloud: cloudStatus(false)

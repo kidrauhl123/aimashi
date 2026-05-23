@@ -118,8 +118,8 @@ function handleHttp(req, res) {
     res.end(body);
     return;
   }
-  if (url.pathname === "/shared/engine-contracts.js") {
-    serveFile(res, path.join(SHARED_ROOT, "engine-contracts.js"), true);
+  if (url.pathname === "/shared/engine-contracts.js" || url.pathname === "/shared/time-format.js") {
+    serveFile(res, path.join(SHARED_ROOT, path.basename(url.pathname)), true);
     return;
   }
   if (url.pathname.startsWith("/mobile/")) {

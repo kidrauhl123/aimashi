@@ -1075,16 +1075,7 @@ function setSelectOptions(select, entries, selectedValue, emptyLabel) {
   select.disabled = false;
 }
 
-function formatTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const now = new Date();
-  if (date.toDateString() === now.toDateString()) {
-    return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(date);
-  }
-  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(date);
-}
+const { formatConversationTime, formatMessageTime } = window.aimashiTimeFormat;
 
 function messagePreview(session) {
   const messages = Array.isArray(session?.messages) ? session.messages : [];
@@ -1331,7 +1322,7 @@ function renderConversationList() {
         <span class="row-main">
           <span class="row-title">
             <strong>${escapeHtml(fellow.name || fellow.key)}</strong>
-            <time>${escapeHtml(formatTime(session?.updatedAt || session?.createdAt))}</time>
+            <time>${escapeHtml(formatConversationTime(session?.updatedAt || session?.createdAt))}</time>
           </span>
           <p>${escapeHtml(messagePreview(session))}</p>
         </span>
@@ -1442,7 +1433,7 @@ function renderChat() {
       <article class="message ${message.role === "user" ? "user" : "assistant"}">
         ${traceHtml}
         ${bubbleHtml}
-        <time>${escapeHtml(formatTime(message.createdAt))}</time>
+        <time>${escapeHtml(formatMessageTime(message.createdAt))}</time>
       </article>
     `;
   }).join("") : `<div class="empty">开始和 ${escapeHtml(fellow.name || fellow.key)} 聊天</div>`;
