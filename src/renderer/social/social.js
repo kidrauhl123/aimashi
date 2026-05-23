@@ -160,6 +160,9 @@
       if (incomingRes.ok) moduleState.incomingRequests = incomingRes.data?.requests || [];
       if (outgoingRes.ok) moduleState.outgoingRequests = outgoingRes.data?.requests || [];
 
+      // Phase 3: cross-device user settings (pin / read marks / appearance).
+      await bootstrapCloudSettings();
+
       // Fetch initial messages for up to INITIAL_ROOMS_CAP rooms.
       const roomsToFetch = moduleState.rooms.slice(0, INITIAL_ROOMS_CAP);
       await Promise.all(roomsToFetch.map(async (room) => {
@@ -214,6 +217,15 @@
     // broadcast while we were disconnected stay invisible until restart.
     if (type === "events_ready") {
       bootstrapAfterLogin().catch((err) => console.warn("[social] rebootstrap on events_ready failed:", err));
+      return;
+    }
+
+    // Phase 3: another device wrote settings — replace local cache so
+    // pins / read marks / appearance match across devices in real time.
+    // payload is the full envelope { type, settings, seq, ... }.
+    if (type === "user_settings.updated") {
+      const settings = payload && payload.settings ? payload.settings : null;
+      if (settings) applyCloudSettings(settings);
       return;
     }
 
@@ -318,10 +330,11 @@
       moduleState.unreadByRoom.delete(roomId);
       _roomMembersCache.delete(roomId);
       if (roomId === moduleState.activeRoomId) moduleState.activeRoomId = null;
-      if (moduleState.pinnedRooms) {
-        moduleState.pinnedRooms.delete(roomId);
-        _savePinnedRooms();
-      }
+      // Pin state is on cloud (Phase 3); the server side cascades on
+      // room delete and pushes user_settings.updated, so no client-side
+      // cleanup is needed here. Leftover pin entries (orphaned by a
+      // room delete the server didn't broadcast for some reason) age
+      // out at the next settings PUT or are tolerated harmlessly.
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -873,36 +886,66 @@
     moduleState.unreadByRoom.delete(roomId);
   }
 
-  // Cloud rooms don't have a server-side pin field yet (no PATCH /api/rooms).
-  // Track pinned state locally so the unified sidebar menu can offer the
-  // same 置顶/取消置顶 toggle for cloud DM + cloud group as for fellow + local
-  // group. Persisted to localStorage so the pin survives reload but not
-  // cross-device — full sync is a follow-up that needs the backend.
-  const PINNED_ROOMS_KEY = "aimashi.social.pinnedRooms.v1";
-  function _loadPinnedRooms() {
-    try {
-      const raw = localStorage.getItem(PINNED_ROOMS_KEY);
-      if (!raw) return new Set();
-      const arr = JSON.parse(raw);
-      return new Set(Array.isArray(arr) ? arr : []);
-    } catch { return new Set(); }
-  }
-  function _savePinnedRooms() {
-    try {
-      localStorage.setItem(PINNED_ROOMS_KEY, JSON.stringify(Array.from(moduleState.pinnedRooms || [])));
-    } catch { /* localStorage may be disabled — silent */ }
+  // Phase 3: pin state lives in cloud user_settings (server-canonical).
+  // Renderer holds a cached copy in moduleState.cloudSettings; it's
+  // populated by bootstrapCloudSettings() at login and refreshed on each
+  // user_settings.updated WS event. Mutations PUT via IPC and the
+  // broadcast confirms / replaces the optimistic update.
+  function _ensureCloudSettings() {
+    if (!moduleState.cloudSettings) moduleState.cloudSettings = { pins: [], readMarks: {}, appearance: {} };
+    return moduleState.cloudSettings;
   }
   function isRoomPinned(roomId) {
     if (!roomId) return false;
-    if (!moduleState.pinnedRooms) moduleState.pinnedRooms = _loadPinnedRooms();
-    return moduleState.pinnedRooms.has(roomId);
+    const s = _ensureCloudSettings();
+    return Array.isArray(s.pins) && s.pins.includes(roomId);
   }
-  function setRoomPinned(roomId, pinned) {
+  async function setRoomPinned(roomId, pinned) {
     if (!roomId) return;
-    if (!moduleState.pinnedRooms) moduleState.pinnedRooms = _loadPinnedRooms();
-    if (pinned) moduleState.pinnedRooms.add(roomId);
-    else moduleState.pinnedRooms.delete(roomId);
-    _savePinnedRooms();
+    const s = _ensureCloudSettings();
+    const current = Array.isArray(s.pins) ? s.pins : [];
+    const next = pinned ? [...new Set([...current, roomId])] : current.filter((id) => id !== roomId);
+    // Optimistic: render with new value, then push to cloud.
+    moduleState.cloudSettings = { ...s, pins: next };
+    if (deps && typeof deps.render === "function") deps.render();
+    try {
+      const updated = await window.aimashi.social.settingsPut({ pins: next, readMarks: s.readMarks, appearance: s.appearance });
+      if (updated && Array.isArray(updated.pins)) {
+        // Replace with server-confirmed truth.
+        moduleState.cloudSettings = updated;
+      }
+    } catch (err) {
+      console.warn("[social] settingsPut failed:", err?.message || err);
+      // Roll back optimistic if server rejected.
+      moduleState.cloudSettings = s;
+      if (deps && typeof deps.render === "function") deps.render();
+    }
+  }
+
+  async function bootstrapCloudSettings() {
+    try {
+      const settings = await window.aimashi.social.settingsGet();
+      if (settings && typeof settings === "object") {
+        moduleState.cloudSettings = {
+          pins: Array.isArray(settings.pins) ? settings.pins : [],
+          readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
+          appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {}
+        };
+        if (deps && typeof deps.render === "function") deps.render();
+      }
+    } catch (err) {
+      console.warn("[social] settingsGet failed:", err?.message || err);
+    }
+  }
+
+  function applyCloudSettings(settings) {
+    if (!settings || typeof settings !== "object") return;
+    moduleState.cloudSettings = {
+      pins: Array.isArray(settings.pins) ? settings.pins : [],
+      readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
+      appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {}
+    };
+    if (deps && typeof deps.render === "function") deps.render();
   }
 
   // PATCH /api/rooms/:id — rename the cloud room (groups only; DM rename
@@ -932,10 +975,8 @@
       moduleState.unreadByRoom.delete(roomId);
       _roomMembersCache.delete(roomId);
       if (roomId === moduleState.activeRoomId) moduleState.activeRoomId = null;
-      if (moduleState.pinnedRooms) {
-        moduleState.pinnedRooms.delete(roomId);
-        _savePinnedRooms();
-      }
+      // Pin state is server-canonical now; cleanup happens via
+      // user_settings.updated broadcast.
       if (deps && typeof deps.render === "function") deps.render();
     }
     return res;
@@ -981,6 +1022,7 @@
     markRoomRead,
     isRoomPinned,
     setRoomPinned,
+    applyCloudSettings,
     renameRoom,
     deleteCloudRoom,
     getUnreadForRoom,

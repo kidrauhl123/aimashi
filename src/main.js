@@ -4982,6 +4982,17 @@ function handleCloudEventsMessage(raw) {
     broadcastRendererEvent(IpcChannel.CloudEvent, { type: message.type, payload: message });
     return;
   }
+  // Phase 3: user settings sync — forward to renderer; renderer caches +
+  // re-renders any pinned/unread state.
+  if (message.type === "user_settings.updated") {
+    broadcastRendererEvent(IpcChannel.CloudEvent, { type: message.type, payload: message });
+    return;
+  }
+  // Phase 2: fellow identity changes from another device.
+  if (message.type === "fellow.upserted" || message.type === "fellow.deleted") {
+    broadcastRendererEvent(IpcChannel.CloudEvent, { type: message.type, payload: message });
+    return;
+  }
   if (message.type === CloudEvent.RoomMessageAppended) {
     broadcastRendererEvent(IpcChannel.CloudEvent, { type: CloudEvent.RoomMessageAppended, payload: message });
     return;
@@ -6623,6 +6634,28 @@ ipcMain.handle(IpcChannel.CloudSync, async () => {
 ipcMain.handle(IpcChannel.CloudPushMessage, async (_event, payload) => {
   await pushDesktopMessageToCloud(payload || {});
   return getRuntimeStatus();
+});
+// Phase 3: cross-device settings (pin / read marks / appearance). Renderer
+// asks main for current bag; mutations PUT to /api/me/settings whose
+// broadcast comes back via the WS event handler and is re-broadcast to
+// the renderer.
+ipcMain.handle(IpcChannel.CloudSettingsGet, async () => {
+  try {
+    const data = await cloudApi("/api/me/settings", { method: "GET" });
+    return data && data.settings ? data.settings : { pins: [], readMarks: {}, appearance: {} };
+  } catch (error) {
+    appendCloudLog(`Cloud settings get failed: ${error?.message || error}`);
+    return { pins: [], readMarks: {}, appearance: {} };
+  }
+});
+ipcMain.handle(IpcChannel.CloudSettingsPut, async (_event, settings) => {
+  try {
+    const data = await cloudApi("/api/me/settings", { method: "PUT", body: settings || {} });
+    return data && data.settings ? data.settings : null;
+  } catch (error) {
+    appendCloudLog(`Cloud settings put failed: ${error?.message || error}`);
+    throw error;
+  }
 });
 ipcMain.handle(IpcChannel.CloudLogout, async () => {
   await logoutAimashiCloud();

@@ -132,7 +132,9 @@ contextBridge.exposeInMainWorld("aimashi", {
     updateRoom: (roomId, patch) => ipcRenderer.invoke(IpcChannel.SocialUpdateRoom, roomId, patch),
     deleteRoom: (roomId) => ipcRenderer.invoke(IpcChannel.SocialDeleteRoom, roomId),
     addRoomMember: (roomId, member) => ipcRenderer.invoke(IpcChannel.SocialAddRoomMember, roomId, member),
-    postRoomMessageAsFellow: (roomId, body) => ipcRenderer.invoke(IpcChannel.SocialPostMessageAsFellow, roomId, body)
+    postRoomMessageAsFellow: (roomId, body) => ipcRenderer.invoke(IpcChannel.SocialPostMessageAsFellow, roomId, body),
+    settingsGet: () => ipcRenderer.invoke(IpcChannel.CloudSettingsGet),
+    settingsPut: (settings) => ipcRenderer.invoke(IpcChannel.CloudSettingsPut, settings)
   },
   platform: process.platform,
   window: {

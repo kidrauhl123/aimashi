@@ -110,7 +110,10 @@
     SocialUpdateRoom: "social:update-room",
     SocialDeleteRoom: "social:delete-room",
     SocialAddRoomMember: "social:add-room-member",
-    SocialPostMessageAsFellow: "social:post-message-as-fellow"
+    SocialPostMessageAsFellow: "social:post-message-as-fellow",
+    // Phase 3: cross-device user settings (pin / read marks / appearance).
+    CloudSettingsGet: "cloud:settings-get",
+    CloudSettingsPut: "cloud:settings-put"
   });
 
   return Object.freeze({ IpcChannel });
