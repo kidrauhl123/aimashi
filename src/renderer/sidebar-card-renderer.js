@@ -47,11 +47,12 @@
     el.style.cssText = style;
   }
 
-  function buildSideHtml({ time, pinned, unread }) {
+  function buildSideHtml({ time, pinned, unread, muted }) {
     const badge = unreadShared().unreadBadgeHtml(unread);
+    const cls = muted ? "persona-unread muted" : "persona-unread";
     const unreadHtml = badge
-      ? badge.replace('class="unread-badge"', 'class="persona-unread"')
-      : `<span class="persona-unread hidden"></span>`;
+      ? badge.replace('class="unread-badge"', `class="${cls}"`)
+      : `<span class="${cls} hidden"></span>`;
     return `
       <span class="persona-side">
         <span class="persona-time">${escapeHtml(time || "")}</span>
@@ -110,9 +111,19 @@
       ${buildSideHtml(spec)}
     `;
     const avatarEl = btn.querySelector(".avatar.group-avatar");
-    const members = Array.isArray(spec.members) ? spec.members : [];
-    global.aimashiGroupAvatar.applyGroupAvatar(avatarEl, members);
-    avatarEl.classList.add("group-avatar");
+    // Custom override: user uploaded a single image for this group. Bypass
+    // the member mosaic and paint that image directly.
+    if (spec.customAvatar && spec.customAvatar.image) {
+      avatarEl.classList.remove("group-avatar");
+      avatarEl.classList.add("avatar");
+      avatarEl.innerHTML = "";
+      avatarEl.removeAttribute("data-count");
+      applyAvatarStyle(avatarEl, spec.customAvatar.image, spec.customAvatar.crop, "#5e5ce6");
+    } else {
+      const members = Array.isArray(spec.members) ? spec.members : [];
+      global.aimashiGroupAvatar.applyGroupAvatar(avatarEl, members);
+      avatarEl.classList.add("group-avatar");
+    }
     attachHandlers(btn, spec);
     return btn;
   }

@@ -1007,6 +1007,30 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 201, { ok: true, member });
     }
 
+    // DELETE /api/rooms/:id/members — remove a member by {memberKind, memberRef}.
+    // Same lenient "any member can edit" rule as PATCH; the operation is
+    // bounded by the room scope and doesn't expose other rooms' state.
+    if (req.method === "DELETE" && roomMembersMatch) {
+      const roomId = roomMembersMatch[1];
+      if (roomId.startsWith("dm:")) return writeError(res, 400, "DM rooms cannot be modified");
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const body = await readJson(req);
+      const memberKind = String(body.memberKind || "");
+      const memberRef = String(body.memberRef || "").trim();
+      if (!memberKind || !memberRef) return writeError(res, 400, "memberKind and memberRef are required");
+      context.socialStore.removeRoomMember(roomId, memberKind, memberRef);
+      // Broadcast room.updated so every client refreshes its member cache.
+      const room = context.socialStore.getRoom(roomId);
+      for (const m of context.socialStore.listRoomMembers(roomId)) {
+        if (m.member_kind === "user") {
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.updated", room });
+        }
+      }
+      return writeJson(res, 200, { ok: true });
+    }
+
     // POST /api/rooms/:id/messages/as-fellow — post AS a fellow
     if (req.method === "POST" && roomAsFellowMatch) {
       const roomId = roomAsFellowMatch[1];
@@ -1511,6 +1535,10 @@ function createAimashiCloudServer(options = {}) {
   context.socialStore = createSocialStore(context.cloudStore.getDb());
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
+  context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
+  // Inject fellowsStore so listRoomMembers can enrich fellow members
+  // with name/avatar from the owner's fellow definitions in one shot.
+  context.socialStore._attachFellowsStore?.(context.fellowsStore);
   // Hourly purge of stale idempotency cache rows (Phase 1.D). Without
   // this the table grows monotonically. Default cutoff 24h matches the
   // store helper's default; tunable via env if pathological retries
@@ -1521,7 +1549,6 @@ function createAimashiCloudServer(options = {}) {
     }
   }, 60 * 60 * 1000);
   if (context.eventLogPurgeTimer.unref) context.eventLogPurgeTimer.unref();
-  context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
   context.userSettingsStore = createUserSettingsStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));
   const wss = new WebSocketServer({ noServer: true });

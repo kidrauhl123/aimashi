@@ -880,19 +880,22 @@
   function markRoomRead(roomId) {
     if (!roomId) return;
     moduleState.unreadByRoom.delete(roomId);
-    // Phase 3: stamp a read mark on cloud user_settings so other devices
-    // also clear the unread badge. The mark stores the last room.maxSeq
-    // we've read (used for incremental unread reconstruction when a
-    // device reconnects).
     const cache = moduleState.messageCache.get(roomId);
     const lastSeq = cache && Number.isFinite(Number(cache.maxSeq)) ? Number(cache.maxSeq) : 0;
     const s = _ensureCloudSettings();
     const nextReadMarks = { ...(s.readMarks || {}), [roomId]: lastSeq };
-    moduleState.cloudSettings = { ...s, readMarks: nextReadMarks };
-    // Fire-and-forget — failure is non-blocking; reconnect replay will
-    // bring the latest state.
-    window.aimashi?.social?.settingsPut?.({ pins: s.pins, readMarks: nextReadMarks, appearance: s.appearance })
-      .catch((err) => console.warn("[social] mark-read settingsPut failed:", err?.message || err));
+    // Clear any manual "标为未读" override so the badge actually goes away.
+    const nextOverrides = { ...(s.unreadOverrides || {}) };
+    delete nextOverrides[roomId];
+    moduleState.cloudSettings = { ...s, readMarks: nextReadMarks, unreadOverrides: nextOverrides };
+    window.aimashi?.social?.settingsPut?.({
+      pins: s.pins,
+      readMarks: nextReadMarks,
+      appearance: s.appearance,
+      mutedRooms: s.mutedRooms || [],
+      unreadOverrides: nextOverrides,
+      expectedVersion: s.version || 0
+    }).catch((err) => console.warn("[social] mark-read settingsPut failed:", err?.message || err));
   }
 
   // Phase 3: pin state lives in cloud user_settings (server-canonical).
@@ -901,7 +904,9 @@
   // user_settings.updated WS event. Mutations PUT via IPC and the
   // broadcast confirms / replaces the optimistic update.
   function _ensureCloudSettings() {
-    if (!moduleState.cloudSettings) moduleState.cloudSettings = { pins: [], readMarks: {}, appearance: {} };
+    if (!moduleState.cloudSettings) moduleState.cloudSettings = { pins: [], readMarks: {}, appearance: {}, mutedRooms: [], unreadOverrides: {} };
+    if (!Array.isArray(moduleState.cloudSettings.mutedRooms)) moduleState.cloudSettings.mutedRooms = [];
+    if (!moduleState.cloudSettings.unreadOverrides) moduleState.cloudSettings.unreadOverrides = {};
     return moduleState.cloudSettings;
   }
   function isRoomPinned(roomId) {
@@ -909,32 +914,70 @@
     const s = _ensureCloudSettings();
     return Array.isArray(s.pins) && s.pins.includes(roomId);
   }
+  function isRoomMuted(roomId) {
+    if (!roomId) return false;
+    const s = _ensureCloudSettings();
+    return Array.isArray(s.mutedRooms) && s.mutedRooms.includes(roomId);
+  }
+  function isRoomManuallyUnread(roomId) {
+    if (!roomId) return false;
+    const s = _ensureCloudSettings();
+    return Boolean(s.unreadOverrides && s.unreadOverrides[roomId]);
+  }
   async function setRoomPinned(roomId, pinned, _retried = false) {
+    return _patchCloudSettings({ pinned, roomId, _retried });
+  }
+  async function setRoomMuted(roomId, muted, _retried = false) {
+    return _patchCloudSettings({ muted, roomId, _retried });
+  }
+  // Manual unread / read override. Telegram-style: forces the badge state
+  // until either (a) opening the room (markRoomRead) or (b) the user
+  // toggles it back from the menu.
+  async function setRoomManuallyUnread(roomId, unread, _retried = false) {
+    return _patchCloudSettings({ manualUnread: unread, roomId, _retried });
+  }
+  async function _patchCloudSettings({ pinned, muted, manualUnread, roomId, _retried }) {
     if (!roomId) return;
     const s = _ensureCloudSettings();
-    const current = Array.isArray(s.pins) ? s.pins : [];
-    const next = pinned ? [...new Set([...current, roomId])] : current.filter((id) => id !== roomId);
-    // Optimistic: render with new value, then push to cloud.
-    moduleState.cloudSettings = { ...s, pins: next };
+    const pins = Array.isArray(s.pins) ? s.pins : [];
+    const mutedRooms = Array.isArray(s.mutedRooms) ? s.mutedRooms : [];
+    const unreadOverrides = s.unreadOverrides && typeof s.unreadOverrides === "object" ? { ...s.unreadOverrides } : {};
+    const next = {
+      pins: pinned === true ? [...new Set([...pins, roomId])]
+        : pinned === false ? pins.filter((id) => id !== roomId)
+        : pins,
+      mutedRooms: muted === true ? [...new Set([...mutedRooms, roomId])]
+        : muted === false ? mutedRooms.filter((id) => id !== roomId)
+        : mutedRooms,
+      unreadOverrides,
+      readMarks: s.readMarks || {},
+      appearance: s.appearance || {}
+    };
+    if (manualUnread === true) {
+      next.unreadOverrides[roomId] = true;
+    } else if (manualUnread === false) {
+      delete next.unreadOverrides[roomId];
+      // Clear actual unread count too — "mark read" should leave 0.
+      moduleState.unreadByRoom.delete(roomId);
+    }
+    moduleState.cloudSettings = { ...s, ...next };
     if (deps && typeof deps.render === "function") deps.render();
     try {
       const updated = await window.aimashi.social.settingsPut({
-        pins: next,
-        readMarks: s.readMarks,
-        appearance: s.appearance,
+        pins: next.pins,
+        mutedRooms: next.mutedRooms,
+        unreadOverrides: next.unreadOverrides,
+        readMarks: next.readMarks,
+        appearance: next.appearance,
         expectedVersion: s.version || 0
       });
-      if (updated && Array.isArray(updated.pins)) {
-        moduleState.cloudSettings = updated;
-      }
+      if (updated && typeof updated === "object") moduleState.cloudSettings = updated;
     } catch (err) {
-      // CAS conflict — refresh and retry once with our delta on top.
       if (!_retried && /409|version conflict/i.test(String(err?.message || ""))) {
         await bootstrapCloudSettings();
-        return setRoomPinned(roomId, pinned, true);
+        return _patchCloudSettings({ pinned, muted, manualUnread, roomId, _retried: true });
       }
       console.warn("[social] settingsPut failed:", err?.message || err);
-      // Roll back optimistic if server rejected for other reasons.
       moduleState.cloudSettings = s;
       if (deps && typeof deps.render === "function") deps.render();
     }
@@ -945,9 +988,12 @@
       const settings = await window.aimashi.social.settingsGet();
       if (settings && typeof settings === "object") {
         moduleState.cloudSettings = {
+          ...settings,
           pins: Array.isArray(settings.pins) ? settings.pins : [],
           readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
-          appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {}
+          appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {},
+          mutedRooms: Array.isArray(settings.mutedRooms) ? settings.mutedRooms : [],
+          unreadOverrides: settings.unreadOverrides && typeof settings.unreadOverrides === "object" ? settings.unreadOverrides : {}
         };
         if (deps && typeof deps.render === "function") deps.render();
       }
@@ -959,9 +1005,12 @@
   function applyCloudSettings(settings) {
     if (!settings || typeof settings !== "object") return;
     moduleState.cloudSettings = {
+      ...settings,
       pins: Array.isArray(settings.pins) ? settings.pins : [],
       readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
-      appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {}
+      appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {},
+      mutedRooms: Array.isArray(settings.mutedRooms) ? settings.mutedRooms : [],
+      unreadOverrides: settings.unreadOverrides && typeof settings.unreadOverrides === "object" ? settings.unreadOverrides : {}
     };
     if (deps && typeof deps.render === "function") deps.render();
   }
@@ -1000,7 +1049,10 @@
     return res;
   }
   function getUnreadForRoom(roomId) {
-    return unreadShared().computeUnreadForConversation({ id: roomId }, moduleState.unreadByRoom);
+    const actual = unreadShared().computeUnreadForConversation({ id: roomId }, moduleState.unreadByRoom);
+    if (actual > 0) return actual;
+    // Manual "标为未读" override surfaces as a single-pip badge.
+    return isRoomManuallyUnread(roomId) ? 1 : 0;
   }
   function getTotalRoomUnread() {
     return unreadShared().totalUnreadFromConversations(null, moduleState.unreadByRoom);
@@ -1041,6 +1093,10 @@
     markRoomRead,
     isRoomPinned,
     setRoomPinned,
+    isRoomMuted,
+    setRoomMuted,
+    isRoomManuallyUnread,
+    setRoomManuallyUnread,
     applyCloudSettings,
     renameRoom,
     deleteCloudRoom,

@@ -83,7 +83,11 @@ test("web buildRoomMessageArticle path: fellow message in cloud room → spec ha
   const spec = source.listMessages()[0];
   assert.equal(spec.role, "assistant");
   assert.equal(spec.isOwn, false);
-  assert.equal(spec.authorName, "codex (alice)");
+  // Fellow attribution intentionally omits the owner suffix — see
+  // cloud-room-source.js authorForMessage. Without enrichment from the
+  // server (member.fellow_name) the display falls back to the raw
+  // sender_ref.
+  assert.equal(spec.authorName, "codex");
 });
 
 test("web isMine check via resolveContact: only self.id ref resolves to kind=self", () => {

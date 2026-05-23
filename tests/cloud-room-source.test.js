@@ -65,7 +65,8 @@ test("CloudRoomSource group fellow message resolves fellow contact via members",
   const source = src.createCloudRoomSource({ room, messages, members, ctx });
   const spec = source.listMessages()[0];
   assert.equal(spec.role, "assistant");
-  assert.equal(spec.authorName, "codex (alice)");
+  // Owner suffix dropped per UX — display the AI's name only.
+  assert.equal(spec.authorName, "codex");
 });
 
 test("CloudRoomSource hydrates own fellow avatar from ctx.fellows", () => {

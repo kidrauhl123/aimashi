@@ -63,15 +63,34 @@
     }, 0);
   }
 
-  // conversation: { id, name, pinned, unread, ... }
+  // conversation: { id, name, pinned, unread, muted, ... }
   // actions: {
   //   togglePinned?: () => Promise<void>,
-  //   rename?: () => void,             // opens an edit dialog or inline prompt
-  //   markRead?: () => void,           // clears unread state
-  //   remove?: () => Promise<void>,    // deletes the conversation
-  //   openPetMenu?: () => void,        // fellow-only: pet/desktop actions
-  //   notSupported?: { rename?: string, remove?: string }  // optional messages
+  //   rename?: () => void,
+  //   toggleRead?: (nextUnreadState: boolean) => void,   // label flips on
+  //                                                       conversation.unread
+  //   toggleMuted?: (nextMutedState: boolean) => void,
+  //   remove?: () => Promise<void>,
+  //   openPetMenu?: () => void,
+  //   notSupported?: { rename?: string, remove?: string }
   // }
+  function pushReadItem(items, conversation, actions) {
+    if (!actions.toggleRead) return;
+    items.push({
+      icon: "message",
+      label: conversation.unread > 0 ? "标为已读" : "标为未读",
+      key: "toggle-read"
+    });
+  }
+  function pushMutedItem(items, conversation, actions) {
+    if (!actions.toggleMuted) return;
+    items.push({
+      icon: "bellOff",
+      label: conversation.muted ? "取消免打扰" : "消息免打扰",
+      key: "toggle-muted"
+    });
+  }
+
   function openPrivateConversationMenu(conversation, actions, x, y) {
     const menu = ensureMenuEl();
     const items = [];
@@ -81,9 +100,8 @@
     if (actions.rename || actions.notSupported?.rename) {
       items.push({ icon: "edit", label: "编辑", key: "rename" });
     }
-    if (actions.markRead) {
-      items.push({ icon: "message", label: "标记已读", key: "mark-read", disabled: !conversation.unread });
-    }
+    pushReadItem(items, conversation, actions);
+    pushMutedItem(items, conversation, actions);
     if (actions.openPetMenu) {
       items.push({ icon: "addPic", label: "桌宠", key: "pet" });
     }
@@ -98,7 +116,8 @@
         if (actions.rename) return actions.rename();
         return alert(actions.notSupported?.rename || "暂未支持");
       }
-      if (key === "mark-read") return actions.markRead?.();
+      if (key === "toggle-read") return actions.toggleRead?.(conversation.unread <= 0);
+      if (key === "toggle-muted") return actions.toggleMuted?.(!conversation.muted);
       if (key === "pet") return actions.openPetMenu?.();
       if (key === "remove") {
         if (actions.remove) return actions.remove();
@@ -121,9 +140,8 @@
     if (actions.rename || actions.notSupported?.rename) {
       items.push({ icon: "edit", label: "重命名", key: "rename" });
     }
-    if (actions.markRead) {
-      items.push({ icon: "message", label: "标记已读", key: "mark-read", disabled: !conversation.unread });
-    }
+    pushReadItem(items, conversation, actions);
+    pushMutedItem(items, conversation, actions);
     if (actions.remove || actions.notSupported?.remove) {
       items.push({ separator: true });
       items.push({ icon: "delete", label: "删除群组", key: "remove", danger: true });
@@ -136,7 +154,8 @@
         if (actions.rename) return actions.rename();
         return alert(actions.notSupported?.rename || "暂未支持");
       }
-      if (key === "mark-read") return actions.markRead?.();
+      if (key === "toggle-read") return actions.toggleRead?.(conversation.unread <= 0);
+      if (key === "toggle-muted") return actions.toggleMuted?.(!conversation.muted);
       if (key === "remove") {
         if (actions.remove) return actions.remove();
         return alert(actions.notSupported?.remove || "暂未支持");

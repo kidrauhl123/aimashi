@@ -802,6 +802,19 @@
         <div class="settings-section-label">基础</div>
         <section class="settings-row settings-group-start">
           <div>
+            <strong>群头像</strong>
+            <p>默认按成员头像合成。点击可上传自定义图片，剪裁后保存。</p>
+          </div>
+          <div class="group-info-avatar-control">
+            <button id="groupInfoAvatarPreview" class="group-info-avatar-preview" type="button" aria-label="修改群头像">
+              <span class="avatar group-avatar"></span>
+            </button>
+            <input id="groupInfoAvatarFile" type="file" accept="image/*" hidden />
+            <button id="groupInfoAvatarReset" class="button-soft" type="button">恢复默认</button>
+          </div>
+        </section>
+        <section class="settings-row">
+          <div>
             <strong>群名</strong>
             <p>显示在会话列表和聊天顶部。</p>
           </div>
@@ -919,6 +932,8 @@
   <script src="./social/social-groups.js"></script>
   <!-- Group conductor: routes non-@ messages to a chosen fellow via dispatch.md -->
   <script src="./social/group-conductor.js"></script>
+  <!-- Group info / settings dialog (cloud rooms) -->
+  <script src="./social/group-info-dialog.js"></script>
   <!-- Lightweight context menu for cloud DM + cloud group bubbles -->
   <script src="./social/social-message-menu.js"></script>
   <!-- Main app entry — assembles everything -->

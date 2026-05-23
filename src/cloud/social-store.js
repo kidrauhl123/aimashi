@@ -245,8 +245,28 @@ function createSocialStore(db) {
     deleteMember.run(String(roomId), String(memberKind), String(memberRef));
   }
 
+  let _fellowsStore = null;
+  function _attachFellowsStore(store) { _fellowsStore = store || null; }
+
   function listRoomMembers(roomId) {
-    return selectMembers.all(String(roomId));
+    const rows = selectMembers.all(String(roomId));
+    if (!_fellowsStore) return rows;
+    // Enrich fellow members with name/avatar from the owner's fellow
+    // definitions so cross-owner fellow attribution can show the actual
+    // AI's name in chat bubbles + group-info dialog without each client
+    // having to fetch every other user's fellow list.
+    return rows.map((row) => {
+      if (row.member_kind !== "fellow" || !row.owner_id) return row;
+      const def = _fellowsStore.getFellow(row.owner_id, row.member_ref);
+      if (!def) return row;
+      return {
+        ...row,
+        fellow_name: def.name || "",
+        fellow_avatar_image: def.avatarImage || "",
+        fellow_avatar_crop: def.avatarCrop || null,
+        fellow_color: def.color || ""
+      };
+    });
   }
 
   function getRoomMember(roomId, memberKind, memberRef) {
@@ -287,6 +307,7 @@ function createSocialStore(db) {
     listRoomsForUser,
     updateRoomMemberPerms,
     getRoomMember,
+    _attachFellowsStore,
   };
 }
 

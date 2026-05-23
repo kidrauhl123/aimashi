@@ -102,6 +102,9 @@ function createSocialApi({ getSettings, normalizeUrl }) {
     async addRoomMember(roomId, { memberKind, memberRef, ownerId }) {
       return jsonFetch({ ...ctx(), method: "POST", path: `/api/rooms/${roomId}/members`, body: { memberKind, memberRef, ownerId } });
     },
+    async removeRoomMember(roomId, { memberKind, memberRef }) {
+      return jsonFetch({ ...ctx(), method: "DELETE", path: `/api/rooms/${roomId}/members`, body: { memberKind, memberRef } });
+    },
     async postRoomMessageAsFellow(roomId, body) {
       return jsonFetch({ ...ctx(), method: "POST", path: `/api/rooms/${roomId}/messages/as-fellow`, body });
     }

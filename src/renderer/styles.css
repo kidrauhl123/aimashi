@@ -986,6 +986,10 @@ body.sidebar-resizing * {
   line-height: 18px;
   font-weight: 800;
 }
+.persona-unread.muted {
+  background: #b3b8c2;
+  color: #fff;
+}
 
 .contact-list {
   display: grid;

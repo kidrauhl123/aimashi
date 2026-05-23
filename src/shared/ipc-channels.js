@@ -102,6 +102,7 @@
     SocialUpdateRoom: "social:update-room",
     SocialDeleteRoom: "social:delete-room",
     SocialAddRoomMember: "social:add-room-member",
+    SocialRemoveRoomMember: "social:remove-room-member",
     SocialPostMessageAsFellow: "social:post-message-as-fellow",
     // Phase 3: cross-device user settings (pin / read marks / appearance).
     CloudSettingsGet: "cloud:settings-get",

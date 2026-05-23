@@ -465,6 +465,37 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.group-info-avatar-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-self: end;
+}
+.group-info-avatar-preview {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 120ms;
+}
+.group-info-avatar-preview:hover {
+  border-color: var(--accent);
+}
+.group-info-avatar-preview .avatar,
+.group-info-avatar-preview .group-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: grid;
+}
+.group-info-avatar-preview .avatar.group-avatar {
+  background: var(--surface);
+}
+
 .group-info-host-badge {
   flex: 0 0 auto;
   padding: 1px 5px;

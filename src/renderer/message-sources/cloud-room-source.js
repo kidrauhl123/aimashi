@@ -20,22 +20,33 @@
       }
       if (m.sender_kind === SenderKind.Fellow) {
         const member = memberArr.find((mem) => mem.member_kind === MemberKind.Fellow && mem.member_ref === m.sender_ref);
-        const ownerLabel = member ? (member.owner?.username || member.owner_username) : "";
-        let owner = ownerLabel;
-        if (!owner && member?.owner_id) {
-          const friend = (ctx.friends || []).find((f) => f.id === member.owner_id);
-          if (friend) owner = friend.username || friend.account || "";
-          if (!owner && selfId === member.owner_id) owner = ctx.self?.username || "";
-        }
-        // If this fellow belongs to me, hydrate its avatar from my local
-        // fellow registry so it renders identically to the same fellow
-        // in fellow-private and local-group views.
+        // Resolution priority for fellow display name + avatar:
+        //   1. local fellow registry (if I own this fellow)
+        //   2. server-enriched fellow_name / fellow_avatar_image on the
+        //      member row (covers cross-owner fellows uniformly)
+        //   3. raw sender_ref as last resort
+        // Owner attribution intentionally omitted — UX showed it as
+        // "(${ownerUsername})" before but users found it noisy ("不要括号
+        // 展示其主人"). If we need owner context later it belongs in the
+        // contact card, not the message label.
+        const localFellow = resolveContact({ kind: ContactKind.Fellow, ref: m.sender_ref }, ctx);
+        let displayName = "";
         let avatar = { image: "", crop: null, color: "#5e5ce6" };
-        if (member?.owner_id === selfId) {
-          const localFellow = resolveContact({ kind: ContactKind.Fellow, ref: m.sender_ref }, ctx);
+        if (localFellow.displayName && localFellow.displayName !== m.sender_ref) {
+          displayName = localFellow.displayName;
           if (localFellow.avatar?.image) avatar = localFellow.avatar;
+        } else if (member && member.fellow_name) {
+          displayName = member.fellow_name;
+          if (member.fellow_avatar_image) {
+            avatar = {
+              image: member.fellow_avatar_image,
+              crop: member.fellow_avatar_crop || null,
+              color: member.fellow_color || "#5e5ce6"
+            };
+          }
+        } else {
+          displayName = m.sender_ref;
         }
-        const displayName = owner ? `${m.sender_ref} (${owner})` : m.sender_ref;
         return {
           kind: ContactKind.Fellow,
           id: m.sender_ref,

@@ -15,6 +15,9 @@ const ALLOWED_PREFIXES = [
 ];
 
 const ALLOWED_FILES = [
+  // Storage layer — persisting and reading raw kind literals against the
+  // SQLite rows themselves is the canonical source of truth, not a bypass.
+  "cloud/social-store.js"
 ];
 
 function walk(dir, out = []) {

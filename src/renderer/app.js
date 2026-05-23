@@ -569,11 +569,13 @@ function conversationCardSpecFromRow(row, personas) {
       };
     }
     const pinned = Boolean(social?.isRoomPinned?.(room.id));
+    const muted = Boolean(social?.isRoomMuted?.(room.id));
     const unread = social?.getUnreadForRoom?.(room.id) || 0;
     return {
       kind: "private",
       active: room.id === activeRoomId,
       pinned,
+      muted,
       name,
       typeLabel: "私聊",
       preview: room.lastMessagePreview || "暂无对话",
@@ -587,10 +589,15 @@ function conversationCardSpecFromRow(row, personas) {
         render();
       },
       onContextMenu: (x, y) => window.aimashiConversationContextMenu.openPrivateConversationMenu(
-        { id: room.id, name, pinned, unread },
+        { id: room.id, name, pinned, unread, muted },
         {
           togglePinned: () => { social.setRoomPinned(room.id, !pinned); render(); },
-          markRead: () => { social.markRoomRead(room.id); render(); },
+          toggleRead: (next) => {
+            if (next) social.setRoomManuallyUnread(room.id, true);
+            else { social.setRoomManuallyUnread(room.id, false); social.markRoomRead(room.id); }
+            render();
+          },
+          toggleMuted: (next) => { social.setRoomMuted(room.id, next); render(); },
           remove: async () => {
             if (!confirm(`确定删除与「${name}」的对话？此操作不可撤销。`)) return;
             const res = await social.deleteCloudRoom(room.id);
@@ -613,18 +620,21 @@ function conversationCardSpecFromRow(row, personas) {
     const tiles = window.aimashiGroupTiles.resolveGroupMemberTiles(memberRecords, groupTilesCtx(personas));
     const memberCount = memberRecords.length || room.memberCount || 0;
     const cgPinned = Boolean(social?.isRoomPinned?.(room.id));
+    const cgMuted = Boolean(social?.isRoomMuted?.(room.id));
     const cgUnread = social?.getUnreadForRoom?.(room.id) || 0;
     const cgName = room.name || "群聊";
     return {
       kind: "group",
       active: room.id === activeRoomId,
       pinned: cgPinned,
+      muted: cgMuted,
       name: cgName,
       typeLabel: memberCount ? `群聊 · ${memberCount}人` : "群聊",
       preview: room.lastMessagePreview || "暂无消息",
       time: formatConversationTime(row.updatedAt),
       unread: cgUnread,
       members: tiles,
+      customAvatar: room.decorations?.avatar || null,
       onClick: () => {
         state.activeKey = "";
         window.aimashiSocial.setActiveRoomId(room.id);
@@ -632,22 +642,16 @@ function conversationCardSpecFromRow(row, personas) {
         render();
       },
       onContextMenu: (x, y) => window.aimashiConversationContextMenu.openGroupConversationMenu(
-        { id: room.id, name: cgName, pinned: cgPinned, unread: cgUnread },
+        { id: room.id, name: cgName, pinned: cgPinned, unread: cgUnread, muted: cgMuted },
         {
           togglePinned: () => { social.setRoomPinned(room.id, !cgPinned); render(); },
-          markRead: () => { social.markRoomRead(room.id); render(); },
-          openInfo: () => {
-            const members = social.getRoomMembers?.(room.id) || [];
-            const lines = members.map((m) => {
-              if (m.member_kind === MemberKind.Fellow) return `· fellow ${m.member_ref}`;
-              if (m.member_kind === MemberKind.User) {
-                const friend = social.friendById?.(m.member_ref);
-                return `· ${friend?.username || friend?.account || m.member_ref}`;
-              }
-              return `· ${m.member_ref}`;
-            });
-            alert(`${cgName}\n\n${lines.join("\n") || "（无成员信息）"}`);
+          toggleRead: (next) => {
+            if (next) social.setRoomManuallyUnread(room.id, true);
+            else { social.setRoomManuallyUnread(room.id, false); social.markRoomRead(room.id); }
+            render();
           },
+          toggleMuted: (next) => { social.setRoomMuted(room.id, next); render(); },
+          openInfo: () => window.aimashiGroupInfoDialog?.open(room.id),
           rename: async () => {
             const next = window.prompt("编辑群组名称", cgName);
             if (!next || next.trim() === cgName) return;
@@ -693,9 +697,18 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
   if (roomType === "group") {
     const members = social?.getRoomMembers?.(room.id) || [];
     const tiles = window.aimashiGroupTiles.resolveGroupMemberTiles(members, groupTilesCtx(personas));
+    const customAvatar = room.decorations?.avatar;
     if (avatarEl) {
-      avatarEl.className = "profile-avatar group-avatar";
-      groupAvatarHelper.applyGroupAvatar(avatarEl, tiles);
+      if (customAvatar && customAvatar.image) {
+        avatarEl.className = "profile-avatar";
+        avatarEl.innerHTML = "";
+        avatarEl.removeAttribute("data-count");
+        const style = avatarHelper.avatarThumbBackgroundStyle(customAvatar.image, customAvatar.crop, "#5e5ce6");
+        avatarEl.setAttribute("style", style);
+      } else {
+        avatarEl.className = "profile-avatar group-avatar";
+        groupAvatarHelper.applyGroupAvatar(avatarEl, tiles);
+      }
     }
     setText(nameEl, room.name || "群聊");
     if (metaEl) metaEl.textContent = tiles.length ? `群聊 · ${tiles.length} 人` : "群聊";
@@ -1262,7 +1275,12 @@ function render() {
   const composerBottom = document.querySelector(".composer-bottom");
   if (activeCloudRoom) {
     paintActiveCloudRoomHeader(activeCloudRoom, { personas, social: window.aimashiSocial });
-    if (groupInfoBtn) groupInfoBtn.classList.add("hidden");
+    const activeIsGroup = (activeCloudRoom.type
+      || (activeCloudRoom.id?.startsWith("dm:") ? "dm"
+        : activeCloudRoom.id?.startsWith("fellow:") ? "fellow"
+        : (activeCloudRoom.id?.startsWith("g_") || activeCloudRoom.id?.startsWith("g-")) ? "group"
+        : "")) === "group";
+    if (groupInfoBtn) groupInfoBtn.classList.toggle("hidden", !activeIsGroup);
     if (els.sessionMenuButton) els.sessionMenuButton.classList.add("hidden");
     if (composerBottom) composerBottom.classList.add("hidden");
   } else if (active) {
@@ -2109,6 +2127,11 @@ async function initializeRuntime() {
     }
   });
 }
+
+document.getElementById("groupInfoButton")?.addEventListener("click", () => {
+  const roomId = window.aimashiSocial?.getActiveRoomId?.();
+  if (roomId) window.aimashiGroupInfoDialog?.open(roomId);
+});
 
 els.openSettings.addEventListener("click", () => {
   state.settingsOpen = true;
@@ -2990,6 +3013,13 @@ els.avatarCropStage?.addEventListener("wheel", (event) => {
   });
 });
 els.confirmAvatarCrop?.addEventListener("click", async () => {
+  if (state.avatarCropEditor.target === "groupRoom") {
+    const image = state.avatarCropEditor.image;
+    const crop = state.avatarCropEditor.crop;
+    window.aimashiFellowDialog.closeAvatarCropEditor();
+    window.aimashiGroupInfoDialog?.applyAvatarFromCropEditor(image, crop);
+    return;
+  }
   if (state.avatarCropEditor.target === "profile") {
     window.aimashiFellowDialog.setProfileAvatarDraft(state.avatarCropEditor.image, state.avatarCropEditor.crop);
     // Auto-persist the avatar so closing the profile dialog without clicking
