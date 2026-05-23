@@ -315,8 +315,9 @@ function createCloudStore(options = {}) {
     );
     const row = getUserById(userId);
     const user = rowToUser(row);
-    const workspace = ensureWorkspace(user);
-    return { token: createSession(user.id), user, workspace };
+    // Phase 4 cutover: workspace removed from auth response. Clients
+    // bootstrap conversations from /api/rooms now.
+    return { token: createSession(user.id), user };
   }
 
   function loginUser(input = {}) {
@@ -329,7 +330,7 @@ function createCloudStore(options = {}) {
     }
     clearLoginFailures(account, input.ip);
     const user = rowToUser(row);
-    return { token: createSession(user.id), user, workspace: ensureWorkspace(user) };
+    return { token: createSession(user.id), user };
   }
 
   function authenticateToken(token) {

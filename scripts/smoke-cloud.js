@@ -383,17 +383,9 @@ async function main() {
   });
   pass("file policy", "active svg rejected");
 
-  await expectJsonStatus(baseUrl, "/api/messages", 400, {
-    token,
-    method: "POST",
-    body: {
-      conversationId: account.data.workspace?.activeConversationId || "conv_aimashi",
-      role: "user",
-      text: "   ",
-      attachments: []
-    }
-  });
-  pass("message validation", "blank message rejected");
+  // (was: POST /api/messages blank-text rejection. Endpoint deleted in
+  //  Phase 4 cutover — message validation lives at POST /api/rooms/:id/
+  //  messages now, and is covered by the room-message integration tests.)
 
   const devices = await jsonRequest(baseUrl, "/api/bridge/devices", { token });
   if (process.env.AIMASHI_SMOKE_REQUIRE_BRIDGE === "1" && !devices.data.devices?.length) {

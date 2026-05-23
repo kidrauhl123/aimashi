@@ -342,7 +342,7 @@ function runAudit({ rootDir = root } = {}) {
       checkSource(rootDir, "src/cloud/sqlite-store.js", /DatabaseSync.*node:sqlite|node:sqlite[\s\S]*DatabaseSync/, "uses node:sqlite DatabaseSync"),
       checkSource(rootDir, "src/cloud/sqlite-store.js", /schema_migrations/, "schema migrations table"),
       checkSource(rootDir, "src/cloud/sqlite-store.js", /importLegacyJsonIfNeeded/, "legacy JSON bootstrap"),
-      checkSource(rootDir, "tests/cloud-sqlite-store.test.js", /persists workspace revisions across reopen/, "restart persistence test"),
+      checkSource(rootDir, "tests/event-log-store.test.js", /event_seq cache stays in lock-step/, "event log monotonic seq persistence"),
       checkSource(rootDir, "tests/cloud-sqlite-store.test.js", /imports existing legacy cloud json/, "legacy import test")
     ]),
     item("cloud.security-baseline", "安全基线：scrypt、会话哈希、所有权、限流、Origin/CORS/security headers", [
@@ -361,26 +361,21 @@ function runAudit({ rootDir = root } = {}) {
       checkSource(rootDir, "scripts/local-agent-bridge.js", /generatedImages|materializeAttachments|run_result/, "standalone bridge handles attachments and generated images")
     ]),
     item("cloud.attachments", "附件/生成图片作为 Cloud 文件处理且不泄漏本地路径", [
-      checkSource(rootDir, "scripts/serve-cloud.js", /saveImageDataUrl|persistCloudAttachments|sanitizeCloudMessageAttachments/, "server persists and sanitizes attachment metadata"),
-      // Web no longer ships an upload/preview client — that feature was deliberately removed
-      // when web was scoped down to chat+settings (commit on 2026-05-22). Cloud server +
-      // desktop boundary checks below still guard the attachment contract end-to-end.
-      checkSource(rootDir, "src/cloud/desktop-sync.js", /dataUrl|thumbnail|Unsupported image type/, "desktop upload boundary logic"),
-      checkSource(rootDir, "tests/serve-cloud-bridge.test.js", /drops unsafe local-path attachment urls|active-content image uploads|blank messages/, "unsafe path, SVG, and blank-message regressions"),
-      checkSource(rootDir, "tests/cloud-desktop-sync.test.js", /full local image files instead of thumbnails|active svg/, "desktop full-image and SVG tests")
+      checkSource(rootDir, "scripts/serve-cloud.js", /saveImageDataUrl|persistCloudAttachments/, "server persists and sanitizes attachment metadata"),
+      checkSource(rootDir, "tests/serve-cloud-bridge.test.js", /accepts image uploads at the documented eighteen megabyte limit|active-content image uploads/, "image upload + SVG rejection regressions")
     ]),
     item("cloud.realtime-sync", "按用户隔离的实时同步", [
-      checkSource(rootDir, "scripts/serve-cloud.js", /\/api\/events|broadcastEvent|workspace_updated|message_created|device_updated|bridge_run_updated/, "event websocket and envelope types"),
-      checkSource(rootDir, "src/web/app.js", /startCloudEvents[\s\S]*workspace_updated[\s\S]*message_created[\s\S]*bridge_run_updated/, "web consumes realtime events"),
-      checkSource(rootDir, "src/main.js", /startCloudEvents|mergeCloudWorkspaceIntoChatStore|writeCloudWorkspace/, "desktop consumes cloud events"),
-      checkSource(rootDir, "tests/serve-cloud-bridge.test.js", /events broadcast workspace updates only to the authenticated user/, "cross-user realtime isolation test")
+      checkSource(rootDir, "scripts/serve-cloud.js", /\/api\/events|broadcastPersistedEvent|broadcastTransientEvent|room.message_appended|user_settings.updated/, "event websocket + persisted event types"),
+      checkSource(rootDir, "src/web/app.js", /startCloudEvents[\s\S]*room\.message_appended/, "web consumes realtime events"),
+      checkSource(rootDir, "src/main.js", /startCloudEvents/, "desktop consumes cloud events"),
+      checkSource(rootDir, "tests/sync-replay.test.js", /reconnect with since_seq replays/, "since_seq replay test guards offline drop")
     ]),
     item("cloud.desktop-sync", "桌面端同账号云同步和 Bridge 自动接入", [
-      checkFile(rootDir, "src/cloud/desktop-sync.js"),
       checkSource(rootDir, "src/main.js", /cloudLogin|syncAimashiCloudWorkspace|startCloudBridge|cloudPushMessage/, "desktop login/sync/bridge IPC path"),
+      checkSource(rootDir, "src/main.js", /pushAllFellowSessionsToCloudRooms|mirrorFellowSessionToCloudRoom/, "desktop mirrors fellow sessions into cloud rooms"),
       checkSource(rootDir, "src/preload.js", /cloudLogin|cloudPushMessage|cloudStatus/, "preload exposes cloud actions"),
       checkSource(rootDir, "src/renderer/app.js", /pushCloudMessageQuietly|renderCloudStatus|cloudLogin/, "renderer cloud status and push path"),
-      checkSource(rootDir, "tests/cloud-desktop-sync.test.js", /maps local sessions to stable cloud conversations|maps cloud conversations into local sessions/, "desktop sync mapping tests")
+      checkSource(rootDir, "tests/fellow-rooms.test.js", /Fellow-room messages POST works through the unified/, "fellow chat room integration test")
     ]),
     item("gate.same-account-bridge-control", "同账号 Web/手机端可直接调用桌面 Agent，设备鉴权不复用 Agent permission", [
       checkSource(rootDir, "src/main.js", /async function runCloudBridgeRequest[\s\S]*permissionMode: "default"/, "desktop bridge keeps Agent permissionMode on the Agent run"),

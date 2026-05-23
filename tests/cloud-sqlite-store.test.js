@@ -26,7 +26,7 @@ test("sqlite store registers, logs in, authenticates, and logs out a user", () =
     const registered = store.registerUser({ username: "Alice", password: "secret1" });
     assert.equal(registered.user.username, "alice");
     assert.ok(registered.token);
-    assert.equal(registered.workspace.activeConversationId, "conv_aimashi");
+        // Phase 4: workspace removed from auth response.
 
     const loggedIn = store.loginUser({ username: "ALICE", password: "secret1" });
     assert.ok(loggedIn.token);
@@ -41,29 +41,6 @@ test("sqlite store registers, logs in, authenticates, and logs out a user", () =
   }
 });
 
-test("sqlite store persists workspace revisions across reopen", () => {
-  const paths = tempStore();
-  let store = createCloudStore(paths);
-  try {
-    const registered = store.registerUser({ username: "bob", password: "secret1" });
-    const first = store.getWorkspace(registered.user.id);
-    const next = store.putWorkspace(registered.user.id, {
-      ...first,
-      activeConversationId: "conv_custom",
-      conversations: [{ id: "conv_custom", title: "自定义", messages: [] }]
-    });
-    assert.equal(next.revision, first.revision + 1);
-    store.close();
-
-    store = createCloudStore(paths);
-    const reopened = store.getWorkspace(registered.user.id);
-    assert.equal(reopened.activeConversationId, "conv_custom");
-    assert.equal(reopened.revision, next.revision);
-  } finally {
-    store.close();
-    cleanup(paths.dataDir);
-  }
-});
 
 test("sqlite store keeps contacts skills and workbench scoped per account", () => {
   const paths = tempStore();
@@ -96,30 +73,6 @@ test("sqlite store keeps contacts skills and workbench scoped per account", () =
   }
 });
 
-test("sqlite store appends to an explicit new conversation id", () => {
-  const paths = tempStore();
-  const store = createCloudStore(paths);
-  try {
-    const user = store.registerUser({ username: "newconv", password: "secret1" }).user;
-    const appended = store.appendMessage(user.id, {
-      conversationId: "desktop_new_session",
-      message: {
-        id: "msg_new",
-        role: "user",
-        text: "桌面端新会话",
-        createdAt: "2026-05-20T00:00:00.000Z",
-        attachments: []
-      }
-    });
-    const conversation = appended.workspace.conversations.find((item) => item.id === "desktop_new_session");
-    assert.equal(conversation.title, "桌面端新会话");
-    assert.equal(conversation.messages.at(-1).id, "msg_new");
-    assert.equal(appended.workspace.activeConversationId, "desktop_new_session");
-  } finally {
-    store.close();
-    cleanup(paths.dataDir);
-  }
-});
 
 test("sqlite store enforces file ownership", () => {
   const paths = tempStore();

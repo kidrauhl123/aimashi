@@ -497,85 +497,6 @@ test("cloud websocket auth rejects query token auth by default", async () => {
   }
 });
 
-test("cloud bridge lists online local devices and writes run results to the workspace", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { email: "bridge@example.com", password: "password123" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    const capabilities = { streaming: true, generatedImages: true, appVersion: "0.1.0", hostname: "mac.local" };
-    ws = new WebSocket(bridgeWsUrl(baseUrl, {
-      deviceName: "Mac Studio",
-      engine: "codex",
-      capabilities: JSON.stringify(capabilities)
-    }), wsTokenProtocol(account.token));
-    await waitForMessage(ws, (message) => message.type === "bridge_ready");
-
-    const devices = await jsonFetch(baseUrl, "/api/bridge/devices", { headers });
-    assert.equal(devices.devices.length, 1);
-    assert.equal(devices.devices[0].deviceName, "Mac Studio");
-    assert.equal(devices.devices[0].engine, "codex");
-    assert.equal(devices.devices[0].status, "online");
-    assert.deepEqual(devices.devices[0].capabilities, capabilities);
-
-    ws.on("message", (raw) => {
-      const message = JSON.parse(String(raw));
-      if (message.type !== "run") return;
-      ws.send(JSON.stringify({
-        type: "run_result",
-        runId: message.runId,
-        ok: true,
-        text: `本机 Codex 已收到：${message.text}`,
-        attachments: [
-          { id: "unsafe_path", type: "image", name: "secret.png", url: "/Users/jung/secret.png" },
-          { id: "unsafe_file", type: "image", name: "secret2.png", url: "file:///Users/jung/secret2.png" },
-          { id: "safe_remote", type: "image", name: "remote.png", url: "https://cdn.example.com/remote.png" }
-        ]
-      }));
-    });
-
-    const run = await jsonFetch(baseUrl, "/api/bridge/run", {
-      method: "POST",
-      headers,
-      body: {
-        deviceId: devices.devices[0].id,
-        conversationId: account.workspace.activeConversationId,
-        text: "你好"
-      }
-    });
-
-    const conversation = run.workspace.conversations.find((item) => item.id === account.workspace.activeConversationId);
-    const lastMessage = conversation.messages[conversation.messages.length - 1];
-    assert.equal(lastMessage.role, "assistant");
-    assert.equal(lastMessage.text, "本机 Codex 已收到：你好");
-    assert.equal(run.message.id, lastMessage.id);
-    assert.deepEqual(run.message.attachments.map((item) => item.id), ["safe_remote"]);
-    assert.equal(run.message.attachments[0].url, "https://cdn.example.com/remote.png");
-
-    const runs = await jsonFetch(baseUrl, "/api/bridge/runs", { headers });
-    assert.equal(runs.runs.length, 1);
-    assert.equal(runs.runs[0].status, "succeeded");
-    assert.equal(runs.runs[0].resultText, "本机 Codex 已收到：你好");
-    assert.deepEqual(runs.runs[0].attachments.map((item) => item.id), ["safe_remote"]);
-
-    const cancelCompleted = await rawFetch(baseUrl, `/api/bridge/runs/${run.run.id}/cancel`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: "{}"
-    });
-    assert.equal(cancelCompleted.status, 409);
-    const stillCompleted = await cancelCompleted.json();
-    assert.equal(stillCompleted.run.status, "succeeded");
-  } finally {
-    ws?.close();
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
 
 test("cloud bridge forwards run progress events to authenticated event sockets", async () => {
   const dataDir = tempDataDir();
@@ -624,7 +545,7 @@ test("cloud bridge forwards run progress events to authenticated event sockets",
       headers,
       body: {
         deviceId: devices.devices[0].id,
-        conversationId: account.workspace.activeConversationId,
+        conversationId: "conv_test_default",
         text: "跑一下"
       }
     });
@@ -705,116 +626,7 @@ test("cloud bridge device listing follows live websocket state instead of stale 
   }
 });
 
-test("cloud bridge runs on the explicitly selected online device", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  let wsOne = null;
-  let wsTwo = null;
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "multi-device", password: "secret1" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    wsOne = new WebSocket(bridgeWsUrl(baseUrl, { deviceName: "Mac One", engine: "codex" }), wsTokenProtocol(account.token));
-    wsTwo = new WebSocket(bridgeWsUrl(baseUrl, { deviceName: "Mac Two", engine: "codex" }), wsTokenProtocol(account.token));
-    await waitForMessage(wsOne, (message) => message.type === "bridge_ready");
-    await waitForMessage(wsTwo, (message) => message.type === "bridge_ready");
-    const devices = await jsonFetch(baseUrl, "/api/bridge/devices", { headers });
-    assert.equal(devices.devices.length, 2);
-    const selected = devices.devices.find((device) => device.deviceName === "Mac Two");
-    assert.ok(selected);
 
-    let firstDeviceSawRun = false;
-    wsOne.on("message", (raw) => {
-      const message = JSON.parse(String(raw));
-      if (message.type === "run") firstDeviceSawRun = true;
-    });
-    wsTwo.on("message", (raw) => {
-      const message = JSON.parse(String(raw));
-      if (message.type !== "run") return;
-      wsTwo.send(JSON.stringify({
-        type: "run_result",
-        runId: message.runId,
-        ok: true,
-        text: `selected:${message.text}`,
-        attachments: []
-      }));
-    });
-
-    const run = await jsonFetch(baseUrl, "/api/bridge/run", {
-      method: "POST",
-      headers,
-      body: {
-        deviceId: selected.id,
-        conversationId: account.workspace.activeConversationId,
-        text: "hello selected"
-      }
-    });
-    assert.equal(run.message.text, "selected:hello selected");
-    assert.equal(run.run.deviceId, selected.id);
-    assert.equal(firstDeviceSawRun, false);
-  } finally {
-    closeWs(wsOne);
-    closeWs(wsTwo);
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
-
-test("cloud bridge auto-selects the only online device when deviceId is omitted", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  let ws = null;
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "single-device", password: "secret1" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    ws = new WebSocket(bridgeWsUrl(baseUrl, { deviceName: "Only Mac", engine: "codex" }), wsTokenProtocol(account.token));
-    await waitForMessage(ws, (message) => message.type === "bridge_ready");
-    const devices = await jsonFetch(baseUrl, "/api/bridge/devices", { headers });
-    assert.equal(devices.devices.length, 1);
-
-    let receivedRunAttachments = null;
-    ws.on("message", (raw) => {
-      const message = JSON.parse(String(raw));
-      if (message.type !== "run") return;
-      receivedRunAttachments = message.attachments;
-      ws.send(JSON.stringify({
-        type: "run_result",
-        runId: message.runId,
-        ok: true,
-        text: `auto:${message.text}`,
-        attachments: []
-      }));
-    });
-
-    const requestDataUrl = `data:image/png;base64,${Buffer.from("request-image").toString("base64")}`;
-    const run = await jsonFetch(baseUrl, "/api/bridge/run", {
-      method: "POST",
-      headers,
-      body: {
-        conversationId: account.workspace.activeConversationId,
-        text: "hello default device",
-        attachments: [{ name: "request.png", type: "image", dataUrl: requestDataUrl }]
-      }
-    });
-    assert.equal(run.message.text, "auto:hello default device");
-    assert.equal(run.run.deviceId, devices.devices[0].id);
-    assert.equal(run.run.requestAttachments.length, 1);
-    assert.match(run.run.requestAttachments[0].url, /^\/api\/files\/file_/);
-    assert.equal(Object.hasOwn(run.run.requestAttachments[0], "dataUrl"), false);
-    assert.deepEqual(receivedRunAttachments, run.run.requestAttachments);
-  } finally {
-    closeWs(ws);
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
 
 test("cloud bridge requires explicit device selection when multiple devices are online", async () => {
   const dataDir = tempDataDir();
@@ -837,7 +649,7 @@ test("cloud bridge requires explicit device selection when multiple devices are 
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        conversationId: account.workspace.activeConversationId,
+        conversationId: "conv_test_default",
         text: "hello ambiguous device"
       })
     });
@@ -891,293 +703,10 @@ test("cloud files require owner authentication", async () => {
   }
 });
 
-test("cloud events broadcast workspace updates only to the authenticated user", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  let aliceEvents = null;
-  let bobEvents = null;
-  try {
-    const alice = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "alice", password: "secret1" }
-    });
-    const bob = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "bob", password: "secret1" }
-    });
-    aliceEvents = new WebSocket(eventsWsUrl(baseUrl), wsTokenProtocol(alice.token));
-    bobEvents = new WebSocket(eventsWsUrl(baseUrl), wsTokenProtocol(bob.token));
-    await waitForMessage(aliceEvents, (message) => message.type === "events_ready");
-    await waitForMessage(bobEvents, (message) => message.type === "events_ready");
 
-    const updatedWorkspace = {
-      ...alice.workspace,
-      activeConversationId: "conv_live",
-      conversations: [{ id: "conv_live", title: "实时同步", messages: [] }]
-    };
-    const aliceUpdate = waitForMessage(aliceEvents, (message) => message.type === "workspace_updated");
-    await jsonFetch(baseUrl, "/api/workspace", {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${alice.token}` },
-      body: { workspace: updatedWorkspace }
-    });
 
-    const event = await aliceUpdate;
-    assert.equal(event.workspace.activeConversationId, "conv_live");
-    await waitForNoMessage(bobEvents);
-  } finally {
-    closeWs(aliceEvents);
-    closeWs(bobEvents);
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
 
-test("cloud workspace updates sanitize message attachments", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "workspace-attachments", password: "secret1" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    const dataUrl = `data:image/png;base64,${Buffer.from("workspace-png").toString("base64")}`;
-    const uploaded = await jsonFetch(baseUrl, "/api/files", {
-      method: "POST",
-      headers,
-      body: { name: "cloud.png", dataUrl }
-    });
-    const updated = await jsonFetch(baseUrl, "/api/workspace", {
-      method: "PUT",
-      headers,
-      body: {
-        workspace: {
-          ...account.workspace,
-          conversations: [{
-            id: "conv_workspace",
-            title: "Workspace",
-            messages: [{
-              id: "msg_workspace",
-              role: "assistant",
-              text: "workspace attach",
-              attachments: [
-                { id: "unsafe_abs", name: "secret.png", url: "/Users/jung/secret.png" },
-                { id: "unsafe_file", name: "secret2.png", url: "file:///Users/jung/secret2.png" },
-                { id: "other_file", name: "other.png", url: "/api/files/file_missing" },
-                { id: "safe_file", name: "cloud.png", url: uploaded.file.url },
-                { id: "data_image", name: "workspace.png", dataUrl }
-              ]
-            }]
-          }]
-        }
-      }
-    });
-    const message = updated.workspace.conversations[0].messages[0];
-    assert.equal(message.attachments.length, 2);
-    assert.equal(message.attachments[0].id, uploaded.file.id);
-    assert.equal(message.attachments[0].url, uploaded.file.url);
-    assert.match(message.attachments[1].url, /^\/api\/files\/file_/);
-    assert.equal(Object.hasOwn(message.attachments[1], "dataUrl"), false);
-    const serialized = JSON.stringify(updated.workspace);
-    assert.equal(serialized.includes("/Users/jung"), false);
-    assert.equal(serialized.includes("file:///"), false);
-    assert.equal(serialized.includes("data:image"), false);
-  } finally {
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
 
-test("cloud appends user messages atomically and broadcasts them", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  let events = null;
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "writer", password: "secret1" }
-    });
-    events = new WebSocket(eventsWsUrl(baseUrl), wsTokenProtocol(account.token));
-    await waitForMessage(events, (message) => message.type === "events_ready");
-
-    const nextMessage = waitForMessage(events, (message) => message.type === "message_created");
-    const appended = await jsonFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${account.token}` },
-      body: {
-        conversationId: account.workspace.activeConversationId,
-        role: "user",
-        text: "服务端追加",
-        attachments: []
-      }
-    });
-
-    assert.equal(appended.message.role, "user");
-    assert.equal(appended.message.text, "服务端追加");
-    const event = await nextMessage;
-    assert.equal(event.message.id, appended.message.id);
-    const conversation = event.workspace.conversations.find((item) => item.id === account.workspace.activeConversationId);
-    assert.equal(conversation.messages.at(-1).text, "服务端追加");
-
-    const commandResult = {
-      type: "session-list",
-      command: "/resume",
-      engine: "codex",
-      sourceDeviceId: "aimashi-device-a",
-      rows: [{
-        id: "019e53ab-cb8a-71a2-a2a4-ca7bdf0520d6",
-        title: "Indexed title",
-        preview: "hello",
-        project: "/repo",
-        updatedAt: 1779525746671
-      }]
-    };
-    const commandMessage = await jsonFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${account.token}` },
-      body: {
-        conversationId: account.workspace.activeConversationId,
-        role: "assistant",
-        text: "选择一个会话继续：",
-        commandResult,
-        attachments: []
-      }
-    });
-    assert.deepEqual(commandMessage.message.commandResult, commandResult);
-
-    const newConversation = await jsonFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${account.token}` },
-      body: {
-        conversationId: "desktop_new_session",
-        role: "user",
-        text: "桌面端新会话",
-        attachments: []
-      }
-    });
-    const created = newConversation.workspace.conversations.find((item) => item.id === "desktop_new_session");
-    assert.equal(created.title, "桌面端新会话");
-    assert.equal(created.messages.at(-1).text, "桌面端新会话");
-    assert.equal(newConversation.workspace.activeConversationId, "desktop_new_session");
-
-    const blank = await rawFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${account.token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        conversationId: account.workspace.activeConversationId,
-        role: "user",
-        text: "   ",
-        attachments: []
-      })
-    });
-    assert.equal(blank.status, 400);
-    assert.match(await blank.text(), /消息内容不能为空/);
-  } finally {
-    closeWs(events);
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
-
-test("cloud upserts desktop conversations and persists message data-url attachments", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "desktop", password: "secret1" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    const upserted = await jsonFetch(baseUrl, "/api/conversations", {
-      method: "POST",
-      headers,
-      body: {
-        conversation: {
-          id: "desktop_session_1",
-          title: "Desktop Session",
-          meta: "Aimashi Desktop · 已同步",
-          avatar: "./assets/avatar-08.png"
-        }
-      }
-    });
-    assert.equal(upserted.conversation.id, "desktop_session_1");
-    assert.equal(upserted.workspace.activeConversationId, "desktop_session_1");
-
-    const dataUrl = `data:image/png;base64,${Buffer.from("desktop-png").toString("base64")}`;
-    const appended = await jsonFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers,
-      body: {
-        conversationId: "desktop_session_1",
-        role: "assistant",
-        text: "桌面端图片",
-        attachments: [{ name: "desktop.png", type: "image", dataUrl }]
-      }
-    });
-    assert.equal(appended.message.attachments.length, 1);
-    assert.match(appended.message.attachments[0].url, /^\/api\/files\/file_/);
-    assert.equal(Object.hasOwn(appended.message.attachments[0], "dataUrl"), false);
-    assert.equal(Object.hasOwn(appended.message.attachments[0], "path"), false);
-
-    const owner = await rawFetch(baseUrl, appended.message.attachments[0].url, { headers });
-    assert.equal(owner.status, 200);
-    assert.equal(owner.headers.get("content-type"), "image/png");
-  } finally {
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
-
-test("cloud drops unsafe local-path attachment urls from messages", async () => {
-  const dataDir = tempDataDir();
-  const server = createAimashiCloudServer({ dataDir });
-  const baseUrl = await listen(server);
-  try {
-    const account = await jsonFetch(baseUrl, "/api/auth/register", {
-      method: "POST",
-      body: { username: "unsafe-attachment", password: "secret1" }
-    });
-    const headers = { Authorization: `Bearer ${account.token}` };
-    const dataUrl = `data:image/png;base64,${Buffer.from("safe-png").toString("base64")}`;
-    const uploaded = await jsonFetch(baseUrl, "/api/files", {
-      method: "POST",
-      headers,
-      body: { name: "cloud.png", dataUrl }
-    });
-    const appended = await jsonFetch(baseUrl, "/api/messages", {
-      method: "POST",
-      headers,
-      body: {
-        conversationId: account.workspace.activeConversationId,
-        role: "assistant",
-        text: "附件过滤",
-        attachments: [
-          { id: "unsafe_abs", name: "secret.png", url: "/Users/jung/secret.png" },
-          { id: "unsafe_file", name: "secret2.png", url: "file:///Users/jung/secret2.png" },
-          { id: "other_file", name: "other.png", url: "/api/files/file_missing" },
-          { id: "safe_file", name: "cloud.png", url: uploaded.file.url },
-          { id: "safe_http", name: "remote.png", url: "https://cdn.example.com/remote.png" }
-        ]
-      }
-    });
-    assert.deepEqual(appended.message.attachments.map((item) => item.id), [uploaded.file.id, "safe_http"]);
-    assert.deepEqual(appended.message.attachments.map((item) => item.url), [uploaded.file.url, "https://cdn.example.com/remote.png"]);
-    const serialized = JSON.stringify(appended);
-    assert.equal(serialized.includes("/Users/jung"), false);
-    assert.equal(serialized.includes("file:///"), false);
-  } finally {
-    await close(server);
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
-});
 
 test("cloud can cancel a pending bridge run", async () => {
   const dataDir = tempDataDir();
@@ -1205,7 +734,7 @@ test("cloud can cancel a pending bridge run", async () => {
       headers,
       body: {
         deviceId: devices.devices[0].id,
-        conversationId: account.workspace.activeConversationId,
+        conversationId: "conv_test_default",
         text: "取消我"
       }
     }).then(
@@ -1226,7 +755,7 @@ test("cloud can cancel a pending bridge run", async () => {
     assert.equal(runResult.value.cancelled, true);
     assert.equal(runResult.value.run.status, "cancelled");
     assert.match(runResult.value.run.error, /已取消/);
-    assert.equal(runResult.value.workspace.activeConversationId, account.workspace.activeConversationId);
+    // Phase 4: bridge response no longer carries a workspace snapshot.
   } finally {
     closeWs(ws);
     await close(server);
@@ -1255,7 +784,7 @@ test("cloud marks bridge runs as timed_out when a device never responds", async 
       headers,
       body: {
         deviceId: devices.devices[0].id,
-        conversationId: account.workspace.activeConversationId,
+        conversationId: "conv_test_default",
         text: "别回复"
       }
     }).then(

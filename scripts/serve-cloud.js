@@ -1363,106 +1363,10 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, payload);
     }
 
-    if (req.method === "GET" && url.pathname === "/api/workspace") {
-      // Phase 4 dedup: after a session has been mirrored to a
-      // fellow-type room (rooms+messages), the workspace.snapshot copy
-      // is redundant. Hide those entries here so clients reading both
-      // /api/workspace and /api/rooms don't see two cards for the same
-      // conversation. Detection: fellow:<userId>:<conv.id> exists.
-      const workspace = cloudStore.getWorkspace(auth.user.id);
-      const userRooms = context.socialStore.listRoomsForUser(auth.user.id) || [];
-      const migratedSessionIds = new Set();
-      for (const r of userRooms) {
-        if (r?.type !== "fellow") continue;
-        const sid = r.id && r.id.startsWith(`fellow:${auth.user.id}:`)
-          ? r.id.slice(`fellow:${auth.user.id}:`.length)
-          : null;
-        if (sid) migratedSessionIds.add(sid);
-      }
-      const filteredConvs = (workspace?.conversations || []).filter((c) => !migratedSessionIds.has(c.id));
-      return writeJson(res, 200, { workspace: { ...workspace, conversations: filteredConvs } });
-    }
-
-    if (req.method === "PUT" && url.pathname === "/api/workspace") {
-      const body = await readJson(req);
-      const rawWorkspace = body.workspace && typeof body.workspace === "object" ? body.workspace : {};
-      const incoming = sanitizeCloudWorkspaceAttachments(cloudStore, auth.user.id, rawWorkspace);
-      const workspace = cloudStore.putWorkspace(auth.user.id, incoming);
-      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
-      return writeJson(res, 200, { workspace });
-    }
-
-    // POST /api/workspace/sync — concurrency-safe merge upsert.
-    // Body: { conversations?: [...], removeConversationIds?: [...] }
-    // Merge semantics:
-    //   - For each incoming conversation:
-    //     * If id exists in current: merge field-by-field (incoming wins
-    //       for title/pinned/avatar/meta/updatedAt). If the incoming has a
-    //       messages array, merge it with existing messages by content-key
-    //       (role|createdAt|text), preferring id-bearing copies on collision;
-    //       if not, leave existing messages untouched (metadata-only patch).
-    //     * If id is new: insert.
-    //   - removeConversationIds always wins (removed even if also in upsert).
-    if (req.method === "POST" && url.pathname === "/api/workspace/sync") {
-      const body = await readJson(req);
-      const incomingConvs = Array.isArray(body.conversations) ? body.conversations : [];
-      const removeIds = new Set(
-        (Array.isArray(body.removeConversationIds) ? body.removeConversationIds : [])
-          .map((x) => String(x))
-          .filter(Boolean)
-      );
-      const sanitizedIncoming = sanitizeCloudWorkspaceAttachments(
-        cloudStore,
-        auth.user.id,
-        { conversations: incomingConvs }
-      ).conversations || [];
-      const incomingById = new Map(
-        sanitizedIncoming
-          .filter((c) => !removeIds.has(c.id))
-          .map((c) => [c.id, c])
-      );
-      // Dedup messages by content-key (role + createdAt + text). The id is
-      // not a reliable primary key here because desktop bulk syncs send the
-      // same logical message without an id (cloudMessageFromDesktopMessage
-      // drops it). When two messages have the same content, prefer the one
-      // with an id so we keep the cloud-canonical record. Collisions only
-      // happen if a user fires two identical messages within the same ms,
-      // which is effectively impossible.
-      function contentKey(m) {
-        return `${String(m?.role || "")}|${String(m?.createdAt || "")}|${String(m?.text || "")}`;
-      }
-      function mergeMessages(existing, incoming) {
-        const map = new Map();
-        function add(m) {
-          const ck = contentKey(m);
-          const prev = map.get(ck);
-          if (!prev) { map.set(ck, m); return; }
-          if (!prev.id && m?.id) map.set(ck, m);
-        }
-        for (const m of Array.isArray(existing) ? existing : []) add(m);
-        for (const m of Array.isArray(incoming) ? incoming : []) add(m);
-        return [...map.values()].sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
-      }
-      const current = cloudStore.getWorkspace(auth.user.id);
-      const merged = (Array.isArray(current.conversations) ? current.conversations : [])
-        .filter((c) => !removeIds.has(c.id))
-        .map((c) => {
-          const next = incomingById.get(c.id);
-          if (!next) return c;
-          incomingById.delete(c.id);
-          const hasMessages = Array.isArray(next.messages);
-          return {
-            ...c,
-            ...next,
-            messages: hasMessages ? mergeMessages(c.messages, next.messages) : (c.messages || [])
-          };
-        });
-      // Anything left in incomingById is brand new — prepend.
-      for (const c of incomingById.values()) merged.unshift(c);
-      const workspace = cloudStore.putWorkspace(auth.user.id, { ...current, conversations: merged });
-      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
-      return writeJson(res, 200, { workspace });
-    }
+    // /api/workspace, /api/workspace/sync removed. Fellow chats live in
+    // rooms+messages now (Phase 4); all conversations route through
+    // /api/rooms[/...]. The legacy workspaces table is left in place
+    // but no endpoint reads or writes it anymore.
 
     if (req.method === "GET" && url.pathname === "/api/bridge/devices") {
       return writeJson(res, 200, { devices: bridgeDevices(bridgeHub, auth.user.id) });
@@ -1482,63 +1386,9 @@ async function handleRequest(req, res, context) {
       return writeJson(res, wasPending || run.status === "cancelled" ? 200 : 409, { run });
     }
 
-    if (req.method === "POST" && url.pathname === "/api/conversations") {
-      const body = await readJson(req);
-      const incoming = sanitizeCloudConversationAttachments(
-        cloudStore,
-        auth.user.id,
-        cleanConversation(body.conversation && typeof body.conversation === "object" ? body.conversation : {})
-      );
-      const current = cloudStore.getWorkspace(auth.user.id);
-      const conversations = Array.isArray(current.conversations) ? current.conversations.slice() : [];
-      const index = conversations.findIndex((item) => item.id === incoming.id);
-      const conversation = index >= 0
-        ? { ...conversations[index], ...incoming, messages: conversations[index].messages || [] }
-        : incoming;
-      if (index >= 0) conversations[index] = conversation;
-      else conversations.unshift(conversation);
-      const workspace = cloudStore.putWorkspace(auth.user.id, {
-        ...current,
-        activeConversationId: conversation.id,
-        conversations
-      });
-      broadcastPersistedEvent(context, auth.user.id, { type: "workspace_updated", workspace });
-      return writeJson(res, 201, { workspace, conversation });
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/messages") {
-      const body = await readJson(req);
-      const role = String(body.role || "user") === "assistant" ? "assistant" : "user";
-      const attachments = persistCloudAttachments(
-        cloudStore,
-        auth.user.id,
-        Array.isArray(body.attachments) ? body.attachments : []
-      );
-      const text = String(body.text || "").trim();
-      if (!text && !attachments.length) return writeError(res, 400, "消息内容不能为空。");
-      // Preserve the client-provided timestamp when present so the
-      // workspace echo dedups against the local store's already-persisted
-      // copy of this message. Fall back to server now() for legacy clients
-      // that don't send one.
-      const clientCreatedAt = String(body.createdAt || "").trim();
-      const isValidIso = clientCreatedAt
-        && !Number.isNaN(new Date(clientCreatedAt).getTime());
-      const message = {
-        id: id("msg"),
-        role,
-        text,
-        createdAt: isValidIso ? clientCreatedAt : now(),
-        attachments
-      };
-      const commandResult = sanitizeCommandResult(body.commandResult);
-      if (commandResult) message.commandResult = commandResult;
-      const appended = cloudStore.appendMessage(auth.user.id, {
-        conversationId: String(body.conversationId || ""),
-        message
-      });
-      broadcastPersistedEvent(context, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
-      return writeJson(res, 201, appended);
-    }
+    // /api/conversations + /api/messages also removed — all writes go
+    // through /api/rooms/:id/messages now. Bridge still uses an
+    // internal storage path; see the /api/bridge/run handler.
 
     if (req.method === "POST" && url.pathname === "/api/bridge/run") {
       const body = await readJson(req);
@@ -1548,10 +1398,16 @@ async function handleRequest(req, res, context) {
         const onlineCount = bridgeDevices(bridgeHub, auth.user.id).length;
         return writeError(res, 409, onlineCount > 1 ? "请选择要连接的本机设备。" : "本机 Agent Bridge 不在线。");
       }
+      // Phase 4 cutover: conversationId is now interpreted as a fellow
+      // room id (rooms+messages). The bridge writes the assistant reply
+      // through messagesStore.appendMessage into that room, and the
+      // standard room.message_appended event is broadcast as part of
+      // the room sequence so other devices see it consistently.
+      const conversationId = String(body.conversationId || "");
       const requestAttachments = persistCloudAttachments(cloudStore, auth.user.id, Array.isArray(body.attachments) ? body.attachments : []);
       const bridgeRun = cloudStore.createBridgeRun(auth.user.id, {
         deviceId: device.id,
-        conversationId: String(body.conversationId || ""),
+        conversationId,
         text: String(body.text || ""),
         attachments: requestAttachments
       });
@@ -1561,7 +1417,7 @@ async function handleRequest(req, res, context) {
         broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: running });
         const result = await runBridgeDevice(bridgeHub, device, {
           runId: bridgeRun.id,
-          conversationId: bridgeRun.conversationId,
+          conversationId,
           text: bridgeRun.text,
           attachments: requestAttachments
         });
@@ -1571,26 +1427,29 @@ async function handleRequest(req, res, context) {
           attachments
         });
         broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: completed });
-        const message = {
-          id: id("msg"),
-          role: "assistant",
-          text: String(result.text || "").trim() || "本机 Agent 已完成。",
-          createdAt: now(),
-          attachments
-        };
-        const appended = cloudStore.appendMessage(auth.user.id, {
-          conversationId: String(body.conversationId || ""),
-          message
-        });
-        broadcastPersistedEvent(context, auth.user.id, { type: "message_created", workspace: appended.workspace, message });
-        return writeJson(res, 200, { ...appended, run: completed });
+        // Persist the assistant reply into rooms+messages if the
+        // conversationId looks like a real room id.
+        let message = null;
+        if (conversationId && context.socialStore.getRoom(conversationId)) {
+          const text = String(result.text || "").trim() || "本机 Agent 已完成。";
+          message = context.messagesStore.appendMessage({
+            roomId: conversationId,
+            senderKind: "fellow",
+            senderRef: (context.socialStore.getRoom(conversationId)?.decorations?.fellowKey || "agent"),
+            senderOwnerId: auth.user.id,
+            bodyMd: text,
+            attachments,
+            status: "complete"
+          });
+          broadcastPersistedEvent(context, auth.user.id, { type: "room.message_appended", roomId: conversationId, message });
+        }
+        return writeJson(res, 200, { run: completed, message });
       } catch (error) {
         if (error.code === "AIMASHI_BRIDGE_CANCELLED") {
           const cancelled = cloudStore.getBridgeRun(auth.user.id, bridgeRun.id)
             || cloudStore.cancelBridgeRun(auth.user.id, bridgeRun.id);
-          const workspace = cloudStore.getWorkspace(auth.user.id);
           broadcastTransientEvent(context.eventHub, auth.user.id, { type: "bridge_run_updated", run: cancelled });
-          return writeJson(res, 200, { workspace, run: cancelled, cancelled: true });
+          return writeJson(res, 200, { run: cancelled, cancelled: true });
         }
         const failed = error.code === "AIMASHI_BRIDGE_TIMEOUT"
           ? cloudStore.timeoutBridgeRun(auth.user.id, bridgeRun.id, error.message || "本机 Agent 响应超时。")
