@@ -704,23 +704,6 @@ function conversationCardSpecFromRow(row, personas) {
             }
           },
           markRead: () => { /* local-store groups have no separate unread state — menu item renders disabled because unread=0 */ },
-          uploadToCloud: async () => {
-            if (!window.aimashi?.social) return alert("请先登录云端账号");
-            if (!confirm(`将群组「${group.name || "未命名群聊"}」上传到云端？\n上传后其他设备登录同账号即可看到，但本地副本仍会保留。`)) return;
-            try {
-              const memberFellows = (group.members || []).map((m) => ({ fellowId: m.fellowId })).filter((x) => x.fellowId);
-              const res = await window.aimashi.social.createRoom({
-                name: group.name || "未命名群聊",
-                memberFellows,
-                memberFriendUserIds: []
-              });
-              if (!res?.ok) return alert("上传失败：" + (res?.error || "未知错误"));
-              alert("已上传到云端。");
-              render();
-            } catch (err) {
-              alert("上传失败：" + (err?.message || String(err)));
-            }
-          },
           remove: () => deleteGroup(group.id)
         },
         x, y
@@ -1315,6 +1298,13 @@ function render() {
     !filter || `${group.name || ""} ${(group.members || []).map((m) => m.fellowId).join(" ")}`.toLowerCase().includes(filter)
   ));
   const socialRows = window.aimashiSocial?.renderSidebarRows?.() || [];
+  // Dedup: a local-store group that has a cloud counterpart (group.cloudRoomId
+  // matches one of the socialRows' room ids — set by sync, see main.js
+  // pushLocalGroupsToCloud) is the SAME conversation as the cloud row. The
+  // sidebar must show it once, not twice. Prefer the cloud row because that's
+  // the canonical cross-device version.
+  const cloudRoomIds = new Set(socialRows.filter((r) => r.type === "group-room" || r.type === "dm-room").map((r) => r.key));
+  const dedupedGroups = visibleGroups.filter((g) => !(g.cloudRoomId && cloudRoomIds.has(g.cloudRoomId)));
   const messageRows = window.aimashiFellowManager.sortMessageCardsForSidebar([
     ...visiblePersonas.map((persona) => ({
       type: "fellow",
@@ -1324,7 +1314,7 @@ function render() {
       updatedAt: conversationUpdatedAt(persona),
       persona
     })),
-    ...visibleGroups.map((group) => ({
+    ...dedupedGroups.map((group) => ({
       type: "group",
       key: group.id,
       pinned: Boolean(group.pinned),

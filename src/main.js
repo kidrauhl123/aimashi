@@ -2735,6 +2735,97 @@ function externalAgentStatus({ fellow, engine, sessionId }) {
   ].filter(Boolean).join("\n");
 }
 
+function agentSessionEntryId(entry) {
+  if (!entry) return "";
+  if (typeof entry === "string") return entry.trim();
+  return String(entry.id || "").trim();
+}
+
+function looksLikeUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function aimashiSessionTitleForAgentBinding(localSessionId, fellow) {
+  const id = String(localSessionId || "").trim();
+  const fellowKey = String(fellow?.key || "").trim();
+  if (!id || id.startsWith("title:") || id.startsWith("utility:")) return null;
+  if (id.startsWith("group:")) {
+    const groupId = id.slice("group:".length).split(":")[0] || "";
+    try {
+      const group = groupId ? ensureGroupStore().get(groupId) : null;
+      return {
+        title: group?.name ? `群聊：${group.name}` : "Aimashi 群聊",
+        preview: `${fellow?.name || fellowKey || "当前 Fellow"} 在这个群聊中的外部会话`,
+        updatedAt: Number(group?.updatedAt || 0)
+      };
+    } catch {
+      return {
+        title: "Aimashi 群聊",
+        preview: `${fellow?.name || fellowKey || "当前 Fellow"} 在这个群聊中的外部会话`,
+        updatedAt: 0
+      };
+    }
+  }
+  try {
+    const sessions = loadChatStore().sessions?.[fellowKey] || [];
+    const session = sessions.find((item) => item.id === id);
+    if (session) {
+      return {
+        title: session.title || "Aimashi 对话",
+        preview: `${fellow?.name || fellowKey || "当前 Fellow"} 的 Aimashi 对话`,
+        updatedAt: Date.parse(session.updatedAt || session.createdAt || "") || 0
+      };
+    }
+  } catch {
+    // Fall through to a generic label.
+  }
+  return {
+    title: "Aimashi 对话",
+    preview: `${fellow?.name || fellowKey || "当前 Fellow"} 的 Aimashi 对话`,
+    updatedAt: 0
+  };
+}
+
+function listBoundExternalAgentSessions({ engine, fellow, limit = 10 } = {}) {
+  const normalizedEngine = normalizeFellowAgentEngine(engine);
+  const fellowKey = String(fellow?.key || "").trim();
+  if (!fellowKey) return [];
+  const prefix = `${normalizedEngine}:${fellowKey}:`;
+  const metadata = new Map(listExternalAgentSessions(normalizedEngine, { homeDir: app.getPath("home"), limit: 160 })
+    .map((item) => [item.id, item]));
+  const rowsByExternalId = new Map();
+  for (const [key, entry] of Object.entries(loadAgentSessionMap())) {
+    if (!key.startsWith(prefix)) continue;
+    const localSessionId = key.slice(prefix.length);
+    const externalId = agentSessionEntryId(entry);
+    if (!externalId || rowsByExternalId.has(externalId)) continue;
+    const local = aimashiSessionTitleForAgentBinding(localSessionId, fellow);
+    if (!local) continue;
+    const external = metadata.get(externalId) || {};
+    rowsByExternalId.set(externalId, {
+      id: externalId,
+      title: local.title,
+      preview: [local.preview, external.project || ""].filter(Boolean).join(" · "),
+      project: external.project || "",
+      updatedAt: local.updatedAt || external.updatedAt || 0
+    });
+  }
+  return [...rowsByExternalId.values()]
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, limit);
+}
+
+function usefulExternalSessionRow(row) {
+  const title = String(row?.title || "").trim();
+  const preview = String(row?.preview || "").trim();
+  const text = `${title}\n${preview}`;
+  if (!title && !preview) return false;
+  if (looksLikeUuid(title) && !preview) return false;
+  if (/<command-name>|<command-message>|<command-args>/i.test(text)) return false;
+  if (/^\/(?:goal|clear|usage|context|compact|resume|export)\b/i.test(title)) return false;
+  return true;
+}
+
 function runExternalSlashCommand({ text, fellow, engine, sessionId }) {
   const command = String(text || "").trim().split(/\s+/)[0].toLowerCase();
   const args = String(text || "").trim().slice(command.length).trim();
@@ -2766,8 +2857,13 @@ function runExternalSlashCommand({ text, fellow, engine, sessionId }) {
     const current = getAgentSessionId(engine, fellow.key, sessionId);
     const next = args.split(/\s+/).filter(Boolean)[0] || "";
     if (!next) {
-      const rows = listExternalAgentSessions(engine, { homeDir: app.getPath("home"), limit: 10 })
+      const boundRows = listBoundExternalAgentSessions({ engine, fellow, limit: 10 })
         .filter((item) => item.id !== current)
+        .slice(0, 10);
+      const rows = (boundRows.length ? boundRows : listExternalAgentSessions(engine, { homeDir: app.getPath("home"), limit: 30 })
+        .filter(usefulExternalSessionRow)
+        .filter((item) => item.id !== current)
+        .slice(0, 10))
         .map((item) => ({
           id: item.id,
           title: item.title || item.id,
@@ -2795,7 +2891,13 @@ function runExternalSlashCommand({ text, fellow, engine, sessionId }) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) {
       return "session-id 看起来不是有效 UUID。用法：/resume <session-id>";
     }
-    setAgentSessionId(engine, fellow.key, sessionId, next);
+    if (engine === "claude-code") {
+      let fingerprint = "";
+      try { fingerprint = ensureClaudeBridgePlugin().fingerprint || ""; } catch { /* bridge refresh failure falls back to legacy storage */ }
+      setAgentSessionEntry(engine, fellow.key, sessionId, next, fingerprint);
+    } else {
+      setAgentSessionId(engine, fellow.key, sessionId, next);
+    }
     return `已把当前 Aimashi 会话绑定到外部 session：${next}\n下一条消息会从这个 session 继续。`;
   }
   if (command === "/rewind") {
@@ -4565,7 +4667,11 @@ async function syncAimashiCloudWorkspace() {
   } catch (error) {
     appendCloudLog(`Aimashi Cloud sync push failed: ${error?.message || error}`);
   }
-  // 2. Pull the merged result back so any cloud-only conversations (DM peers,
+  // 2. Push any locally-stored groups that haven't been mirrored to cloud
+  //    yet. From the user's view there is no "local group" vs "cloud
+  //    group" — they're just groups; sync handles the storage promotion.
+  await pushLocalGroupsToCloud();
+  // 3. Pull the merged result back so any cloud-only conversations (DM peers,
   //    other-device sessions) also land in the local chat store.
   const data = pushed && pushed.workspace
     ? { user: settings.user, workspace: pushed.workspace }
@@ -4574,6 +4680,39 @@ async function syncAimashiCloudWorkspace() {
   settingsStore.writeCloudWorkspace(data.workspace || null);
   mergeCloudWorkspaceIntoChatStore(data.workspace || null);
   return cloudStatus(false);
+}
+
+// For each locally-stored group without a recorded cloudRoomId, create a
+// cloud room counterpart via POST /api/rooms and store the returned room.id
+// back so subsequent syncs skip it. One-directional: cloud rooms are NOT
+// pulled into the local group store because cloud rooms may contain human
+// members the fellow-only local store can't represent — the sidebar shows
+// the cloud version directly (de-duped against the local entry by id).
+async function pushLocalGroupsToCloud() {
+  let groupList = [];
+  try { groupList = ensureGroupStore().list(); }
+  catch (error) { appendCloudLog(`Cloud group sync: failed to list local groups (${error?.message || error})`); return; }
+  for (const group of groupList) {
+    if (!group || group.cloudRoomId) continue;
+    const memberFellows = (Array.isArray(group.members) ? group.members : [])
+      .map((m) => ({ fellowId: m?.fellowId || m?.id || m?.key || "" }))
+      .filter((m) => m.fellowId);
+    if (!memberFellows.length) continue;
+    try {
+      const res = await cloudApi("/api/rooms", {
+        method: "POST",
+        body: {
+          name: group.name || "未命名群聊",
+          memberFellows,
+          memberFriendUserIds: []
+        }
+      });
+      const roomId = res?.room?.id;
+      if (roomId) ensureGroupStore().updateGroup(group.id, { cloudRoomId: roomId });
+    } catch (error) {
+      appendCloudLog(`Cloud group sync failed for ${group.id}: ${error?.message || error}`);
+    }
+  }
 }
 
 async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = {}) {
