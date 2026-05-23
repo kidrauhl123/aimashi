@@ -1364,7 +1364,23 @@ async function handleRequest(req, res, context) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/workspace") {
-      return writeJson(res, 200, { workspace: cloudStore.getWorkspace(auth.user.id) });
+      // Phase 4 dedup: after a session has been mirrored to a
+      // fellow-type room (rooms+messages), the workspace.snapshot copy
+      // is redundant. Hide those entries here so clients reading both
+      // /api/workspace and /api/rooms don't see two cards for the same
+      // conversation. Detection: fellow:<userId>:<conv.id> exists.
+      const workspace = cloudStore.getWorkspace(auth.user.id);
+      const userRooms = context.socialStore.listRoomsForUser(auth.user.id) || [];
+      const migratedSessionIds = new Set();
+      for (const r of userRooms) {
+        if (r?.type !== "fellow") continue;
+        const sid = r.id && r.id.startsWith(`fellow:${auth.user.id}:`)
+          ? r.id.slice(`fellow:${auth.user.id}:`.length)
+          : null;
+        if (sid) migratedSessionIds.add(sid);
+      }
+      const filteredConvs = (workspace?.conversations || []).filter((c) => !migratedSessionIds.has(c.id));
+      return writeJson(res, 200, { workspace: { ...workspace, conversations: filteredConvs } });
     }
 
     if (req.method === "PUT" && url.pathname === "/api/workspace") {
