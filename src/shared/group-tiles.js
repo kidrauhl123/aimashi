@@ -34,11 +34,14 @@
       const kind = m.member_kind;
       const ref = m.member_ref;
       if (kind === "user") {
+        // Self is just another user-kind member; no special "boss" position
+        // or default color. We still look up self separately because the
+        // friend list never includes the viewer.
         if (self && ref === self.id) {
           out.push({
             image: self.avatarImage || "",
             crop: self.avatarCrop || null,
-            color: self.avatarColor || "#111827"
+            color: self.avatarColor || "#5e5ce6"
           });
           continue;
         }

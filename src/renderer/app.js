@@ -452,8 +452,22 @@ function sortSessions(sessions) {
 // the cloud and local paths can't drift.
 function groupTilesCtx(personas) {
   const social = window.aimashiSocial;
+  // Group membership records use the CLOUD user id (state.runtime.cloud.user.id),
+  // not the desktop-local user id. If we hand the resolver the local user
+  // object the self-match misses and the user gets painted as the
+  // "unknown friend" fallback tile.
+  const cloudUser = state.runtime?.cloud?.user || null;
+  const localUser = state.runtime?.user || null;
+  const self = cloudUser
+    ? {
+        id: cloudUser.id,
+        avatarImage: cloudUser.avatarImage || localUser?.avatarImage || "",
+        avatarCrop: cloudUser.avatarCrop || localUser?.avatarCrop || null,
+        avatarColor: cloudUser.avatarColor || localUser?.avatarColor || ""
+      }
+    : localUser;
   return {
-    self: state.runtime?.user || null,
+    self,
     friends: social?.moduleState?.friends || [],
     fellows: personas || [],
     avatarAssetForKey: window.aimashiAvatar?.avatarAssetForKey
