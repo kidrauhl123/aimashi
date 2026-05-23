@@ -5,6 +5,13 @@
 (function () {
   "use strict";
 
+  const __global = typeof window !== "undefined" ? window : globalThis;
+  function contact() {
+    if (__global.aimashiContact) return __global.aimashiContact;
+    if (typeof require !== "undefined") return require("../../shared/contact");
+    throw new Error("aimashiContact is not loaded");
+  }
+
   // Injected at init time. All functions below use these bare identifiers as
   // they did when inline in app.js — keeping diffs minimal.
   let state, els, aimashi;
@@ -25,9 +32,10 @@
   }
 
   function fellowName(fellowId) {
+    const { resolveContact, ContactKind } = contact();
     const fellows = state.runtime?.fellows || state.runtime?.personas || [];
-    const f = fellows.find((x) => x.key === fellowId || x.id === fellowId);
-    return f?.name || fellowId;
+    const resolved = resolveContact({ kind: ContactKind.Fellow, ref: fellowId }, { fellows });
+    return resolved.displayName || fellowId;
   }
 
   function formatNextTime(ms) {
