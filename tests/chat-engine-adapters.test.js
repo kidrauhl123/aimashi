@@ -82,6 +82,26 @@ test("codex adapter falls through to SDK call when slash is not local", async ()
   ]);
 });
 
+test("claude adapter preserves structured local command result", async () => {
+  const deps = createDeps({
+    externalSlashResult: {
+      content: "选择一个会话继续：",
+      commandResult: { type: "session-list", rows: [{ id: "s1" }] }
+    }
+  });
+  const adapters = createChatEngineAdapters(deps);
+  const response = await adapters["claude-code"].send({
+    fellow,
+    sessionId: "s1",
+    slashText: "/resume"
+  });
+
+  assert.equal(response.choices[0].message.content, "选择一个会话继续：");
+  assert.deepEqual(response.choices[0].message.commandResult, { type: "session-list", rows: [{ id: "s1" }] });
+  assert.deepEqual(response.aimashi.commandResult, { type: "session-list", rows: [{ id: "s1" }] });
+});
+
+
 test("hermes adapter starts runtime before local slash command", async () => {
   const deps = createDeps({ hermesSlashResult: "settings saved" });
   const adapters = createChatEngineAdapters(deps);

@@ -64,6 +64,86 @@
   box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / 0.22);
 }
 
+.command-result.session-list {
+  display: grid;
+  gap: 6px;
+  min-width: min(520px, 68vw);
+  margin-top: 9px;
+}
+
+.command-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 50px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  color: inherit;
+  text-align: left;
+}
+
+.command-session-row:hover,
+.command-session-row:focus-visible {
+  border-color: rgb(var(--accent-rgb) / 0.38);
+  background: rgb(var(--accent-rgb) / 0.08);
+  outline: none;
+}
+
+.command-session-row:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.command-session-row.loading {
+  border-color: rgb(var(--accent-rgb) / 0.42);
+  background: rgb(var(--accent-rgb) / 0.1);
+}
+
+.command-session-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.command-session-main strong,
+.command-session-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-session-main strong {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.command-session-main small,
+.command-session-side {
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.command-session-side {
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .command-session-row {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="dark"] .command-session-row:hover,
+:root[data-theme="dark"] .command-session-row:focus-visible {
+  border-color: rgb(var(--accent-rgb) / 0.46);
+  background: rgb(var(--accent-rgb) / 0.14);
+}
+
 .message-pin-badge {
   display: inline-flex;
   align-items: center;

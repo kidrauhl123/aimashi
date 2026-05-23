@@ -3547,6 +3547,38 @@ els.chat.addEventListener("click", async (event) => {
     render();
     return;
   }
+  const resumeButton = event.target.closest?.("[data-command-resume-id]");
+  if (resumeButton && els.chat.contains(resumeButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const sessionIdToResume = String(resumeButton.dataset.commandResumeId || "").trim();
+    if (!sessionIdToResume || resumeButton.disabled) return;
+    const engine = resumeButton.dataset.commandResumeEngine || window.aimashiEngineOptions.activeAgentEngine();
+    const fellow = activePersona() || { key: state.activeKey };
+    resumeButton.disabled = true;
+    resumeButton.classList.add("loading");
+    try {
+      const result = await window.aimashi.executeAgentCommand?.({
+        engine,
+        commandName: "/resume",
+        args: [sessionIdToResume],
+        context: {
+          sessionId: activeSession()?.id || "",
+          fellow
+        }
+      });
+      const content = result?.content && typeof result.content === "object"
+        ? result.content.content
+        : result?.content;
+      appendChat("assistant", String(content || "已切换外部会话。"), { persist: true });
+    } catch (error) {
+      appendTransientChat("assistant", `恢复外部会话失败: ${error.message}`);
+    } finally {
+      resumeButton.classList.remove("loading");
+      resumeButton.disabled = false;
+    }
+    return;
+  }
   const imageButton = event.target.closest(".message-attachment.image");
   if (imageButton && els.chat.contains(imageButton)) {
     event.preventDefault();

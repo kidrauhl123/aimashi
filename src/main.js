@@ -33,6 +33,7 @@ const {
   createAgentCommandProvider,
   parseCommandFrontmatter
 } = require("./main/agent-command-provider.js");
+const { listExternalAgentSessions } = require("./main/agent-session-index.js");
 const { requireFellow } = require("./main/fellow-registry.js");
 const { createClaudeCodeChatAdapter } = require("./main/claude-code-chat-adapter.js");
 const { createCodexChatAdapter } = require("./main/codex-chat-adapter.js");
@@ -2602,15 +2603,24 @@ function executeExternalAgentCommand(input = {}) {
   const args = Array.isArray(input.args) ? input.args.map(String) : [];
   const projectPath = String(input.context?.projectPath || input.projectPath || process.cwd()).trim() || process.cwd();
   if (externalAgentBuiltInCommands.some((item) => item.command === command)) {
+    const result = runExternalSlashCommand({
+      text: [command, ...args].join(" "),
+      fellow: input.context?.fellow || {},
+      engine,
+      sessionId: input.context?.sessionId || ""
+    });
+    if (result && typeof result === "object" && !Array.isArray(result)) {
+      return {
+        type: "builtin",
+        command,
+        content: String(result.content || ""),
+        commandResult: result.commandResult || null
+      };
+    }
     return {
       type: "builtin",
       command,
-      content: runExternalSlashCommand({
-        text: [command, ...args].join(" "),
-        fellow: input.context?.fellow || {},
-        engine,
-        sessionId: input.context?.sessionId || ""
-      })
+      content: result
     };
   }
   const commandPath = assertAllowedAgentCommandPath(input.commandPath, engine, projectPath);
@@ -2755,13 +2765,33 @@ function runExternalSlashCommand({ text, fellow, engine, sessionId }) {
     const current = getAgentSessionId(engine, fellow.key, sessionId);
     const next = args.split(/\s+/).filter(Boolean)[0] || "";
     if (!next) {
-      return [
-        `当前绑定的外部会话：${current || "尚未创建"}`,
-        "用法：/resume <session-id>",
-        "说明：Claude Code 的交互式 session picker 不能直接嵌进当前非交互 SDK 通道；这里支持用明确 session id 切换绑定。"
-      ].join("\n");
+      const rows = listExternalAgentSessions(engine, { homeDir: app.getPath("home"), limit: 10 })
+        .filter((item) => item.id !== current)
+        .map((item) => ({
+          id: item.id,
+          title: item.title || item.id,
+          preview: item.preview || "",
+          project: item.project || "",
+          updatedAt: item.updatedAt || 0
+        }));
+      if (!rows.length) {
+        return [
+          `当前绑定的外部会话：${current || "尚未创建"}`,
+          "没有找到可恢复的本地外部会话。",
+          "用法：/resume <session-id>"
+        ].join("\n");
+      }
+      return {
+        content: `当前绑定的外部会话：${current || "尚未创建"}\n选择一个会话继续：`,
+        commandResult: {
+          type: "session-list",
+          command: "/resume",
+          engine,
+          rows
+        }
+      };
     }
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(next)) {
       return "session-id 看起来不是有效 UUID。用法：/resume <session-id>";
     }
     setAgentSessionId(engine, fellow.key, sessionId, next);

@@ -5,11 +5,23 @@ function defaultCommandId() {
   return `cmd_${crypto.randomUUID()}`;
 }
 
-function commandResponse({ commandId, chatCompletionResponse, engine, model, content, fellowKey }) {
+function normalizeLocalCommandResult(result) {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return {
+      content: String(result.content || ""),
+      commandResult: result.commandResult || null
+    };
+  }
+  return { content: String(result || ""), commandResult: null };
+}
+
+function commandResponse({ commandId, chatCompletionResponse, engine, model, result, content, fellowKey }) {
+  const normalized = normalizeLocalCommandResult(result ?? content);
   return chatCompletionResponse({
     id: commandId(),
     model,
-    content,
+    content: normalized.content,
+    commandResult: normalized.commandResult,
     aimashi: { transport: "local-command", engine, fellow_key: fellowKey }
   });
 }
@@ -40,7 +52,7 @@ function createChatEngineAdapters(deps = {}) {
               chatCompletionResponse,
               engine,
               model: adapter.responseModel,
-              content: localResult,
+              result: localResult,
               fellowKey: context.fellow.key
             });
           }
@@ -66,7 +78,7 @@ function createChatEngineAdapters(deps = {}) {
               chatCompletionResponse,
               engine,
               model: adapter.responseModel,
-              content: localResult,
+              result: localResult,
               fellowKey: context.fellow.key
             });
           }

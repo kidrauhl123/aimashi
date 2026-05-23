@@ -28,3 +28,18 @@ test("responseMessageContent trims assistant content", () => {
   }), "hi");
   assert.equal(responseMessageContent({}), "");
 });
+
+test("chatCompletionResponse carries structured command results", () => {
+  const commandResult = { type: "session-list", rows: [{ id: "s1" }] };
+  const response = chatCompletionResponse({
+    id: "r2",
+    model: "claude-code",
+    content: "choose",
+    commandResult,
+    aimashi: { transport: "local-command" }
+  });
+
+  assert.deepEqual(response.choices[0].message.commandResult, commandResult);
+  assert.deepEqual(response.aimashi.commandResult, commandResult);
+  assert.equal(response.aimashi.transport, "local-command");
+});

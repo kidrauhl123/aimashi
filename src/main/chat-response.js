@@ -1,11 +1,12 @@
 const crypto = require("node:crypto");
 
-function chatCompletionResponse({ id, model, content, attachments = [], finishReason = "stop", aimashi = {} }) {
+function chatCompletionResponse({ id, model, content, attachments = [], commandResult = null, finishReason = "stop", aimashi = {} }) {
   const message = {
     role: "assistant",
     content: content || ""
   };
   if (Array.isArray(attachments) && attachments.length) message.attachments = attachments;
+  if (commandResult && typeof commandResult === "object") message.commandResult = commandResult;
   return {
     id: id || `chatcmpl_${crypto.randomUUID()}`,
     object: "chat.completion",
@@ -18,7 +19,7 @@ function chatCompletionResponse({ id, model, content, attachments = [], finishRe
         finish_reason: finishReason
       }
     ],
-    aimashi
+    aimashi: commandResult && typeof commandResult === "object" ? { ...aimashi, commandResult } : aimashi
   };
 }
 
