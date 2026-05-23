@@ -788,6 +788,19 @@ function migrate(db) {
       PRIMARY KEY (owner_user_id, id)
     );
     CREATE INDEX IF NOT EXISTS idx_fellows_owner ON fellows(owner_user_id);
+
+    -- v6: per-user cross-device settings (pin / read marks / appearance).
+    -- One row per user, JSON for the small bags so we don't need a
+    -- schema migration every time a setting category is added. Read on
+    -- bootstrap, updated via PUT /api/me/settings, broadcast via
+    -- user_settings.updated.
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id          TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      pins_json        TEXT NOT NULL DEFAULT '[]',
+      read_marks_json  TEXT NOT NULL DEFAULT '{}',
+      appearance_json  TEXT NOT NULL DEFAULT '{}',
+      updated_at       TEXT NOT NULL
+    );
   `);
   if (!hasColumn(db, "bridge_runs", "request_attachments_json")) {
     db.exec("ALTER TABLE bridge_runs ADD COLUMN request_attachments_json TEXT NOT NULL DEFAULT '[]'");
@@ -818,6 +831,8 @@ function migrate(db) {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (4, ?)")
     .run(nowIso());
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (5, ?)")
+    .run(nowIso());
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (6, ?)")
     .run(nowIso());
 }
 

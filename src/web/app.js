@@ -65,6 +65,12 @@ let state = {
   // cloud-room-source adapter so room messages render fellow names +
   // avatars instead of fellow-id strings.
   fellows: [],
+  // Cross-device user settings (Phase 3). Holds pins + read marks +
+  // appearance. Populated from /api/me/settings on bootstrap; updated
+  // optimistically via pushSettings() + reconciled by
+  // user_settings.updated WS events. Replaces the previous localStorage-
+  // backed _pinnedRooms set.
+  settings: { pins: [], readMarks: {}, appearance: {} },
   incomingRequests: [],
   outgoingRequests: [],
   messageCache: new Map(),
@@ -166,6 +172,7 @@ function clearSession() {
   state.rooms = [];
   state.friends = [];
   state.fellows = [];
+  state.settings = { pins: [], readMarks: {}, appearance: {} };
   state.incomingRequests = [];
   state.outgoingRequests = [];
   state.messageCache.clear();
@@ -272,6 +279,8 @@ async function bootstrap() {
     // messages from a fellow render with proper attribution rather than
     // a bare fellow-id string.
     api("/api/me/fellows").then((d) => { state.fellows = Array.isArray(d.fellows) ? d.fellows : []; }).catch(() => {}),
+    // Phase 3: cross-device user settings (pin / read marks / appearance).
+    api("/api/me/settings").then((d) => { if (d.settings) state.settings = d.settings; }).catch(() => {}),
     // Workspace: holds the desktop-synced fellow conversations (Phase A).
     api("/api/workspace").then((d) => { applyWorkspace(d.workspace); }).catch(() => {}),
     // Bridge devices: lets Phase B decide whether the owner's desktop is
@@ -525,6 +534,15 @@ function handleCloudEvent(envelope) {
       renderConversationList();
       renderActiveChat();
     }
+  } else if (type === "user_settings.updated") {
+    // Phase 3: another device wrote settings — replace local copy. Last
+    // write wins because the server stamps updatedAt and we don't try
+    // to merge field-by-field (settings bags are small and replaced as
+    // a whole).
+    if (envelope.settings) {
+      state.settings = envelope.settings;
+      renderConversationList();
+    }
   }
 }
 
@@ -722,25 +740,39 @@ function ensureConvMenuEl() {
   return _convMenuEl;
 }
 
-// Local-only pinning for cloud rooms (mirrors desktop's social.isRoomPinned).
-// Server has no decorations.pinned wiring yet, so pin survives reload via
-// localStorage but doesn't sync across devices. Full sync is a follow-up.
-const ROOM_PINNED_KEY = "aimashi.web.pinnedRooms.v1";
-function _loadPinnedRooms() {
-  try {
-    const raw = localStorage.getItem(ROOM_PINNED_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch { return new Set(); }
-}
-let _pinnedRooms = null;
+// Pin state lives in state.settings.pins (cloud-canonical, Phase 3).
+// state.settings is loaded from GET /api/me/settings on bootstrap and
+// kept current via user_settings.updated WS events. Local mutation goes
+// through pushSettings() which optimistically updates state.settings,
+// fires a PUT, and the broadcast comes back to confirm (or replace) it.
 function isRoomPinned(roomId) {
-  if (!_pinnedRooms) _pinnedRooms = _loadPinnedRooms();
-  return _pinnedRooms.has(roomId);
+  if (!roomId) return false;
+  return Array.isArray(state.settings?.pins) && state.settings.pins.includes(roomId);
 }
-function setRoomPinned(roomId, pinned) {
-  if (!_pinnedRooms) _pinnedRooms = _loadPinnedRooms();
-  if (pinned) _pinnedRooms.add(roomId); else _pinnedRooms.delete(roomId);
-  try { localStorage.setItem(ROOM_PINNED_KEY, JSON.stringify(Array.from(_pinnedRooms))); } catch { /* silent */ }
+async function setRoomPinned(roomId, pinned) {
+  if (!roomId) return;
+  const current = Array.isArray(state.settings?.pins) ? state.settings.pins : [];
+  const nextPins = pinned ? [...new Set([...current, roomId])] : current.filter((id) => id !== roomId);
+  await pushSettings({ pins: nextPins });
+}
+
+// Optimistic settings update: stage the change locally, render, then PUT.
+// On WS user_settings.updated callback we replace with server truth
+// (handles multi-tab conflicts via last-writer-wins).
+async function pushSettings(patch) {
+  const base = state.settings || { pins: [], readMarks: {}, appearance: {} };
+  const next = {
+    pins: patch.pins !== undefined ? patch.pins : base.pins,
+    readMarks: patch.readMarks !== undefined ? patch.readMarks : base.readMarks,
+    appearance: patch.appearance !== undefined ? patch.appearance : base.appearance
+  };
+  state.settings = next;
+  renderConversationList();
+  try {
+    await api("/api/me/settings", { method: "PUT", body: next });
+  } catch (err) {
+    console.warn("[web] settings PUT failed:", err);
+  }
 }
 
 function openConvMenu(convId, anchorButton) {
@@ -844,8 +876,7 @@ async function handleConvAction(action, convId) {
 async function handleRoomAction(action, room) {
   const title = roomDisplayTitle(room);
   if (action === "pin") {
-    setRoomPinned(room.id, !isRoomPinned(room.id));
-    renderConversationList();
+    await setRoomPinned(room.id, !isRoomPinned(room.id));
     return;
   }
   if (action === "rename") {

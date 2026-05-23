@@ -35,6 +35,12 @@ try {
 } catch {
   ({ createFellowsStore } = require("./src/cloud/fellows-store.js"));
 }
+let createUserSettingsStore = null;
+try {
+  ({ createUserSettingsStore } = require("../src/cloud/user-settings-store.js"));
+} catch {
+  ({ createUserSettingsStore } = require("./src/cloud/user-settings-store.js"));
+}
 let dmRoomId = null;
 let ensureDmRoom = null;
 try {
@@ -1260,6 +1266,30 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 200, payload);
     }
 
+    // GET /api/me/settings — cross-device user settings (pin / read marks
+    // / appearance). Phase 3. Clients fetch on bootstrap + subscribe to
+    // user_settings.updated to stay in sync.
+    if (req.method === "GET" && url.pathname === "/api/me/settings") {
+      return writeJson(res, 200, { settings: context.userSettingsStore.getSettings(auth.user.id) });
+    }
+
+    // PUT /api/me/settings — whole-bag replace. Body merges client-side
+    // before sending; server stores verbatim. Triggers
+    // user_settings.updated to every connected device of this user.
+    if (req.method === "PUT" && url.pathname === "/api/me/settings") {
+      const body = await readJson(req);
+      if (replayIfCached(context, res, auth.user.id, body)) return;
+      const settings = context.userSettingsStore.putSettings(auth.user.id, {
+        pins: body.pins,
+        readMarks: body.readMarks,
+        appearance: body.appearance
+      });
+      broadcastPersistedEvent(context, auth.user.id, { type: "user_settings.updated", settings });
+      const payload = { settings };
+      rememberOp(context, auth.user.id, body, 200, payload);
+      return writeJson(res, 200, payload);
+    }
+
     // DELETE /api/me/fellows/:id
     if (req.method === "DELETE" && fellowDetailMatch) {
       const id = fellowDetailMatch[1];
@@ -1572,6 +1602,7 @@ function createAimashiCloudServer(options = {}) {
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
   context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
+  context.userSettingsStore = createUserSettingsStore(context.cloudStore.getDb());
   const server = http.createServer((req, res) => handleRequest(req, res, context));
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => handleBridgeUpgrade(req, socket, head, context, wss));
