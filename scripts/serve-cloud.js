@@ -1162,7 +1162,11 @@ async function handleRequest(req, res, context) {
           broadcastPersistedEvent(context, m.member_ref, { type: "room.message_appended", roomId, message });
         }
       }
-      // 2. Handle fellow mentions — dispatch invocation request to fellow owner (cross-user)
+      // 2. Handle fellow mentions — dispatch invocation request to fellow
+      //    owner. Includes self-owned fellows; the local agent runtime
+      //    lives on the owner's machine regardless of whether the sender
+      //    is the owner. (Skipping owner === sender meant every fellow in
+      //    a single-user group was silently dropped.)
       const mentions = Array.isArray(body.mentions) ? body.mentions : [];
       for (const mention of mentions) {
         if (!mention || mention.kind !== "fellow") continue;
@@ -1170,8 +1174,6 @@ async function handleRequest(req, res, context) {
         if (!fellowId) continue;
         const fellowMember = context.socialStore.getRoomMember(roomId, "fellow", fellowId);
         if (!fellowMember) continue;
-        // Only dispatch cross-user invocations (owner is not the sender)
-        if (fellowMember.owner_id === auth.user.id) continue;
         const recentMessages = context.messagesStore.listMessagesSince(roomId, Math.max(0, message.seq - 6), 6);
         broadcastPersistedEvent(context, fellowMember.owner_id, {
           type: "room.fellow_invocation_requested",
