@@ -38,6 +38,30 @@ test("listClaudeSessions uses history titles and jsonl previews", () => {
   });
 });
 
+test("listClaudeSessions hides Claude command envelope prompts from titles", () => {
+  const home = tempHome();
+  const sessionId = "22222222-2222-4333-8444-555555555555";
+  const projectDir = path.join(home, ".claude", "projects", "-repo");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "history.jsonl"), JSON.stringify({
+    sessionId,
+    display: "/goal",
+    project: "/repo",
+    timestamp: 2000
+  }) + "\n");
+  fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+    JSON.stringify({
+      type: "user",
+      message: { content: "<command-name>/goal</command-name> <command-message>goal</command-message>" }
+    })
+  ].join("\n") + "\n");
+
+  const row = listClaudeSessions({ homeDir: home, limit: 5 })[0];
+  assert.equal(row.title, sessionId);
+  assert.equal(row.preview, "");
+});
+
 test("listCodexSessions uses session_index titles and session_meta cwd", () => {
   const home = tempHome();
   const sessionId = "019e52a6-e802-7051-8952-6cd177c4a8a3";

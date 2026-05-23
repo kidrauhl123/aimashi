@@ -15,6 +15,24 @@ function truncateText(value = "", max = 120) {
   return text.length > max ? `${text.slice(0, Math.max(0, max - 3))}...` : text;
 }
 
+function isCommandEnvelopeText(value = "") {
+  return /<command-name>|<command-message>|<command-args>/i.test(String(value || ""));
+}
+
+function isSlashOnlyTitle(value = "") {
+  return /^\/(?:goal|clear|usage|context|compact|resume|export)\b/i.test(String(value || "").trim());
+}
+
+function humanClaudeText(content) {
+  const text = Array.isArray(content)
+    ? content
+      .filter((part) => !part?.type || part.type === "text")
+      .map((part) => part?.text || "")
+      .join(" ")
+    : content;
+  return isCommandEnvelopeText(text) ? "" : String(text || "");
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 }
@@ -82,7 +100,7 @@ function loadClaudeHistory(homeDir) {
     const id = String(item.sessionId || "").trim();
     if (!id) continue;
     map.set(id, {
-      title: truncateText(item.display || ""),
+      title: isSlashOnlyTitle(item.display) || isCommandEnvelopeText(item.display) ? "" : truncateText(item.display || ""),
       project: String(item.project || "").trim(),
       updatedAt: parseTimestamp(item.timestamp)
     });
@@ -99,9 +117,7 @@ function listClaudeSessions({ homeDir = os.homedir(), limit = 10 } = {}) {
       const meta = history.get(id) || {};
       const tail = readJsonlTail(filePath, 40).reverse();
       const prompt = tail.find((item) => item.type === "user" && item.message?.content);
-      const content = Array.isArray(prompt?.message?.content)
-        ? prompt.message.content.map((part) => part?.text || "").join(" ")
-        : prompt?.message?.content;
+      const content = humanClaudeText(prompt?.message?.content);
       return {
         id,
         title: meta.title || truncateText(content || id, 80),
