@@ -42,36 +42,6 @@ test("sqlite store registers, logs in, authenticates, and logs out a user", () =
 });
 
 
-test("sqlite store keeps contacts skills and workbench scoped per account", () => {
-  const paths = tempStore();
-  let store = createCloudStore(paths);
-  try {
-    const alice = store.registerUser({ username: "alice", password: "secret1" }).user;
-    const bob = store.registerUser({ username: "bob", password: "secret1" }).user;
-    const aliceWorkspace = store.getWorkspace(alice.id);
-    store.putWorkspace(alice.id, {
-      ...aliceWorkspace,
-      contacts: [{ id: "contact_alice", title: "Alice Fellow" }],
-      skills: [{ id: "skill_alice", title: "Alice Skill" }],
-      workbench: [{ id: "task_alice", title: "Alice Task" }]
-    });
-
-    const bobWorkspace = store.getWorkspace(bob.id);
-    assert.equal(bobWorkspace.contacts.some((item) => item.id === "contact_alice"), false);
-    assert.equal(bobWorkspace.skills.some((item) => item.id === "skill_alice"), false);
-    assert.equal(bobWorkspace.workbench.some((item) => item.id === "task_alice"), false);
-    store.close();
-
-    store = createCloudStore(paths);
-    const reopenedAlice = store.getWorkspace(alice.id);
-    assert.deepEqual(reopenedAlice.contacts, [{ id: "contact_alice", title: "Alice Fellow" }]);
-    assert.deepEqual(reopenedAlice.skills, [{ id: "skill_alice", title: "Alice Skill" }]);
-    assert.deepEqual(reopenedAlice.workbench, [{ id: "task_alice", title: "Alice Task" }]);
-  } finally {
-    store.close();
-    cleanup(paths.dataDir);
-  }
-});
 
 
 test("sqlite store enforces file ownership", () => {
@@ -270,54 +240,3 @@ test("schema v2 creates social tables and indexes", () => {
   }
 });
 
-test("sqlite store imports existing legacy cloud json on first open", () => {
-  const paths = tempStore();
-  const legacyJsonPath = path.join(paths.dataDir, "cloud.json");
-  fs.writeFileSync(legacyJsonPath, JSON.stringify({
-    users: {
-      legacy: {
-        id: "user_legacy",
-        username: "legacy",
-        email: "",
-        createdAt: "2026-05-20T00:00:00.000Z",
-        passwordSalt: "salt",
-        passwordHash: "hash"
-      }
-    },
-    sessions: {
-      session_hash: {
-        userId: "user_legacy",
-        createdAt: "2026-05-20T00:00:00.000Z",
-        expiresAt: "2099-01-01T00:00:00.000Z"
-      }
-    },
-    workspaces: {
-      user_legacy: {
-        revision: 7,
-        activeConversationId: "conv_legacy",
-        conversations: [{ id: "conv_legacy", title: "旧会话", messages: [] }]
-      }
-    },
-    files: {
-      file_legacy: {
-        id: "file_legacy",
-        userId: "user_legacy",
-        name: "old.png",
-        mimeType: "image/png",
-        path: path.join(paths.uploadDir, "user_legacy", "file_legacy.png"),
-        createdAt: "2026-05-20T00:00:00.000Z"
-      }
-    }
-  }), "utf8");
-
-  const store = createCloudStore(paths);
-  try {
-    assert.equal(store.getWorkspace("user_legacy").activeConversationId, "conv_legacy");
-    const auth = store.authenticateToken("not-the-token");
-    assert.equal(auth, null);
-    assert.equal(store.getFileForUser("user_legacy", "file_legacy").name, "old.png");
-  } finally {
-    store.close();
-    cleanup(paths.dataDir);
-  }
-});

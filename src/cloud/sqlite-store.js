@@ -281,16 +281,10 @@ function createCloudStore(options = {}) {
     loginFailures.delete(rateLimitKey(account, ip));
   }
 
-  function ensureWorkspace(user) {
-    const existing = db.prepare("SELECT snapshot_json FROM workspaces WHERE user_id = ?").get(user.id);
-    if (existing) return parseJson(existing.snapshot_json, defaultWorkspace(user, now, id));
-    const workspace = defaultWorkspace(user, now, id);
-    db.prepare(`
-      INSERT INTO workspaces (user_id, revision, snapshot_json, updated_at)
-      VALUES (?, ?, ?, ?)
-    `).run(user.id, workspace.revision, JSON.stringify(workspace), now());
-    return workspace;
-  }
+  // (ensureWorkspace removed in Phase 4 cutover — workspace snapshots
+  //  are no longer the conversation store. The `workspaces` table is
+  //  left intact but unused; a future commit can DROP it once we've
+  //  confirmed no rollback need.)
 
   function registerUser(input = {}) {
     const account = accountFromBody(input);
@@ -350,51 +344,8 @@ function createCloudStore(options = {}) {
     db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
   }
 
-  function getWorkspace(userId) {
-    const user = getUserById(userId);
-    if (!user) throw new Error("用户不存在。");
-    return ensureWorkspace(rowToUser(user));
-  }
-
-  function putWorkspace(userId, incoming = {}) {
-    const current = getWorkspace(userId);
-    const next = {
-      ...current,
-      ...incoming,
-      revision: Number(current.revision || 1) + 1,
-      conversations: Array.isArray(incoming.conversations) ? incoming.conversations : current.conversations,
-      contacts: Array.isArray(incoming.contacts) ? incoming.contacts : current.contacts,
-      skills: Array.isArray(incoming.skills) ? incoming.skills : current.skills,
-      workbench: Array.isArray(incoming.workbench) ? incoming.workbench : current.workbench
-    };
-    db.prepare("UPDATE workspaces SET revision = ?, snapshot_json = ?, updated_at = ? WHERE user_id = ?")
-      .run(next.revision, JSON.stringify(next), now(), userId);
-    return next;
-  }
-
-  function appendMessage(userId, { conversationId, message }) {
-    const workspace = getWorkspace(userId);
-    let conversation = (workspace.conversations || []).find((item) => item.id === conversationId);
-    if (!conversation && conversationId) {
-      const titleText = String(message?.text || "").trim();
-      conversation = {
-        id: String(conversationId),
-        title: message?.role === "user" && titleText ? titleText.slice(0, 24) : "新对话",
-        meta: "Aimashi Cloud · 已同步",
-        avatar: "./assets/avatar-01.png",
-        updatedAt: message.createdAt || now(),
-        unread: 0,
-        messages: []
-      };
-      workspace.conversations = [...(workspace.conversations || []), conversation];
-    }
-    if (!conversation) conversation = (workspace.conversations || [])[0];
-    if (!conversation) throw new Error("会话不存在。");
-    conversation.messages = [...(conversation.messages || []), message];
-    conversation.updatedAt = message.createdAt || now();
-    workspace.activeConversationId = conversation.id;
-    return { workspace: putWorkspace(userId, workspace), message };
-  }
+  // (getWorkspace / putWorkspace / appendMessage removed in Phase 4
+  //  cutover — see the ensureWorkspace note above.)
 
   function saveImageDataUrl(userId, attachment = {}) {
     if (!getUserById(userId)) throw new Error("用户不存在。");
@@ -579,9 +530,6 @@ function createCloudStore(options = {}) {
     loginUser,
     logoutSession,
     authenticateToken,
-    getWorkspace,
-    putWorkspace,
-    appendMessage,
     saveImageDataUrl,
     getFileForUser,
     listBridgeDevices,

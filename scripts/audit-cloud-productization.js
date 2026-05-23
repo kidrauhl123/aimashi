@@ -333,17 +333,16 @@ function runAudit({ rootDir = root } = {}) {
   const requirements = [
     item("cloud.unified-account-data", "统一账号数据按 userId 隔离", [
       checkFile(rootDir, "src/cloud/sqlite-store.js"),
-      checkSource(rootDir, "src/cloud/sqlite-store.js", /users[\s\S]*sessions[\s\S]*workspaces[\s\S]*files[\s\S]*bridge_devices[\s\S]*bridge_runs/, "SQLite tables cover users/sessions/workspaces/files/devices/runs"),
+      checkSource(rootDir, "src/cloud/sqlite-store.js", /users[\s\S]*sessions[\s\S]*files[\s\S]*bridge_devices[\s\S]*bridge_runs[\s\S]*rooms[\s\S]*messages[\s\S]*fellows[\s\S]*user_settings/, "SQLite tables cover users/sessions/files/devices/runs/rooms/messages/fellows/user_settings"),
       checkSource(rootDir, "src/cloud/sqlite-store.js", /WHERE user_id = \?/g, "queries scope data by user_id"),
       checkFile(rootDir, "tests/cloud-sqlite-store.test.js"),
-      checkSource(rootDir, "tests/cloud-sqlite-store.test.js", /contacts skills and workbench scoped per account/, "cross-account workspace regression")
+      checkSource(rootDir, "tests/fellows-store.test.js", /listFellows scopes to owner/, "cross-account fellow scoping regression")
     ]),
     item("cloud.durable-sqlite", "SQLite 持久化、迁移和 legacy JSON bootstrap", [
       checkSource(rootDir, "src/cloud/sqlite-store.js", /DatabaseSync.*node:sqlite|node:sqlite[\s\S]*DatabaseSync/, "uses node:sqlite DatabaseSync"),
       checkSource(rootDir, "src/cloud/sqlite-store.js", /schema_migrations/, "schema migrations table"),
       checkSource(rootDir, "src/cloud/sqlite-store.js", /importLegacyJsonIfNeeded/, "legacy JSON bootstrap"),
-      checkSource(rootDir, "tests/event-log-store.test.js", /event_seq cache stays in lock-step/, "event log monotonic seq persistence"),
-      checkSource(rootDir, "tests/cloud-sqlite-store.test.js", /imports existing legacy cloud json/, "legacy import test")
+      checkSource(rootDir, "tests/event-log-store.test.js", /event_seq cache stays in lock-step/, "event log monotonic seq persistence")
     ]),
     item("cloud.security-baseline", "安全基线：scrypt、会话哈希、所有权、限流、Origin/CORS/security headers", [
       checkSource(rootDir, "src/cloud/sqlite-store.js", /scryptSync/, "scrypt password hashing"),

@@ -727,36 +727,11 @@ function sanitizeCommandResult(commandResult) {
   return normalized;
 }
 
-function sanitizeCloudConversationAttachments(cloudStore, userId, conversation = {}) {
-  if (!Array.isArray(conversation.messages)) return conversation;
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message) => sanitizeCloudMessageAttachments(cloudStore, userId, message))
-  };
-}
-
-function sanitizeCloudWorkspaceAttachments(cloudStore, userId, workspace = {}) {
-  if (!Array.isArray(workspace.conversations)) return workspace;
-  return {
-    ...workspace,
-    conversations: workspace.conversations.map((conversation) => sanitizeCloudConversationAttachments(cloudStore, userId, conversation))
-  };
-}
-
-function cleanConversation(input = {}) {
-  const idValue = String(input.id || "").trim();
-  const idSafe = idValue && /^[a-zA-Z0-9:_-]{1,120}$/.test(idValue) ? idValue : id("conv");
-  const timestamp = now();
-  return {
-    id: idSafe,
-    title: String(input.title || "新对话").trim().slice(0, 80) || "新对话",
-    meta: String(input.meta || "Aimashi Cloud · 已同步").trim().slice(0, 120) || "Aimashi Cloud · 已同步",
-    avatar: String(input.avatar || "./assets/avatar-01.png").trim().slice(0, 240) || "./assets/avatar-01.png",
-    updatedAt: String(input.updatedAt || timestamp),
-    unread: Number(input.unread || 0),
-    messages: Array.isArray(input.messages) ? input.messages : []
-  };
-}
+// (sanitizeCloudConversationAttachments / sanitizeCloudWorkspaceAttachments
+//  / cleanConversation removed in Phase 4 cutover — their callers (the
+//  workspace + conversations + messages endpoints) are gone. Per-message
+//  attachment sanitization still happens via sanitizeCloudMessageAttachments
+//  above and persistCloudAttachments at the room-message POST path.)
 
 function serveAuthorizedFile(req, res, cloudStore, auth, pathname) {
   const match = pathname.match(/^\/api\/files\/([a-zA-Z0-9_-]+)$/);
@@ -1218,7 +1193,7 @@ async function handleRequest(req, res, context) {
     }
 
     if (req.method === "GET" && url.pathname === "/api/me") {
-      return writeJson(res, 200, { user: auth.user, workspace: cloudStore.getWorkspace(auth.user.id) });
+      return writeJson(res, 200, { user: auth.user });
     }
 
     // PATCH /api/me/profile — update the signed-in user's display avatar so
