@@ -46,33 +46,24 @@
   // ── group message article (with sender attribution) ───────────────────────
 
   function buildGroupMessageArticle(msg, accentColor, members) {
-    const { moduleState, escapeHtml, renderMsgBody } = ctx;
-    const article = document.createElement("article");
+    const { moduleState } = ctx;
     const roomId = moduleState.activeRoomId || "";
     const source = _cloudRoomSourceFor(roomId, [msg], members);
     const spec = source ? source.listMessages()[0] : null;
-    const isOwn = Boolean(spec && spec.isOwn);
-    article.className = "message " + (isOwn ? "user" : "assistant");
-    const bodyHtml = renderMsgBody((spec ? spec.bodyMd : msg.body_md) || "");
-    const color = isOwn ? "#111827" : (accentColor || "#5e5ce6");
-
-    // Own messages: hide the sender label (the bubble alignment already
-    // tells the user "this is me"). Non-own: show the spec's authorName,
-    // which already encodes fellow-with-owner formatting ("codex (alice)").
-    const authorName = spec ? spec.authorName : "";
-    const senderLabel = isOwn ? "" : escapeHtml(authorName || "");
-
-    const initial = isOwn
-      ? ((moduleState.myUsername || "M")[0] || "M").toUpperCase()
-      : ((authorName && authorName[0]) ? authorName[0].toUpperCase() : "?");
-    article.innerHTML = `
-      <div class="avatar" style="background-color:${escapeHtml(color)}; color:#fff;">${escapeHtml(initial)}</div>
-      <div class="message-stack">
-        ${senderLabel ? `<div style="font-size:11px; color:var(--fg-muted,#888); margin-bottom:2px;">${senderLabel}</div>` : ""}
-        <div class="bubble">${bodyHtml}</div>
-      </div>
-    `;
-    return article;
+    const createBubble = window.aimashiMessageBubble?.createMessageBubble;
+    if (!spec || !createBubble) {
+      // Defensive: if adapter/renderer isn't wired yet, fall back to a
+      // bare article so the chat still shows something.
+      const article = document.createElement("article");
+      article.className = "message assistant";
+      article.innerHTML = `<div class="message-stack"><div class="bubble">${ctx.renderMsgBody(msg.body_md || "")}</div></div>`;
+      return article;
+    }
+    return createBubble(spec, {
+      onContextMenu: (_spec, x, y) => {
+        window.aimashiSocialMessageMenu?.openSocialMessageMenu(msg, x, y);
+      }
+    });
   }
 
   async function fetchAndCacheRoomMembers(roomId) {

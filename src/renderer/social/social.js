@@ -428,18 +428,30 @@
     if (composerBottom) composerBottom.classList.add("hidden");
   }
 
+  function _specForMessage(msg) {
+    const factory = (typeof window !== "undefined" && window.aimashiCloudRoomSource) || null;
+    if (!factory || typeof factory.createCloudRoomSource !== "function") return null;
+    const room = moduleState.rooms.find((r) => r.id === moduleState.activeRoomId) || { id: moduleState.activeRoomId || "" };
+    const ctx = { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends, fellows: [] };
+    const source = factory.createCloudRoomSource({ room, messages: [msg], members: [], ctx });
+    return source.listMessages()[0] || null;
+  }
+
   function _buildMessageArticle(msg, accentColor) {
-    const article = document.createElement("article");
-    const isUser = _isUserRoleMessage(msg);
-    article.className = "message " + (isUser ? "user" : "assistant");
-    const bodyHtml = _renderMsgBody(msg.body_md || "");
-    const color = isUser ? "#111827" : (accentColor || "#5e5ce6");
-    const initial = isUser ? "B" : "?";
-    article.innerHTML = `
-      <div class="avatar" style="background-color:${escapeHtml(color)}; color:#fff;">${isUser ? "" : escapeHtml(initial)}</div>
-      <div class="message-stack"><div class="bubble">${bodyHtml}</div></div>
-    `;
-    return article;
+    const spec = _specForMessage(msg);
+    const createBubble = window.aimashiMessageBubble?.createMessageBubble;
+    if (!spec || !createBubble) {
+      // Defensive fallback — bare bubble, no context menu.
+      const article = document.createElement("article");
+      article.className = "message assistant";
+      article.innerHTML = `<div class="message-stack"><div class="bubble">${_renderMsgBody(msg.body_md || "")}</div></div>`;
+      return article;
+    }
+    return createBubble(spec, {
+      onContextMenu: (_spec, x, y) => {
+        window.aimashiSocialMessageMenu?.openSocialMessageMenu(msg, x, y);
+      }
+    });
   }
 
   function _renderMsgBody(md) {
