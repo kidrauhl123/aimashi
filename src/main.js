@@ -177,6 +177,7 @@ const {
   fallbackSessionTitle,
   normalizeMessageReply,
   normalizeMessageTranslation,
+  normalizeCommandResult,
   chatMessageMergeKey,
   mergeChatMessageRecord,
   normalizeChatStore,
@@ -6114,6 +6115,8 @@ function saveChatSession({ personaKey, session, replaceMessages = false }) {
         if (replyTo) out.replyTo = replyTo;
         const translation = normalizeMessageTranslation(message.translation);
         if (translation && translation.status !== "loading") out.translation = translation;
+        const commandResult = normalizeCommandResult(message.commandResult);
+        if (commandResult) out.commandResult = commandResult;
         const attachments = normalizeAttachments(message.attachments);
         if (attachments.length) out.attachments = attachments;
         if (message.reasoning) out.reasoning = String(message.reasoning);

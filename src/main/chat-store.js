@@ -66,6 +66,29 @@ function createChatStore(deps = {}) {
     };
   }
 
+  function normalizeCommandResult(commandResult) {
+    if (!commandResult || typeof commandResult !== "object" || commandResult.type !== "session-list") return null;
+    const rows = Array.isArray(commandResult.rows)
+      ? commandResult.rows
+        .map((row) => ({
+          id: String(row?.id || "").trim(),
+          title: String(row?.title || "").trim().slice(0, 160),
+          preview: String(row?.preview || "").trim().slice(0, 240),
+          project: String(row?.project || "").trim().slice(0, 240),
+          updatedAt: Number(row?.updatedAt) || 0
+        }))
+        .filter((row) => row.id)
+        .slice(0, 20)
+      : [];
+    if (!rows.length) return null;
+    return {
+      type: "session-list",
+      command: String(commandResult.command || "/resume").trim() || "/resume",
+      engine: String(commandResult.engine || "").trim(),
+      rows
+    };
+  }
+
   function chatMessageMergeKey(message) {
     return `${message.role}\n${message.createdAt}\n${message.content}`;
   }
@@ -79,6 +102,7 @@ function createChatStore(deps = {}) {
       tools: next.tools || existing.tools,
       replyTo: next.replyTo || existing.replyTo,
       translation: next.translation || existing.translation,
+      commandResult: next.commandResult || existing.commandResult,
       pinned: Boolean(existing.pinned || next.pinned),
       pinnedAt: next.pinnedAt || existing.pinnedAt
     };
@@ -122,6 +146,8 @@ function createChatStore(deps = {}) {
                 if (replyTo) out.replyTo = replyTo;
                 const translation = normalizeMessageTranslation(message.translation);
                 if (translation && translation.status !== "loading") out.translation = translation;
+                const commandResult = normalizeCommandResult(message.commandResult);
+                if (commandResult) out.commandResult = commandResult;
                 const attachments = normalizeAttachments(message.attachments);
                 if (attachments.length) out.attachments = attachments;
                 if (message.reasoning) out.reasoning = String(message.reasoning);
@@ -184,6 +210,7 @@ function createChatStore(deps = {}) {
     fallbackSessionTitle,
     normalizeMessageReply,
     normalizeMessageTranslation,
+    normalizeCommandResult,
     chatMessageMergeKey,
     mergeChatMessageRecord,
     normalizeChatStore,
