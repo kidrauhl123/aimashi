@@ -289,7 +289,7 @@ async function bootstrap() {
   // avatars on first paint instead of empty tiles.
   await Promise.all(
     state.rooms
-      .filter((r) => r.type === "group")
+      .filter((r) => r.type === "group" || (!r.id?.startsWith("dm:") && !r.id?.startsWith("fellow:") && (r.id?.startsWith("g_") || r.id?.startsWith("g-"))))
       .map((r) => ensureRoomMembers(r.id))
   );
   renderConversationList();
@@ -570,9 +570,11 @@ function groupTilesCtx() {
 // ChatGPT-style pin behavior the user asked for.
 function combinedConversationItems() {
   const room = state.rooms.map((r) => {
+    // id-prefix fallback for cloud deployments that haven't shipped the v7
+    // type column yet. Remove once every server is on schema ≥ v7.
     const isDM = r.type === "dm" || r.id?.startsWith("dm:");
     const isFellow = r.type === "fellow" || r.id?.startsWith("fellow:");
-    const isGroup = r.type === "group";
+    const isGroup = r.type === "group" || (!isDM && !isFellow && (r.id?.startsWith("g_") || r.id?.startsWith("g-")));
     let avatar = "";
     let avatarCrop = null;
     let color = "";

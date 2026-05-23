@@ -365,11 +365,16 @@
       }
 
       // Route on rooms.type (schema truth). Two card shapes only:
-      // private-room (dm / fellow) and group-room. The card renderer
-      // resolves "who's the other party" downstream — this file just
-      // packages the row with its cached preview + the membership count
-      // groups need to render the mosaic.
-      if (room.type === "group") {
+      // private-room (dm / fellow) and group-room. id-prefix fallback
+      // keeps the sidebar correct against older cloud deployments that
+      // haven't shipped the v7 type column yet — once every server is
+      // on schema ≥ v7 the fallback can be removed.
+      const roomType = room.type
+        || (room.id?.startsWith("dm:") ? "dm"
+          : room.id?.startsWith("fellow:") ? "fellow"
+          : room.id?.startsWith("g_") || room.id?.startsWith("g-") ? "group"
+          : null);
+      if (roomType === "group") {
         const memberCount = (_roomMembersCache.get(room.id) || []).length;
         return {
           type: "group-room",
@@ -377,18 +382,18 @@
           pinned: false,
           pinnedAt: "",
           updatedAt,
-          room: { ...room, lastMessagePreview, memberCount }
+          room: { ...room, type: "group", lastMessagePreview, memberCount }
         };
       }
 
-      const otherUser = room.type === "dm" ? otherUserForRoom(room) : null;
+      const otherUser = roomType === "dm" ? otherUserForRoom(room) : null;
       return {
         type: "private-room",
         key: room.id,
         pinned: false,
         pinnedAt: "",
         updatedAt,
-        room: { ...room, otherUser, lastMessagePreview }
+        room: { ...room, type: roomType || "dm", otherUser, lastMessagePreview }
       };
     });
   }
