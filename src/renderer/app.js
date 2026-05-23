@@ -686,6 +686,19 @@ function conversationCardSpecFromRow(row, personas) {
         {
           togglePinned: () => setGroupPinned(group.id, !group.pinned),
           openInfo: () => window.aimashiGroup?.openInfoDialog?.(group),
+          rename: async () => {
+            const next = window.prompt("编辑群组名称", group.name || "未命名群聊");
+            if (next === null) return;
+            const trimmed = String(next).trim() || "未命名群聊";
+            if (trimmed === (group.name || "未命名群聊")) return;
+            try {
+              Object.assign(group, await window.aimashi.groups.update(group.id, { name: trimmed }));
+              render();
+            } catch (err) {
+              alert("保存群名失败：" + (err?.message || String(err)));
+            }
+          },
+          markRead: () => { /* local groups don't track unread separately — menu item shows disabled because unread=0 */ },
           remove: () => deleteGroup(group.id)
         },
         x, y
