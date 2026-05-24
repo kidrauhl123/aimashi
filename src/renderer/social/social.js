@@ -37,6 +37,13 @@
   // Cache of room members per room id (fetched on first open, updated via WS events).
   const _roomMembersCache = new Map();
 
+  // Distance (px) from the bottom within which we treat the user as "pinned" and
+  // keep following new content. Mirrors the fellow-chat threshold in app.js.
+  const SCROLL_STICK_THRESHOLD_PX = 80;
+  // Which room renderRoomChat last painted — a change means the user switched
+  // rooms, so we land at the bottom instead of preserving the old offset.
+  let _lastRenderedRoomId = null;
+
   const moduleState = {
     rooms: [],
     friends: [],
@@ -540,9 +547,11 @@
         moduleState.unreadByRoom.set(roomId, (moduleState.unreadByRoom.get(roomId) || 0) + 1);
       }
 
-      // If this is the active room, append to DOM directly for snappy UX.
+      // If this is the active room, append to DOM directly for snappy UX. Only
+      // stick to the bottom for my own messages; someone else's message must not
+      // pull me away from history I've scrolled up to read.
       if (roomId === moduleState.activeRoomId) {
-        _appendMessageToActiveChat(message);
+        _appendMessageToActiveChat(message, { stick: isMine });
       }
       _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
@@ -689,6 +698,19 @@
     const room = moduleState.rooms.find((r) => r.id === roomId);
     const color = avatarColor(roomId);
 
+    // Decide BEFORE rebuilding whether to keep the view pinned to the bottom.
+    // Stick when entering a different room (show its latest) or when the user is
+    // already near the bottom; otherwise restore their prior offset so a
+    // background re-render never yanks them out of the history they scrolled to.
+    const isRoomSwitch = roomId !== _lastRenderedRoomId;
+    const prevScrollTop = containerEl.scrollTop;
+    const stickToBottom = isRoomSwitch
+      || (containerEl.scrollHeight - containerEl.scrollTop - containerEl.clientHeight < SCROLL_STICK_THRESHOLD_PX);
+    _lastRenderedRoomId = roomId;
+    const applyScroll = () => {
+      containerEl.scrollTop = stickToBottom ? containerEl.scrollHeight : prevScrollTop;
+    };
+
     containerEl.innerHTML = "";
 
     // Header (avatar / name / meta) is painted by app.js render() — this
@@ -708,7 +730,7 @@
       }
       const streaming = _buildCloudAgentStreamingArticle(roomId, color, members);
       if (streaming) containerEl.appendChild(streaming);
-      containerEl.scrollTop = containerEl.scrollHeight;
+      applyScroll();
       if (!_roomMembersCache.has(roomId)) {
         _fetchAndCacheRoomMembers(roomId);
       }
@@ -722,7 +744,7 @@
     }
     const streaming = _buildCloudAgentStreamingArticle(roomId, color);
     if (streaming) containerEl.appendChild(streaming);
-    containerEl.scrollTop = containerEl.scrollHeight;
+    applyScroll();
   }
 
   function _specForMessage(msg, members = []) {
@@ -950,15 +972,20 @@
     return escapeHtml(md);
   }
 
-  function _appendMessageToActiveChat(msg) {
+  // stick=true (default, and for your own outgoing messages) always jumps to the
+  // bottom. For messages arriving from others, pass stick=false so a reader who
+  // has scrolled up to read history isn't yanked down — they only follow along
+  // when already near the bottom.
+  function _appendMessageToActiveChat(msg, { stick = true } = {}) {
     const chatEl = document.getElementById("chat");
     if (!chatEl) return;
+    const nearBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < SCROLL_STICK_THRESHOLD_PX;
     const room = moduleState.rooms.find((r) => r.id === moduleState.activeRoomId);
     const color = room ? avatarColor(room.id) : "#5e5ce6";
     const article = _buildMessageArticle(msg, color);
     if (article) {
       chatEl.appendChild(article);
-      chatEl.scrollTop = chatEl.scrollHeight;
+      if (stick || nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
     }
   }
 
@@ -1306,7 +1333,13 @@
   function getActiveRoomId() { return moduleState.activeRoomId; }
   function getRoomById(roomId) { return moduleState.rooms.find((r) => r.id === roomId) || null; }
   function setActiveRoomId(id) {
-    moduleState.activeRoomId = id || null;
+    const next = id || null;
+    // Any actual navigation (switching rooms, or leaving to a local fellow chat
+    // that reuses #chat) invalidates the last-painted marker, so the next
+    // renderRoomChat treats re-entry as a switch and lands at the latest message
+    // instead of restoring a stale offset.
+    if (next !== moduleState.activeRoomId) _lastRenderedRoomId = null;
+    moduleState.activeRoomId = next;
     if (id) moduleState.unreadByRoom.delete(id);
   }
   function markRoomRead(roomId) {
