@@ -133,10 +133,6 @@
 
   function initSocialModule(d) {
     deps = d;
-    // Local-first: hydrate the sidebar from the last persisted snapshot so
-    // the conversation list paints instantly on cold start (TG / WeChat
-    // behavior). bootstrapAfterLogin then refreshes from cloud in place.
-    _hydrateSnapshot();
   }
 
   // ── local snapshot (cold-start cache) ──────────────────────────────────────
@@ -1202,4 +1198,10 @@
     friendById,
     _internalCtx
   };
+
+  // Hydrate the cold-start cache at module load — before app.js even calls
+  // initSocialModule — so the very first render() paints the full saved
+  // conversation list with zero flash (TG-style). bootstrapAfterLogin
+  // refreshes from cloud in the background and overwrites in place.
+  _hydrateSnapshot();
 })(typeof window !== "undefined" ? window : globalThis);

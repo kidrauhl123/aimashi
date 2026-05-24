@@ -1306,8 +1306,13 @@ function render() {
   // "割裂" they complained about. For logged-in users, hold the sidebar
   // until cloud bootstrap finishes so personas + rooms land in one paint.
   const social = window.aimashiSocial;
-  const cloudLoggedIn = Boolean(state.runtime?.cloud?.loggedIn);
-  const cloudReady = !cloudLoggedIn || !social || social.isBootstrapped?.();
+  // cloud.enabled = token present (signed in). NOTE: there is no
+  // cloud.loggedIn field — cloudStatus() exposes enabled/connected/
+  // connecting only. An earlier version gated on loggedIn, which was
+  // always undefined, so the gate never fired and personas always
+  // painted first.
+  const cloudSignedIn = Boolean(state.runtime?.cloud?.enabled);
+  const cloudReady = !cloudSignedIn || !social || social.isBootstrapped?.();
   const socialRows = cloudReady ? (social?.renderSidebarRows?.() || []) : [];
   const messageRows = !cloudReady ? [] : window.aimashiFellowManager.sortMessageCardsForSidebar([
     ...visiblePersonas.map((persona) => ({
@@ -2110,8 +2115,11 @@ async function initializeRuntime() {
       els,
       appendTransientChat,
     });
-    // Bootstrap social data if already logged in to cloud
-    if (state.runtime && state.runtime.cloud && state.runtime.cloud.loggedIn) {
+    // Bootstrap social data if signed in to cloud (token present).
+    // (cloud.enabled, not cloud.loggedIn — the latter never existed, so
+    // this used to never run; bootstrap only fired later via the WS
+    // events_ready event, which is part of why the list arrived late.)
+    if (state.runtime && state.runtime.cloud && state.runtime.cloud.enabled) {
       window.aimashiSocial.bootstrapAfterLogin().catch((err) => {
         console.warn("[social] boot bootstrap failed:", err);
       });
