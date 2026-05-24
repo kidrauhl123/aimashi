@@ -17,6 +17,12 @@ test("server-local installer restores data backups during rollback", () => {
   assert.match(source, /SERVICE_USER="\$\{AIMASHI_DEPLOY_SERVICE_USER:-aimashi-cloud\}"/);
   assert.match(source, /ensure_service_user\(\) \{[\s\S]*?useradd_cmd=.*useradd[\s\S]*?--system --user-group --home-dir "\$DATA_DIR" --shell "\$login_shell" "\$SERVICE_USER"/);
   assert.match(source, /ensure_docker_access\(\) \{[\s\S]*?grep -q '\^docker:' \/etc\/group[\s\S]*?usermod_cmd=.*usermod[\s\S]*?run_as_root "\$usermod_cmd" -aG docker "\$SERVICE_USER"/);
+  assert.match(source, /AGENT_DOCKER_NETWORK="\$\{AIMASHI_CLOUD_AGENT_DOCKER_NETWORK:-aimashi-cloud\}"/);
+  assert.match(source, /docker network inspect "\$AGENT_DOCKER_NETWORK"[\s\S]*?docker network create "\$AGENT_DOCKER_NETWORK"/);
+  assert.match(source, /AGENT_MODEL_BASE_URL="\$\{AIMASHI_CLOUD_AGENT_MODEL_BASE_URL:-http:\/\/litellm:4000\/v1\}"/);
+  assert.match(source, /AGENT_MODEL_API_KEY="\$\{AIMASHI_CLOUD_AGENT_MODEL_API_KEY:-\$\{AIMASHI_LITELLM_API_KEY:-\}\}"/);
+  assert.match(source, /Environment=AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=\$AGENT_MODEL_BASE_URL/);
+  assert.match(source, /Environment=AIMASHI_CLOUD_AGENT_MODEL_API_KEY=\$AGENT_MODEL_API_KEY/);
   assert.match(source, /require_command id/);
   assert.match(source, /require_command chown/);
   assert.match(source, /require_command docker/);
@@ -62,6 +68,13 @@ test("ssh deploy script restores data backups during install and public verifica
   assert.match(source, /id -u \$SERVICE_USER_QUOTED >\/dev\/null 2>&1 \|\| command -v useradd >\/dev\/null \|\| test -x \/usr\/sbin\/useradd/);
   assert.match(source, /ensure_service_user\(\) \{[\s\S]*?useradd_cmd=.*useradd[\s\S]*?--system --user-group --home-dir "\$DATA_DIR" --shell "\\\$login_shell" "\\\$SERVICE_USER"/);
   assert.match(source, /ensure_docker_access\(\) \{[\s\S]*?grep -q '\^docker:' \/etc\/group[\s\S]*?usermod_cmd=.*usermod[\s\S]*?run_as_root "\\\$usermod_cmd" -aG docker "\\\$SERVICE_USER"/);
+  assert.match(source, /AGENT_DOCKER_NETWORK="\$\{AIMASHI_CLOUD_AGENT_DOCKER_NETWORK:-aimashi-cloud\}"/);
+  assert.match(source, /docker network inspect "\$AGENT_DOCKER_NETWORK"[\s\S]*?docker network create "\$AGENT_DOCKER_NETWORK"/);
+  assert.match(source, /AGENT_MODEL_BASE_URL="\$\{AIMASHI_CLOUD_AGENT_MODEL_BASE_URL:-http:\/\/litellm:4000\/v1\}"/);
+  assert.match(source, /AGENT_MODEL_API_KEY="\$\{AIMASHI_CLOUD_AGENT_MODEL_API_KEY:-\$\{AIMASHI_LITELLM_API_KEY:-\}\}"/);
+  assert.match(source, /Environment=AIMASHI_CLOUD_AGENT_DOCKER_NETWORK=\$AGENT_DOCKER_NETWORK/);
+  assert.match(source, /Environment=AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=\$AGENT_MODEL_BASE_URL/);
+  assert.match(source, /Environment=AIMASHI_CLOUD_AGENT_MODEL_API_KEY=\$AGENT_MODEL_API_KEY/);
   assert.match(source, /run_as_root chown -R "\\\$SERVICE_USER:\\\$SERVICE_USER" "\$DATA_DIR"/);
   assert.match(source, /run_as_root cp "\$REMOTE_RELEASE_DIR\/nginx\/aimashi-websocket-map\.conf" "\$NGINX_MAP_CONF"/);
   assert.match(source, /run_as_root cp "\$REMOTE_RELEASE_DIR\/nginx\/aimashi-cloud-site\.conf" "\$NGINX_SITE_CONF"/);
@@ -135,6 +148,9 @@ test("release builder includes operator README with safe install verification", 
   assert.match(source, /AIMASHI_SMOKE_USERNAME="<smoke-account>"/);
   assert.match(source, /AIMASHI_SMOKE_PASSWORD="<smoke-password>"/);
   assert.match(source, /AIMASHI_SMOKE_REQUIRE_BRIDGE=1/);
+  assert.match(source, /LiteLLM Proxy/);
+  assert.match(source, /AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http:\/\/litellm:4000\/v1/);
+  assert.match(source, /AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>/);
   assert.match(source, /same Aimashi Cloud account/);
   assert.match(source, /does not require a separate local approval click/);
   assert.match(source, /Agent permission mode remains/);

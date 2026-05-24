@@ -132,6 +132,10 @@ The release archive also includes \`diagnose-deploy-ssh.js\` for operators who c
 
 If this archive has already been extracted and the original tarball is not in the current directory, run the verify command from the directory that contains \`aimashi-cloud-release.tgz\`, or pass the absolute path to the tarball.
 
+## Platform Model Gateway
+
+Cloud Hermes workers use the platform model supplied through LiteLLM Proxy. Configure LiteLLM provider keys, model aliases, budgets, and virtual keys in LiteLLM Admin UI/API, then set \`AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http://litellm:4000/v1\`, \`AIMASHI_CLOUD_AGENT_MODEL=aimashi-default\`, and \`AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>\` on the Aimashi Cloud systemd service. Do not put raw provider API keys in Aimashi.
+
 ## Install On The VPS
 
 \`\`\`bash
@@ -394,6 +398,14 @@ function verifyRelease() {
     !/device authentication/.test(releaseReadme)
   ) {
     throw new Error("Release README must document same-account desktop bridge control without a separate remote approval gate.");
+  }
+  if (
+    !/LiteLLM Proxy/.test(releaseReadme) ||
+    !/AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http:\/\/litellm:4000\/v1/.test(releaseReadme) ||
+    !/AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>/.test(releaseReadme) ||
+    !/Do not put raw provider API keys in Aimashi/.test(releaseReadme)
+  ) {
+    throw new Error("Release README must document the LiteLLM platform model gateway.");
   }
 
   childProcess.execFileSync(process.execPath, ["-e", `

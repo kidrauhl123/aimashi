@@ -10,6 +10,16 @@ const CONTAINER_ENV = Object.freeze({
   HERMES_WRITE_SAFE_ROOT: "/data/workspace"
 });
 
+const MODEL_API_KEY_ENV = "AIMASHI_CLOUD_AGENT_MODEL_API_KEY";
+
+function atomicWriteFile(filePath, content, mode = 0o600) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmpPath, content, { mode });
+  fs.renameSync(tmpPath, filePath);
+}
+
 function assertSafeUserId(userId) {
   const id = String(userId || "").trim();
   if (!id) throw new Error("userId required");
@@ -23,9 +33,16 @@ function createHermesWorkerManager(options = {}) {
   const staticBaseUrl = options.staticBaseUrl || process.env.AIMASHI_CLOUD_HERMES_BASE_URL || "";
   const apiKey = options.apiKey || process.env.AIMASHI_CLOUD_HERMES_API_KEY || "aimashi-cloud";
   const image = options.image || process.env.AIMASHI_CLOUD_HERMES_IMAGE || "";
+  const dockerNetwork = String(options.dockerNetwork || process.env.AIMASHI_CLOUD_AGENT_DOCKER_NETWORK || "bridge").trim() || "bridge";
   const dockerBin = options.dockerBin || process.env.AIMASHI_DOCKER_BIN || "docker";
   const execFile = options.execFile || promisify(execFileCb);
   const containerPort = Number(options.containerPort || process.env.AIMASHI_CLOUD_HERMES_CONTAINER_PORT || 8765);
+  const modelProvider = String(options.modelProvider || process.env.AIMASHI_CLOUD_AGENT_MODEL_PROVIDER || "aimashi-litellm").trim();
+  const model = String(options.model || process.env.AIMASHI_CLOUD_AGENT_MODEL || "aimashi-default").trim();
+  const modelBaseUrl = String(options.modelBaseUrl || process.env.AIMASHI_CLOUD_AGENT_MODEL_BASE_URL || "http://litellm:4000/v1").trim();
+  const modelApiMode = String(options.modelApiMode || process.env.AIMASHI_CLOUD_AGENT_MODEL_API_MODE || "chat_completions").trim();
+  const modelApiKey = String(options.modelApiKey || process.env[MODEL_API_KEY_ENV] || process.env.AIMASHI_LITELLM_API_KEY || "").trim();
+  const modelProviderName = String(options.modelProviderName || process.env.AIMASHI_CLOUD_AGENT_MODEL_PROVIDER_NAME || "Aimashi LiteLLM").trim();
 
   function pathsForUser(userId) {
     const id = assertSafeUserId(userId);
@@ -43,7 +60,56 @@ function createHermesWorkerManager(options = {}) {
 
   function envForUser(userId) {
     assertSafeUserId(userId);
-    return { ...CONTAINER_ENV };
+    const env = { ...CONTAINER_ENV };
+    if (modelApiKey) env[MODEL_API_KEY_ENV] = modelApiKey;
+    return env;
+  }
+
+  function renderHermesConfig() {
+    const lines = [
+      "model:",
+      `  provider: ${JSON.stringify(modelProvider)}`,
+      `  default: ${JSON.stringify(model)}`,
+      `  base_url: ${JSON.stringify(modelBaseUrl)}`,
+      `  api_mode: ${JSON.stringify(modelApiMode)}`,
+      "",
+      "providers:",
+      `  ${JSON.stringify(modelProvider)}:`,
+      `    name: ${JSON.stringify(modelProviderName || modelProvider)}`,
+      `    base_url: ${JSON.stringify(modelBaseUrl)}`,
+      `    key_env: ${JSON.stringify(MODEL_API_KEY_ENV)}`,
+      `    default_model: ${JSON.stringify(model)}`,
+      `    api_mode: ${JSON.stringify(modelApiMode)}`,
+      "",
+      "platforms:",
+      "  api_server:",
+      "    enabled: true",
+      "    host: 127.0.0.1",
+      `    port: ${containerPort}`,
+      `    key: ${apiKey}`,
+      "  feishu:",
+      "    enabled: false",
+      "  telegram:",
+      "    enabled: false",
+      "  discord:",
+      "    enabled: false",
+      "",
+      "approvals:",
+      "  mode: \"yolo\"",
+      "  timeout: 60",
+      "",
+      "agent:",
+      "  reasoning_effort: \"medium\"",
+      "",
+      "aimashi:",
+      "  runtime_schema: 1",
+      ""
+    ];
+    return `${lines.join("\n")}`;
+  }
+
+  function writeHermesConfig(paths) {
+    atomicWriteFile(path.join(paths.hermesHome, "config.yaml"), renderHermesConfig(), 0o600);
   }
 
   function ensureUserDirs(userId) {
@@ -51,6 +117,7 @@ function createHermesWorkerManager(options = {}) {
     for (const dir of [paths.root, paths.hermesHome, paths.home, paths.workspace, paths.attachments, paths.logs]) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
+    writeHermesConfig(paths);
     return paths;
   }
 
@@ -104,7 +171,7 @@ function createHermesWorkerManager(options = {}) {
         "-d",
         "--rm",
         "--name", name,
-        "--network=bridge",
+        "--network", dockerNetwork,
         "--read-only",
         "--cpus=1",
         "--memory=1024m",
@@ -117,6 +184,7 @@ function createHermesWorkerManager(options = {}) {
         "--env", `HOME=${env.HOME}`,
         "--env", `TERMINAL_CWD=${env.TERMINAL_CWD}`,
         "--env", `HERMES_WRITE_SAFE_ROOT=${env.HERMES_WRITE_SAFE_ROOT}`,
+        ...(env[MODEL_API_KEY_ENV] ? ["--env", `${MODEL_API_KEY_ENV}=${env[MODEL_API_KEY_ENV]}`] : []),
         image
       ]);
     }

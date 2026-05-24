@@ -11,6 +11,11 @@ WEB_DIR="${AIMASHI_DEPLOY_WEB_DIR:-/var/www/aimashi-web}"
 DATA_DIR="${AIMASHI_DEPLOY_DATA_DIR:-/var/lib/aimashi-cloud}"
 AGENT_ROOT="${AIMASHI_CLOUD_AGENT_ROOT:-/opt/aimashi-cloud/agent-users}"
 HERMES_IMAGE="${AIMASHI_CLOUD_HERMES_IMAGE:-aimashi/hermes-cloud:2026-05-24}"
+AGENT_DOCKER_NETWORK="${AIMASHI_CLOUD_AGENT_DOCKER_NETWORK:-aimashi-cloud}"
+AGENT_MODEL_PROVIDER="${AIMASHI_CLOUD_AGENT_MODEL_PROVIDER:-aimashi-litellm}"
+AGENT_MODEL_NAME="${AIMASHI_CLOUD_AGENT_MODEL:-aimashi-default}"
+AGENT_MODEL_BASE_URL="${AIMASHI_CLOUD_AGENT_MODEL_BASE_URL:-http://litellm:4000/v1}"
+AGENT_MODEL_API_KEY="${AIMASHI_CLOUD_AGENT_MODEL_API_KEY:-${AIMASHI_LITELLM_API_KEY:-}}"
 BACKUP_DIR="${AIMASHI_DEPLOY_BACKUP_DIR:-/root}"
 SERVICE="${AIMASHI_DEPLOY_SERVICE:-aimashi-cloud}"
 SERVICE_USER="${AIMASHI_DEPLOY_SERVICE_USER:-aimashi-cloud}"
@@ -163,6 +168,9 @@ ensure_docker_access() {
   if ! grep -q '^docker:' /etc/group; then
     echo "Missing docker group; install Docker with a docker group before enabling cloud Hermes workers." >&2
     exit 1
+  fi
+  if [ -n "$AGENT_DOCKER_NETWORK" ] && [ "$AGENT_DOCKER_NETWORK" != "bridge" ]; then
+    run_as_root docker network inspect "$AGENT_DOCKER_NETWORK" >/dev/null 2>&1 || run_as_root docker network create "$AGENT_DOCKER_NETWORK" >/dev/null
   fi
   if id -nG "\$SERVICE_USER" | tr ' ' '\n' | grep -qx docker; then
     return
@@ -343,6 +351,11 @@ Environment=AIMASHI_CLOUD_AGENT_MODE=docker
 Environment=AIMASHI_CLOUD_AGENT_ROOT=$AGENT_ROOT
 Environment=AIMASHI_CLOUD_HERMES_IMAGE=$HERMES_IMAGE
 Environment=AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
+Environment=AIMASHI_CLOUD_AGENT_DOCKER_NETWORK=$AGENT_DOCKER_NETWORK
+Environment=AIMASHI_CLOUD_AGENT_MODEL_PROVIDER=$AGENT_MODEL_PROVIDER
+Environment=AIMASHI_CLOUD_AGENT_MODEL=$AGENT_MODEL_NAME
+Environment=AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=$AGENT_MODEL_BASE_URL
+Environment=AIMASHI_CLOUD_AGENT_MODEL_API_KEY=$AGENT_MODEL_API_KEY
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

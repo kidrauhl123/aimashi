@@ -1,5 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const { createHermesWorkerManager } = require("../src/cloud-agent/hermes-worker-manager.js");
@@ -27,6 +29,34 @@ test("worker manager rejects unsafe user ids for filesystem paths", () => {
   const manager = createHermesWorkerManager({ rootDir: "/tmp/aimashi-agents" });
   assert.throws(() => manager.pathsForUser("../escape"), /unsafe userId/);
   assert.throws(() => manager.pathsForUser(""), /userId required/);
+});
+
+test("worker manager writes platform LiteLLM config per user", () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "aimashi-agents-"));
+  const manager = createHermesWorkerManager({
+    rootDir,
+    mode: "static",
+    staticBaseUrl: "http://127.0.0.1:9999",
+    apiKey: "worker-api-key",
+    modelProvider: "aimashi-litellm",
+    model: "aimashi-default",
+    modelBaseUrl: "http://litellm:4000/v1",
+    modelApiKey: "sk-litellm"
+  });
+
+  const paths = manager.ensureUserDirs("user_a");
+  const configPath = path.join(paths.hermesHome, "config.yaml");
+  const config = fs.readFileSync(configPath, "utf8");
+  const stat = fs.statSync(configPath);
+
+  assert.equal(stat.mode & 0o777, 0o600);
+  assert.match(config, /provider: "aimashi-litellm"/);
+  assert.match(config, /default: "aimashi-default"/);
+  assert.match(config, /base_url: "http:\/\/litellm:4000\/v1"/);
+  assert.match(config, /key_env: "AIMASHI_CLOUD_AGENT_MODEL_API_KEY"/);
+  assert.match(config, /key: worker-api-key/);
+  assert.doesNotMatch(config, /sk-litellm/);
+  assert.equal(manager.envForUser("user_a").AIMASHI_CLOUD_AGENT_MODEL_API_KEY, "sk-litellm");
 });
 
 test("Hermes runs client sends Fellow headers and returns final text", async () => {
@@ -112,6 +142,8 @@ test("docker worker mode starts one isolated container per user", async () => {
     rootDir: "/tmp/aimashi-agents",
     mode: "docker",
     image: "aimashi/hermes-cloud:test",
+    dockerNetwork: "aimashi-cloud",
+    modelApiKey: "sk-litellm",
     execFile: fakeExecFile
   });
 
@@ -120,7 +152,8 @@ test("docker worker mode starts one isolated container per user", async () => {
   assert.equal(worker.baseUrl, "http://127.0.0.1:49152");
   const runCall = execCalls.find((call) => call.args[0] === "run");
   assert.ok(runCall, "docker run should be called when container is missing");
-  assert.ok(runCall.args.includes("--network=bridge"));
+  assert.ok(runCall.args.includes("--network"));
+  assert.ok(runCall.args.includes("aimashi-cloud"));
   assert.ok(runCall.args.includes("--read-only"));
   assert.ok(runCall.args.includes("--cpus=1"));
   assert.ok(runCall.args.includes("--memory=1024m"));
@@ -129,5 +162,6 @@ test("docker worker mode starts one isolated container per user", async () => {
   assert.ok(runCall.args.includes("HOME=/data/home"));
   assert.ok(runCall.args.includes("TERMINAL_CWD=/data/workspace"));
   assert.ok(runCall.args.includes("HERMES_WRITE_SAFE_ROOT=/data/workspace"));
+  assert.ok(runCall.args.includes("AIMASHI_CLOUD_AGENT_MODEL_API_KEY=sk-litellm"));
   assert.equal(runCall.args.some((arg) => String(arg).includes("docker.sock")), false);
 });
