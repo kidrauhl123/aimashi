@@ -261,6 +261,12 @@ function verifyRelease() {
     "api/src/cloud/messages-store.js",
     "api/src/cloud/dm-room.js",
     "api/src/cloud/desktop-bridge-permission.js",
+    "api/src/cloud-agent/runtime-bindings-store.js",
+    "api/src/cloud-agent/cloud-agent-runs-store.js",
+    "api/src/cloud-agent/default-fellow.js",
+    "api/src/cloud-agent/hermes-worker-manager.js",
+    "api/src/cloud-agent/hermes-runs-client.js",
+    "api/src/cloud-agent/dispatcher.js",
     "api/src/permission-modes.js",
     "web/index.html",
     "web/app.js",
@@ -291,6 +297,12 @@ function verifyRelease() {
     "api/src/cloud/messages-store.js",
     "api/src/cloud/dm-room.js",
     "api/src/cloud/desktop-bridge-permission.js",
+    "api/src/cloud-agent/runtime-bindings-store.js",
+    "api/src/cloud-agent/cloud-agent-runs-store.js",
+    "api/src/cloud-agent/default-fellow.js",
+    "api/src/cloud-agent/hermes-worker-manager.js",
+    "api/src/cloud-agent/hermes-runs-client.js",
+    "api/src/cloud-agent/dispatcher.js",
     "api/src/permission-modes.js",
     "web/app.js",
     "web/appearance.js",
@@ -388,6 +400,12 @@ function verifyRelease() {
     require(${JSON.stringify(assertFile("api/src/cloud/messages-store.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud/dm-room.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud/desktop-bridge-permission.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/runtime-bindings-store.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/cloud-agent-runs-store.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/default-fellow.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-worker-manager.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-runs-client.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/dispatcher.js"))});
     require(${JSON.stringify(assertFile("api/src/permission-modes.js"))});
     require(${JSON.stringify(assertFile("api/server.js"))});
   `], {
@@ -419,6 +437,7 @@ function main() {
 
   copyFile("scripts/serve-cloud.js", path.join(apiDir, "server.js"));
   copyDir("src/cloud", path.join(apiDir, "src", "cloud"));
+  copyDir("src/cloud-agent", path.join(apiDir, "src", "cloud-agent"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
   copyDir("src/web", webDir);
   copyFile("src/shared/time-format.js", path.join(webDir, "shared", "time-format.js"));

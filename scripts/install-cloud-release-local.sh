@@ -8,6 +8,8 @@ SMOKE_URL="${AIMASHI_INSTALL_SMOKE_URL:-$PUBLIC_URL}"
 API_DIR="${AIMASHI_DEPLOY_API_DIR:-/opt/aimashi-cloud}"
 WEB_DIR="${AIMASHI_DEPLOY_WEB_DIR:-/var/www/aimashi-web}"
 DATA_DIR="${AIMASHI_DEPLOY_DATA_DIR:-/var/lib/aimashi-cloud}"
+AGENT_ROOT="${AIMASHI_CLOUD_AGENT_ROOT:-/opt/aimashi-cloud/agent-users}"
+HERMES_IMAGE="${AIMASHI_CLOUD_HERMES_IMAGE:-aimashi/hermes-cloud:2026-05-24}"
 BACKUP_DIR="${AIMASHI_DEPLOY_BACKUP_DIR:-/root}"
 SERVICE="${AIMASHI_DEPLOY_SERVICE:-aimashi-cloud}"
 SERVICE_USER="${AIMASHI_DEPLOY_SERVICE_USER:-aimashi-cloud}"
@@ -75,6 +77,25 @@ ensure_service_user() {
     login_shell="/bin/false"
   fi
   run_as_root "$useradd_cmd" --system --user-group --home-dir "$DATA_DIR" --shell "$login_shell" "$SERVICE_USER"
+}
+
+ensure_docker_access() {
+  if ! grep -q '^docker:' /etc/group; then
+    echo "Missing docker group; install Docker with a docker group before enabling cloud Hermes workers." >&2
+    exit 1
+  fi
+  if id -nG "$SERVICE_USER" | tr ' ' '\n' | grep -qx docker; then
+    return
+  fi
+  usermod_cmd="$(command -v usermod || true)"
+  if [ -z "$usermod_cmd" ] && [ -x /usr/sbin/usermod ]; then
+    usermod_cmd="/usr/sbin/usermod"
+  fi
+  if [ -z "$usermod_cmd" ]; then
+    echo "Missing required command: usermod; add '$SERVICE_USER' to the docker group manually." >&2
+    exit 1
+  fi
+  run_as_root "$usermod_cmd" -aG docker "$SERVICE_USER"
 }
 
 unit_value() {
@@ -267,10 +288,12 @@ require_command rsync
 require_command systemctl
 require_command id
 require_command chown
+require_command docker
 
 install_done=0
 trap rollback_install ERR
 ensure_service_user
+ensure_docker_access
 
 run_as_root mkdir -p "$BACKUP_DIR"
 if [ -d "$DATA_DIR" ]; then
@@ -294,11 +317,11 @@ if [ -f "/etc/systemd/system/$SERVICE.service" ]; then
   echo "systemd unit backup written to $UNIT_BACKUP"
 fi
 
-run_as_root mkdir -p "$API_DIR" "$WEB_DIR" "$DATA_DIR"
+run_as_root mkdir -p "$API_DIR" "$WEB_DIR" "$DATA_DIR" "$AGENT_ROOT"
 run_as_root rsync -a --delete "$INSTALL_TMP/api/" "$API_DIR/"
 run_as_root cp "$INSTALL_TMP/manifest.json" "$API_DIR/release-manifest.json"
 run_as_root rsync -a --delete "$INSTALL_TMP/web/" "$WEB_DIR/"
-run_as_root chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+run_as_root chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR" "$AGENT_ROOT"
 
 cd "$API_DIR"
 run_as_root npm install --omit=dev
@@ -323,10 +346,14 @@ Environment=AIMASHI_CLOUD_DATA=$DATA_DIR
 Environment=AIMASHI_CLOUD_ALLOWED_ORIGINS=$PUBLIC_URL
 Environment=AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 Environment=AIMASHI_CLOUD_VERSION=2026-05-20
+Environment=AIMASHI_CLOUD_AGENT_MODE=docker
+Environment=AIMASHI_CLOUD_AGENT_ROOT=$AGENT_ROOT
+Environment=AIMASHI_CLOUD_HERMES_IMAGE=$HERMES_IMAGE
+Environment=AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=$DATA_DIR
+ReadWritePaths=$DATA_DIR $AGENT_ROOT
 
 [Install]
 WantedBy=multi-user.target

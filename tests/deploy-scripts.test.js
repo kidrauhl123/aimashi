@@ -16,8 +16,10 @@ test("server-local installer restores data backups during rollback", () => {
   assert.match(source, /DATA_BACKUP="\$BACKUP_DIR\/aimashi-cloud-data-\$DEPLOY_ID\.tgz"/);
   assert.match(source, /SERVICE_USER="\$\{AIMASHI_DEPLOY_SERVICE_USER:-aimashi-cloud\}"/);
   assert.match(source, /ensure_service_user\(\) \{[\s\S]*?useradd_cmd=.*useradd[\s\S]*?--system --user-group --home-dir "\$DATA_DIR" --shell "\$login_shell" "\$SERVICE_USER"/);
+  assert.match(source, /ensure_docker_access\(\) \{[\s\S]*?grep -q '\^docker:' \/etc\/group[\s\S]*?usermod_cmd=.*usermod[\s\S]*?run_as_root "\$usermod_cmd" -aG docker "\$SERVICE_USER"/);
   assert.match(source, /require_command id/);
   assert.match(source, /require_command chown/);
+  assert.match(source, /require_command docker/);
   assert.match(source, /run_as_root chown -R "\$SERVICE_USER:\$SERVICE_USER" "\$DATA_DIR"/);
   assert.match(source, /unit_value\(\) \{[\s\S]*?awk -F= -v key="\$key"/);
   assert.match(source, /rollback_data_owner\(\) \{[\s\S]*?restored_user="\$\(unit_value User "\$UNIT_BACKUP"\)"/);
@@ -56,8 +58,10 @@ test("ssh deploy script restores data backups during install and public verifica
   assert.match(source, /NGINX_SITE_BACKUP="\$BACKUP_DIR\/aimashi-cloud-nginx-site-\$DEPLOY_ID\.conf"/);
   assert.match(source, /SERVICE_USER="\$\{AIMASHI_DEPLOY_SERVICE_USER:-aimashi-cloud\}"/);
   assert.match(source, /command -v id >\/dev\/null && command -v chown >\/dev\/null/);
+  assert.match(source, /command -v docker >\/dev\/null && \(command -v usermod >\/dev\/null \|\| test -x \/usr\/sbin\/usermod\)/);
   assert.match(source, /id -u \$SERVICE_USER_QUOTED >\/dev\/null 2>&1 \|\| command -v useradd >\/dev\/null \|\| test -x \/usr\/sbin\/useradd/);
   assert.match(source, /ensure_service_user\(\) \{[\s\S]*?useradd_cmd=.*useradd[\s\S]*?--system --user-group --home-dir "\$DATA_DIR" --shell "\\\$login_shell" "\\\$SERVICE_USER"/);
+  assert.match(source, /ensure_docker_access\(\) \{[\s\S]*?grep -q '\^docker:' \/etc\/group[\s\S]*?usermod_cmd=.*usermod[\s\S]*?run_as_root "\\\$usermod_cmd" -aG docker "\\\$SERVICE_USER"/);
   assert.match(source, /run_as_root chown -R "\\\$SERVICE_USER:\\\$SERVICE_USER" "\$DATA_DIR"/);
   assert.match(source, /run_as_root cp "\$REMOTE_RELEASE_DIR\/nginx\/aimashi-websocket-map\.conf" "\$NGINX_MAP_CONF"/);
   assert.match(source, /run_as_root cp "\$REMOTE_RELEASE_DIR\/nginx\/aimashi-cloud-site\.conf" "\$NGINX_SITE_CONF"/);
@@ -98,6 +102,8 @@ test("release builder includes operator README with safe install verification", 
   const source = readScript("scripts/build-cloud-release.js");
   assert.match(source, /function writeReleaseReadme\(\)/);
   assert.match(source, /function writeNginxConfigs\(\)/);
+  assert.match(source, /copyDir\("src\/cloud-agent", path\.join\(apiDir, "src", "cloud-agent"\)\)/);
+  assert.match(source, /"api\/src\/cloud-agent\/dispatcher\.js"/);
   assert.match(source, /"README\.md"/);
   assert.match(source, /"nginx\/aimashi-websocket-map\.conf"/);
   assert.match(source, /"nginx\/aimashi-cloud-site\.conf"/);
