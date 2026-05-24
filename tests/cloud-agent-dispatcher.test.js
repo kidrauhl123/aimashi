@@ -63,7 +63,7 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
       hermesRunsClient: {
         async runChat(args) {
           hermesCalls.push(args);
-          return { runId: "hr_1", content: "cloud reply", events: [] };
+          return { runId: "hr_1", content: "cloud reply", events: [{ artifacts: [{ path: "/data/workspace/out.txt" }] }] };
         }
       },
       attachmentMaterializer: {
@@ -73,6 +73,10 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
             input: `${args.text}\n\n附件上下文：/data/attachments/run/a.txt`,
             attachments: [{ id: "file_1", name: "a.txt", path: "/data/attachments/run/a.txt" }]
           };
+        },
+        archiveGeneratedAttachments(args) {
+          assert.deepEqual(args.result.events, [{ artifacts: [{ path: "/data/workspace/out.txt" }] }]);
+          return [{ id: "file_generated", type: "text", name: "out.txt", mimeType: "text/plain", size: 3, url: "/api/files/file_generated" }];
         }
       },
       broadcastPersistedEvent(userId, payload) {
@@ -104,6 +108,7 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
     assert.equal(messages[1].sender_ref, "aimashi");
     assert.equal(messages[1].sender_owner_id, ctx.user.id);
     assert.equal(messages[1].body_md, "cloud reply");
+    assert.deepEqual(JSON.parse(messages[1].attachments_json), [{ id: "file_generated", type: "text", name: "out.txt", mimeType: "text/plain", size: 3, url: "/api/files/file_generated" }]);
 
     const runRows = ctx.cloudStore.getDb().prepare("SELECT status, hermes_run_id FROM cloud_agent_runs").all()
       .map((row) => ({ status: row.status, hermes_run_id: row.hermes_run_id }));

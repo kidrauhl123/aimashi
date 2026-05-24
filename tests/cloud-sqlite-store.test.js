@@ -61,6 +61,19 @@ test("sqlite store enforces file ownership", () => {
     assert.equal(store.getFileForUser(alice.id, saved.id).id, saved.id);
     assert.equal(store.getFileForUser(bob.id, saved.id), null);
 
+    const localPath = path.join(paths.dataDir, "report.txt");
+    fs.writeFileSync(localPath, "generated report", { mode: 0o600 });
+    const generated = store.saveLocalFileForUser(alice.id, {
+      path: localPath,
+      name: "../report.txt",
+      mimeType: "text/plain",
+      type: "text"
+    });
+    assert.equal(generated.type, "text");
+    assert.equal(generated.name, "report.txt");
+    assert.equal(fs.readFileSync(generated.path, "utf8"), "generated report");
+    assert.equal(store.getFileForUser(bob.id, generated.id), null);
+
     assert.throws(
       () => store.saveImageDataUrl(alice.id, {
         name: "script.svg",
@@ -239,4 +252,3 @@ test("schema v2 creates social tables and indexes", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
-

@@ -7,7 +7,8 @@ const path = require("node:path");
 const { createCloudStore } = require("../src/cloud/sqlite-store.js");
 const {
   createAttachmentMaterializer,
-  parseAttachmentsFromMessage
+  parseAttachmentsFromMessage,
+  hostPathForWorkerArtifact
 } = require("../src/cloud-agent/attachment-materializer.js");
 
 function setup() {
@@ -107,4 +108,45 @@ test("parseAttachmentsFromMessage reads persisted message attachment JSON", () =
     [{ id: "a1" }]
   );
   assert.deepEqual(parseAttachmentsFromMessage({ attachments_json: "not json" }), []);
+});
+
+test("attachment materializer archives only worker-root generated artifacts", () => {
+  const ctx = setup();
+  try {
+    fs.mkdirSync(path.join(ctx.workerPaths.root, "workspace"), { recursive: true, mode: 0o700 });
+    const generatedPath = path.join(ctx.workerPaths.root, "workspace", "answer.txt");
+    const outsidePath = path.join(ctx.dir, "outside.txt");
+    fs.writeFileSync(generatedPath, "answer", { mode: 0o600 });
+    fs.writeFileSync(outsidePath, "outside", { mode: 0o600 });
+
+    assert.equal(
+      hostPathForWorkerArtifact(ctx.workerPaths, "/data/workspace/answer.txt"),
+      generatedPath
+    );
+    assert.equal(hostPathForWorkerArtifact(ctx.workerPaths, "/etc/passwd"), "");
+
+    const materializer = createAttachmentMaterializer({ cloudStore: ctx.cloudStore });
+    const archived = materializer.archiveGeneratedAttachments({
+      userId: ctx.alice.id,
+      workerPaths: ctx.workerPaths,
+      result: {
+        events: [{
+          type: "run.completed",
+          artifacts: [
+            { path: "/data/workspace/answer.txt", name: "../answer.txt", mimeType: "text/plain" },
+            { path: outsidePath, name: "outside.txt", mimeType: "text/plain" }
+          ]
+        }]
+      }
+    });
+
+    assert.equal(archived.length, 1);
+    assert.equal(archived[0].name, "answer.txt");
+    assert.equal(archived[0].type, "text");
+    assert.match(archived[0].url, /^\/api\/files\/file_/);
+    assert.equal(fs.readFileSync(ctx.cloudStore.getFileForUser(ctx.alice.id, archived[0].id).path, "utf8"), "answer");
+    assert.equal(ctx.cloudStore.getFileForUser(ctx.bob.id, archived[0].id), null);
+  } finally {
+    ctx.cleanup();
+  }
 });

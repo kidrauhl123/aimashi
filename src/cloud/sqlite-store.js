@@ -6,6 +6,7 @@ const { DatabaseSync } = require("node:sqlite");
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const MAX_IMAGE_BYTES = 18 * 1024 * 1024;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function nowIso() {
@@ -122,6 +123,12 @@ function fileExtensionForMime(mimeType) {
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
   return ".jpg";
+}
+
+function sanitizeStoredFileName(value, fallback = "file") {
+  const base = path.basename(String(value || fallback)).replace(/[\x00-\x1f\x7f]/g, "").trim();
+  const cleaned = base.replace(/[^\w.\- ()\[\]\u4e00-\u9fff]/g, "_").slice(0, 160);
+  return cleaned || fallback;
 }
 
 function rowToUser(row) {
@@ -368,6 +375,37 @@ function createCloudStore(options = {}) {
     return rowToFile(db.prepare("SELECT * FROM files WHERE id = ?").get(fileId));
   }
 
+  function saveLocalFileForUser(userId, input = {}) {
+    if (!getUserById(userId)) throw new Error("用户不存在。");
+    const sourcePath = String(input.path || input.filePath || "").trim();
+    if (!sourcePath) throw new Error("File path is required.");
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isFile() || !stat.size || stat.size > MAX_FILE_BYTES) throw new Error("Invalid file size.");
+    const mimeType = String(input.mimeType || input.mime || "application/octet-stream").slice(0, 160);
+    const fileId = id("file");
+    const userDir = path.join(uploadDir, userId);
+    fs.mkdirSync(userDir, { recursive: true, mode: 0o700 });
+    const name = sanitizeStoredFileName(input.name || path.basename(sourcePath), fileId);
+    const ext = path.extname(name);
+    const filePath = path.join(userDir, `${fileId}${ext || ""}`);
+    fs.copyFileSync(sourcePath, filePath);
+    fs.chmodSync(filePath, 0o600);
+    db.prepare(`
+      INSERT INTO files (id, user_id, type, name, mime_type, path, size, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fileId,
+      userId,
+      String(input.type || "file"),
+      name,
+      mimeType,
+      filePath,
+      stat.size,
+      now()
+    );
+    return rowToFile(db.prepare("SELECT * FROM files WHERE id = ?").get(fileId));
+  }
+
   function getFileForUser(userId, fileId) {
     return rowToFile(db.prepare("SELECT * FROM files WHERE id = ? AND user_id = ?").get(String(fileId || ""), userId));
   }
@@ -531,6 +569,7 @@ function createCloudStore(options = {}) {
     logoutSession,
     authenticateToken,
     saveImageDataUrl,
+    saveLocalFileForUser,
     getFileForUser,
     listBridgeDevices,
     upsertBridgeDevice,

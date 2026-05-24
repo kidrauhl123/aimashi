@@ -78,6 +78,13 @@ function createCloudAgentDispatcher(deps = {}) {
         attachments: materialized.attachments || [],
         conversationHistory: conversationHistory(roomId)
       });
+      const replyAttachments = attachmentMaterializer?.archiveGeneratedAttachments
+        ? attachmentMaterializer.archiveGeneratedAttachments({
+          userId,
+          workerPaths: worker.paths || {},
+          result
+        })
+        : [];
       cloudAgentRunsStore.markRunning(run.id, result.runId || "");
       const reply = messagesStore.appendMessage({
         roomId,
@@ -85,6 +92,7 @@ function createCloudAgentDispatcher(deps = {}) {
         senderRef: fellowId,
         senderOwnerId: userId,
         bodyMd: result.content || "",
+        attachments: replyAttachments.length ? replyAttachments : null,
         status: "complete"
       });
       cloudAgentRunsStore.markComplete(run.id);

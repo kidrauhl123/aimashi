@@ -102,6 +102,61 @@ function inputWithAttachmentContext(text, attachments = [], fsImpl = fs) {
   return [String(text || ""), context ? `附件上下文：\n${context}` : ""].filter(Boolean).join("\n\n");
 }
 
+function walkArtifacts(value, out = []) {
+  if (!value || out.length >= 20) return out;
+  if (Array.isArray(value)) {
+    for (const item of value) walkArtifacts(item, out);
+    return out;
+  }
+  if (typeof value !== "object") return out;
+  const pathValue = value.path || value.file_path || value.filePath;
+  if (typeof pathValue === "string" && pathValue.trim()) {
+    out.push({
+      path: pathValue,
+      name: value.name || value.filename || value.file_name || "",
+      mimeType: value.mimeType || value.mime || value.content_type || "",
+      type: value.type || value.kind || ""
+    });
+  }
+  for (const key of ["attachments", "artifacts", "files", "generated_files", "generatedFiles", "outputs"]) {
+    if (value[key]) walkArtifacts(value[key], out);
+  }
+  return out;
+}
+
+function resultArtifacts(result = {}) {
+  const artifacts = [];
+  walkArtifacts(result.attachments, artifacts);
+  walkArtifacts(result.artifacts, artifacts);
+  walkArtifacts(result.files, artifacts);
+  for (const event of Array.isArray(result.events) ? result.events : []) {
+    walkArtifacts(event, artifacts);
+  }
+  const seen = new Set();
+  return artifacts.filter((item) => {
+    const key = String(item.path || "").trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 20);
+}
+
+function hostPathForWorkerArtifact(workerPaths = {}, artifactPath = "") {
+  const raw = String(artifactPath || "").trim();
+  if (!raw || /^https?:\/\//i.test(raw)) return "";
+  const root = workerPaths.root ? path.resolve(workerPaths.root) : "";
+  if (!root) return "";
+  let candidate = "";
+  if (raw === "/data") candidate = root;
+  else if (raw.startsWith("/data/")) candidate = path.join(root, raw.slice("/data/".length));
+  else if (!path.isAbsolute(raw)) candidate = path.join(workerPaths.workspace || path.join(root, "workspace"), raw);
+  else return "";
+  const resolved = path.resolve(candidate);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return "";
+  return resolved;
+}
+
 function createAttachmentMaterializer(deps = {}) {
   const cloudStore = deps.cloudStore;
   const fsImpl = deps.fs || fs;
@@ -171,12 +226,67 @@ function createAttachmentMaterializer(deps = {}) {
     };
   }
 
-  return { materialize };
+  function archiveGeneratedAttachments(args = {}) {
+    if (!cloudStore || typeof cloudStore.saveLocalFileForUser !== "function") return [];
+    const userId = String(args.userId || "").trim();
+    const workerPaths = args.workerPaths || {};
+    if (!userId || !workerPaths.root) return [];
+    const rootReal = fsImpl.realpathSync(workerPaths.root);
+    const attachments = [];
+    for (const artifact of resultArtifacts(args.result || {})) {
+      const hostPath = hostPathForWorkerArtifact(workerPaths, artifact.path);
+      if (!hostPath) continue;
+      let realPath = "";
+      let stat = null;
+      try {
+        realPath = fsImpl.realpathSync(hostPath);
+        stat = fsImpl.statSync(realPath);
+      } catch {
+        continue;
+      }
+      const relative = path.relative(rootReal, realPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      if (!stat.isFile() || !stat.size || stat.size > MAX_ATTACHMENT_BYTES) continue;
+      const name = sanitizeAttachmentName(artifact.name || path.basename(realPath));
+      const mimeType = String(artifact.mimeType || "").trim() || mimeForName(name);
+      const kind = attachmentKind({ mimeType, name });
+      const saved = cloudStore.saveLocalFileForUser(userId, {
+        path: realPath,
+        name,
+        mimeType,
+        type: kind
+      });
+      if (saved) attachments.push({
+        id: saved.id,
+        type: saved.type || kind,
+        name: saved.name,
+        mimeType: saved.mimeType,
+        size: saved.size || stat.size,
+        url: saved.url
+      });
+    }
+    return attachments;
+  }
+
+  return { materialize, archiveGeneratedAttachments };
+}
+
+function mimeForName(name) {
+  const ext = path.extname(String(name || "")).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".pdf") return "application/pdf";
+  if (attachmentKind({ name }) === "text") return "text/plain";
+  return "application/octet-stream";
 }
 
 module.exports = {
   createAttachmentMaterializer,
   parseAttachmentsFromMessage,
   attachmentContext,
-  inputWithAttachmentContext
+  inputWithAttachmentContext,
+  resultArtifacts,
+  hostPathForWorkerArtifact
 };
