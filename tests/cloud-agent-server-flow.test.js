@@ -43,7 +43,12 @@ test("POST /api/rooms/:id/messages appends cloud fellow reply through existing r
     dataDir,
     cloudAgentWorkerManager: {
       async ensureWorker(userId) {
-        return { userId, baseUrl: "http://worker", apiKey: "k" };
+        return {
+          userId,
+          baseUrl: "http://worker",
+          apiKey: "k",
+          paths: { attachments: path.join(dataDir, "agent-users", userId, "attachments") }
+        };
       }
     },
     cloudAgentHermesClient: {
@@ -65,9 +70,20 @@ test("POST /api/rooms/:id/messages appends cloud fellow reply through existing r
     const sent = await jsonFetch(baseUrl, `/api/rooms/${roomId}/messages`, {
       method: "POST",
       headers: authHeaders,
-      body: { bodyMd: "hi cloud", clientOpId: "op_cloud_1" }
+      body: {
+        bodyMd: "hi cloud",
+        clientOpId: "op_cloud_1",
+        attachments: [{
+          name: "pixel.png",
+          dataUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}`
+        }]
+      }
     });
     assert.equal(sent.message.sender_kind, "user");
+    const sentAttachments = JSON.parse(sent.message.attachments_json);
+    assert.equal(sentAttachments.length, 1);
+    assert.match(sentAttachments[0].url, /^\/api\/files\/file_/);
+    assert.equal(sentAttachments[0].dataUrl, undefined);
 
     await server.aimashi.cloudAgentDispatcher.idle();
 
@@ -78,6 +94,9 @@ test("POST /api/rooms/:id/messages appends cloud fellow reply through existing r
     assert.equal(listed.messages[1].sender_ref, "aimashi");
     assert.equal(listed.messages[1].body_md, "server cloud reply");
     assert.equal(hermesCalls.length, 1);
+    assert.match(hermesCalls[0].input, /附件上下文/);
+    assert.equal(hermesCalls[0].attachments.length, 1);
+    assert.equal(hermesCalls[0].attachments[0].path.startsWith("/data/attachments/"), true);
   } finally {
     await close(server);
     fs.rmSync(dataDir, { recursive: true, force: true });

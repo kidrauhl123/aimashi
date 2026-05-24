@@ -71,6 +71,12 @@ try {
 } catch {
   ({ createHermesRunsClient } = require("./src/cloud-agent/hermes-runs-client.js"));
 }
+let createAttachmentMaterializer = null;
+try {
+  ({ createAttachmentMaterializer } = require("../src/cloud-agent/attachment-materializer.js"));
+} catch {
+  ({ createAttachmentMaterializer } = require("./src/cloud-agent/attachment-materializer.js"));
+}
 let createCloudAgentDispatcher = null;
 try {
   ({ createCloudAgentDispatcher } = require("../src/cloud-agent/dispatcher.js"));
@@ -1088,13 +1094,18 @@ async function handleRequest(req, res, context) {
       if (!fellowMember || fellowMember.owner_id !== auth.user.id) {
         return writeError(res, 403, "you are not the owner of this fellow in this room");
       }
+      const attachments = persistCloudAttachments(
+        context.cloudStore,
+        auth.user.id,
+        Array.isArray(body.attachments) ? body.attachments : []
+      );
       const message = context.messagesStore.appendMessage({
         roomId,
         senderKind: "fellow",
         senderRef: fellowId,
         senderOwnerId: auth.user.id,
         bodyMd: body.bodyMd || "",
-        attachments: body.attachments || null,
+        attachments: attachments.length ? attachments : null,
         mentions: body.mentions || null,
         turnId: body.turnId || null,
         status: "complete",
@@ -1216,12 +1227,17 @@ async function handleRequest(req, res, context) {
         const other = auth.user.id === a ? b : a;
         ensureDmRoom(context.socialStore, auth.user.id, other);
       }
+      const attachments = persistCloudAttachments(
+        context.cloudStore,
+        auth.user.id,
+        Array.isArray(body.attachments) ? body.attachments : []
+      );
       const message = context.messagesStore.appendMessage({
         roomId,
         senderKind: "user",
         senderRef: auth.user.id,
         bodyMd: body.bodyMd || "",
-        attachments: body.attachments || null,
+        attachments: attachments.length ? attachments : null,
         mentions: body.mentions || null,
         turnId: body.turnId || null,
         status: "complete",
@@ -1619,6 +1635,9 @@ function createAimashiCloudServer(options = {}) {
     apiKey: options.cloudAgentHermesApiKey
   });
   const hermesRunsClient = options.cloudAgentHermesClient || createHermesRunsClient();
+  const attachmentMaterializer = options.cloudAgentAttachmentMaterializer || createAttachmentMaterializer({
+    cloudStore: context.cloudStore
+  });
   context.cloudAgentDispatcher = createCloudAgentDispatcher({
     socialStore: context.socialStore,
     messagesStore: context.messagesStore,
@@ -1627,6 +1646,7 @@ function createAimashiCloudServer(options = {}) {
     cloudAgentRunsStore: context.cloudAgentRunsStore,
     workerManager,
     hermesRunsClient,
+    attachmentMaterializer,
     broadcastPersistedEvent: (userId, payload) => broadcastPersistedEvent(context, userId, payload)
   });
   const server = http.createServer((req, res) => handleRequest(req, res, context));

@@ -1,3 +1,5 @@
+const { parseAttachmentsFromMessage } = require("./attachment-materializer.js");
+
 function requireDep(deps, key) {
   if (!deps || !deps[key]) throw new Error(`${key} dependency is required`);
   return deps[key];
@@ -17,6 +19,7 @@ function createCloudAgentDispatcher(deps = {}) {
   const cloudAgentRunsStore = requireDep(deps, "cloudAgentRunsStore");
   const workerManager = requireDep(deps, "workerManager");
   const hermesRunsClient = requireDep(deps, "hermesRunsClient");
+  const attachmentMaterializer = deps.attachmentMaterializer || null;
   const broadcastPersistedEvent = typeof deps.broadcastPersistedEvent === "function"
     ? deps.broadcastPersistedEvent
     : () => {};
@@ -56,13 +59,23 @@ function createCloudAgentDispatcher(deps = {}) {
 
     try {
       const worker = await workerManager.ensureWorker(userId);
+      const materialized = attachmentMaterializer
+        ? attachmentMaterializer.materialize({
+          userId,
+          workerPaths: worker.paths || {},
+          runId: run.id,
+          text: message.body_md || "",
+          attachments: parseAttachmentsFromMessage(message)
+        })
+        : { attachments: [], input: message.body_md || "" };
       const result = await hermesRunsClient.runChat({
         baseUrl: worker.baseUrl,
         apiKey: worker.apiKey,
         userId,
         fellow,
         roomId,
-        input: message.body_md || "",
+        input: materialized.input || message.body_md || "",
+        attachments: materialized.attachments || [],
         conversationHistory: conversationHistory(roomId)
       });
       cloudAgentRunsStore.markRunning(run.id, result.runId || "");

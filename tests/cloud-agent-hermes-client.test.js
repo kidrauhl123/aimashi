@@ -65,6 +65,7 @@ test("Hermes runs client sends Fellow headers and returns final text", async () 
     fellow: { id: "aimashi", name: "Aimashi" },
     roomId: "fellow:u1:aimashi",
     input: "hi",
+    attachments: [{ id: "file_1", name: "note.txt", mimeType: "text/plain", size: 12, kind: "text", path: "/data/attachments/run/note.txt" }],
     conversationHistory: [{ role: "user", content: "hi" }]
   });
 
@@ -78,7 +79,9 @@ test("Hermes runs client sends Fellow headers and returns final text", async () 
   const body = JSON.parse(calls[0].body);
   assert.equal(body.session_id, "cloud:u1:aimashi:fellow:u1:aimashi");
   assert.deepEqual(body.conversation_history, [{ role: "user", content: "hi" }]);
+  assert.deepEqual(body.attachments, [{ id: "file_1", name: "note.txt", mimeType: "text/plain", size: 12, kind: "text", path: "/data/attachments/run/note.txt" }]);
   assert.equal(body.metadata.account_id, "u1");
+  assert.deepEqual(body.metadata.attachments, [{ id: "file_1", name: "note.txt", mimeType: "text/plain", path: "/data/attachments/run/note.txt" }]);
 });
 
 test("docker worker mode starts one isolated container per user", async () => {

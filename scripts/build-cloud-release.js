@@ -264,6 +264,7 @@ function verifyRelease() {
     "api/src/cloud-agent/runtime-bindings-store.js",
     "api/src/cloud-agent/cloud-agent-runs-store.js",
     "api/src/cloud-agent/default-fellow.js",
+    "api/src/cloud-agent/attachment-materializer.js",
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
@@ -300,6 +301,7 @@ function verifyRelease() {
     "api/src/cloud-agent/runtime-bindings-store.js",
     "api/src/cloud-agent/cloud-agent-runs-store.js",
     "api/src/cloud-agent/default-fellow.js",
+    "api/src/cloud-agent/attachment-materializer.js",
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
@@ -403,6 +405,7 @@ function verifyRelease() {
     require(${JSON.stringify(assertFile("api/src/cloud-agent/runtime-bindings-store.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/cloud-agent-runs-store.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/default-fellow.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/attachment-materializer.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-worker-manager.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-runs-client.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/dispatcher.js"))});

@@ -47,6 +47,7 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
   const ctx = setup();
   const hermesCalls = [];
   const broadcasts = [];
+  const materializeCalls = [];
   try {
     const dispatcher = createCloudAgentDispatcher({
       socialStore: ctx.socialStore,
@@ -65,6 +66,15 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
           return { runId: "hr_1", content: "cloud reply", events: [] };
         }
       },
+      attachmentMaterializer: {
+        materialize(args) {
+          materializeCalls.push(args);
+          return {
+            input: `${args.text}\n\n附件上下文：/data/attachments/run/a.txt`,
+            attachments: [{ id: "file_1", name: "a.txt", path: "/data/attachments/run/a.txt" }]
+          };
+        }
+      },
       broadcastPersistedEvent(userId, payload) {
         broadcasts.push({ userId, payload });
       }
@@ -74,7 +84,8 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
       roomId: ctx.room.id,
       senderKind: "user",
       senderRef: ctx.user.id,
-      bodyMd: "hello"
+      bodyMd: "hello",
+      attachments: [{ id: "file_1", url: "/api/files/file_1" }]
     });
 
     await dispatcher.handleUserMessage({ userId: ctx.user.id, roomId: ctx.room.id, message });
@@ -82,7 +93,10 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
     assert.equal(hermesCalls.length, 1);
     assert.equal(hermesCalls[0].userId, ctx.user.id);
     assert.equal(hermesCalls[0].fellow.id, "aimashi");
-    assert.equal(hermesCalls[0].input, "hello");
+    assert.equal(materializeCalls.length, 1);
+    assert.deepEqual(materializeCalls[0].attachments, [{ id: "file_1", url: "/api/files/file_1" }]);
+    assert.match(hermesCalls[0].input, /附件上下文/);
+    assert.deepEqual(hermesCalls[0].attachments, [{ id: "file_1", name: "a.txt", path: "/data/attachments/run/a.txt" }]);
     assert.deepEqual(hermesCalls[0].conversationHistory.map((m) => m.role), ["user"]);
 
     const messages = ctx.messagesStore.listMessagesSince(ctx.room.id, 0);

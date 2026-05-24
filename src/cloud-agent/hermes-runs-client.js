@@ -89,12 +89,30 @@ function createHermesRunsClient(deps = {}) {
       input: String(args.input || ""),
       session_id: sessionId,
       conversation_history: Array.isArray(args.conversationHistory) ? args.conversationHistory : [],
+      attachments: Array.isArray(args.attachments)
+        ? args.attachments.map((attachment) => ({
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          kind: attachment.kind,
+          path: attachment.path
+        }))
+        : [],
       metadata: {
         fellow_key: key,
         persona_key: key,
         account_id: userId,
         route_profile: "cloud-hermes",
-        room_id: roomId
+        room_id: roomId,
+        attachments: Array.isArray(args.attachments)
+          ? args.attachments.map((attachment) => ({
+            id: attachment.id,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            path: attachment.path
+          }))
+          : []
       }
     };
     const headers = {
