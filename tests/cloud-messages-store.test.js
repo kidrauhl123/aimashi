@@ -99,6 +99,23 @@ test("appendMessage persists attachments + mentions + turn_id", () => {
   } finally { teardown(ctx); }
 });
 
+test("deleteMessage removes the row and returns it; missing id returns null", () => {
+  const ctx = setup();
+  try {
+    const m1 = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "keep" });
+    const m2 = ctx.messages.appendMessage({ roomId: "r-msg", senderKind: "user", senderRef: ctx.alice.id, bodyMd: "drop" });
+    const deleted = ctx.messages.deleteMessage(m2.id);
+    assert.equal(deleted.id, m2.id);
+    assert.equal(deleted.room_id, "r-msg");
+    assert.equal(ctx.messages.getMessage(m2.id), null);
+    // Surviving message is untouched; remaining list is just m1.
+    assert.equal(ctx.messages.getMessage(m1.id).body_md, "keep");
+    assert.deepEqual(ctx.messages.listMessagesSince("r-msg", 0).map((m) => m.id), [m1.id]);
+    // Deleting an unknown id is a no-op returning null.
+    assert.equal(ctx.messages.deleteMessage("m_nope"), null);
+  } finally { teardown(ctx); }
+});
+
 test("updateMessageStatus transitions streaming -> complete", () => {
   const ctx = setup();
   try {

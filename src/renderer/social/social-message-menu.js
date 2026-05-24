@@ -1,13 +1,19 @@
-// Lightweight context menu for cloud-room (DM + group) message bubbles.
+// Context menu for cloud-room (DM + group) message bubbles.
 //
-// Cloud-room messages don't live in a fellow session, so the full
-// fellow-chat menu in src/renderer/chat/message-menu.js (which depends on
-// activeSession() / messageAtIndex) doesn't apply. This module reuses the
-// same DOM element (#messageContextMenu) and CSS (.message-context-menu)
-// but renders a smaller action set: copy plain text, copy markdown.
+// Cloud-room messages don't live in a fellow session, so the fellow-chat menu
+// in src/renderer/chat/message-menu.js (which depends on activeSession() /
+// messageAtIndex) can't be reused directly. This module renders the SAME
+// designed menu — same #messageContextMenu element, same .message-context-menu
+// CSS, same menuItemHtml icons + separator + danger styling — but wires the
+// actions to cloud-room operations:
+//   回复  → set composer reply draft (embedded as a markdown quote on send)
+//   拷贝  → copy plain text
+//   翻译  → translate in place via the utility model
+//   删除  → DELETE /api/rooms/:id/messages/:msgId (syncs to all devices)
+// 置顶 is intentionally omitted: a shared cloud room has no per-message pin.
 //
-// Wired from social._buildMessageArticle and social-groups.buildGroupMessageArticle
-// via the onContextMenu callback of createMessageBubble.
+// Wired from app.js's chat-level contextmenu dispatcher, which routes bubbles
+// carrying data-message-source="cloud-room" here instead of the fellow menu.
 
 (function (global) {
   "use strict";
@@ -22,6 +28,12 @@
     return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   }
 
+  function menuItemHtml(spec) {
+    const fn = global.aimashiMarkdown?.menuItemHtml;
+    if (typeof fn === "function") return fn(spec);
+    return `<button type="button" ${spec.attrs || ""}>${escapeHtml(spec.label)}</button>`;
+  }
+
   function plainTextFromMarkdown(md) {
     return String(md || "")
       .replace(/```[\s\S]*?```/g, (m) => m.replace(/```[a-zA-Z]*\n?/g, "").replace(/```$/g, ""))
@@ -30,6 +42,11 @@
       .replace(/\*([^*]+)\*/g, "$1")
       .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  }
+
+  function snippetOf(plain) {
+    const text = String(plain || "").replace(/\s+/g, " ").trim();
+    return text.length > 160 ? `${text.slice(0, 160)}...` : text;
   }
 
   async function copyToClipboard(text) {
@@ -64,22 +81,27 @@
     const menu = getMenuEl();
     if (!menu) return;
     // If fellow chat had its menu open, close it first.
-    const fellowMenu = global.aimashiMessageMenu?.closeMessageContextMenu;
-    if (typeof fellowMenu === "function") fellowMenu();
+    const closeFellow = global.aimashiMessageMenu?.closeMessageContextMenu;
+    if (typeof closeFellow === "function") closeFellow();
 
-    const md = message?.body_md || message?.bodyMd || "";
-    const plain = plainTextFromMarkdown(md);
+    const social = global.aimashiSocial;
+    const roomId = social?.getActiveRoomId?.();
+    const desc = social?.describeMessageForMenu?.(message) || { authorName: "", isOwn: false, bodyMd: message?.body_md || "" };
+    const plain = plainTextFromMarkdown(desc.bodyMd);
     const hasText = Boolean(plain);
 
     menu.innerHTML = `
-      <button type="button" data-social-message-action="copy" ${hasText ? "" : "disabled"}>复制</button>
-      <button type="button" data-social-message-action="copy-md" ${hasText ? "" : "disabled"}>复制 Markdown</button>
+      ${menuItemHtml({ icon: "quote", label: "回复", attrs: `data-social-message-action="reply" ${hasText ? "" : "disabled"}` })}
+      ${menuItemHtml({ icon: "copy", label: "拷贝", attrs: `data-social-message-action="copy" ${hasText ? "" : "disabled"}` })}
+      ${menuItemHtml({ icon: "translate", label: "翻译", attrs: `data-social-message-action="translate" ${hasText ? "" : "disabled"}` })}
+      <div class="skill-context-menu-separator" role="separator"></div>
+      ${menuItemHtml({ icon: "delete", label: "删除", attrs: 'data-social-message-action="delete"', className: "danger" })}
     `;
     menu.classList.remove("hidden");
 
     const rect = menu.getBoundingClientRect();
     const width = rect.width || 140;
-    const height = rect.height || 80;
+    const height = rect.height || 180;
     menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
 
@@ -87,8 +109,26 @@
       btn.addEventListener("click", async () => {
         const action = btn.dataset.socialMessageAction;
         closeMenu();
-        if (action === "copy") await copyToClipboard(plain);
-        if (action === "copy-md") await copyToClipboard(md);
+        if (action === "copy") {
+          await copyToClipboard(plain);
+          return;
+        }
+        if (action === "reply") {
+          global.aimashiMessageHelpers?.setReplyDraft?.({
+            role: desc.isOwn ? "user" : "assistant",
+            author: desc.isOwn ? "你" : (desc.authorName || "对方"),
+            content: snippetOf(plain)
+          });
+          return;
+        }
+        if (action === "translate") {
+          if (roomId && message?.id) await social?.translateRoomMessage?.(roomId, message.id);
+          return;
+        }
+        if (action === "delete") {
+          if (roomId && message?.id) await social?.deleteRoomMessage?.(roomId, message.id);
+          return;
+        }
       });
     });
 

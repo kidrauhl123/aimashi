@@ -84,7 +84,11 @@
     const member = findFellowRoomMember(roomId, ref);
     const ownerId = member?.owner_id || "";
     const me = selfUser();
-    const isMine = ownerId === me.id;
+    // In a shared room, trust the member row's owner_id (never elevate just
+    // because a fellow key happens to collide with one of our local keys). Only
+    // when there's NO room member (private fellow chat) does a local fellow
+    // count as ours — there's no owner_id to read there.
+    const isMine = member ? (ownerId === me.id) : Boolean(local);
 
     const name = local?.name || member?.fellow_name || ref;
     const avatar = local

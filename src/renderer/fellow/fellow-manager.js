@@ -393,7 +393,7 @@
   function openFellowContextMenu(fellowKey, x, y) {
     if (!fellowKey || !state) return;
     window.aimashiMessageMenu?.closeMessageContextMenu();
-    closeGroupContextMenu();
+    closeGroupContextMenu?.(); // group subsystem removed in unification — dep no longer injected
     state.fellowContextMenu = { open: true, x, y, fellowKey };
     renderFellowContextMenu();
   }

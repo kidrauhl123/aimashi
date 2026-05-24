@@ -83,6 +83,9 @@ function createSocialApi({ getSettings, normalizeUrl }) {
     async postRoomMessage(roomId, body) {
       return jsonFetch({ ...ctx(), method: "POST", path: `/api/rooms/${roomId}/messages`, body: withOpId(body) });
     },
+    async deleteRoomMessage(roomId, messageId) {
+      return jsonFetch({ ...ctx(), method: "DELETE", path: `/api/rooms/${roomId}/messages/${encodeURIComponent(messageId)}` });
+    },
     async createRoom({ name, memberFellows, memberFriendUserIds, clientGroupId } = {}) {
       // clientGroupId is the room-creation-specific idempotency key (links
       // a local group to its cloud counterpart); we still attach a generic

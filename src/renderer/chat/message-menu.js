@@ -84,9 +84,14 @@
   function openMessageContextMenu(messageIndex, x, y, selection = null) {
     const index = Number(messageIndex);
     if (!messageAtIndex(index)) return;
-    closeSkillContextMenu();
-    closeFellowContextMenu();
-    closeGroupContextMenu();
+    // Optional calls: the group subsystem was removed in the cloud-room
+    // unification, so closeGroupContextMenu is no longer injected. Calling an
+    // undefined dep here threw a TypeError *after* the handler had already
+    // preventDefault()ed the native menu — which silently killed the right-
+    // click menu in every local fellow (private AI) chat. Guard all three.
+    closeSkillContextMenu?.();
+    closeFellowContextMenu?.();
+    closeGroupContextMenu?.();
     const selectionText = String(selection?.text || "").trim();
     state.messageContextMenu = { open: true, x, y, messageIndex: index, selectionText };
     if (selectionText) highlightMessageSelection(selection.range);

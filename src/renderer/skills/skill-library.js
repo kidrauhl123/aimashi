@@ -475,7 +475,7 @@
   function openSkillContextMenu(skillId, x, y) {
     if (!skillId || !state) return;
     window.aimashiMessageMenu?.closeMessageContextMenu();
-    closeGroupContextMenu();
+    closeGroupContextMenu?.(); // group subsystem removed in unification — dep no longer injected
     state.skillContextMenu = { open: true, x, y, skillId };
     renderSkillContextMenu();
   }

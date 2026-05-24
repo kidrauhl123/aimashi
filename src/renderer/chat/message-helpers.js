@@ -117,6 +117,16 @@
     window.aimashiComposer.updateSlashCommandState();
   }
 
+  // Set a reply draft from any source (fellow message OR cloud-room message)
+  // and render the composer reply chip. Cloud-room bubbles call this so the
+  // same designed reply UI shows for groups/DMs as for private fellow chat.
+  function setReplyDraft(reference) {
+    if (!state) return;
+    state.replyDraft = reference || null;
+    renderComposerReply();
+    els?.chatInput?.focus();
+  }
+
   function renderComposerReply() {
     if (!state || !els || !els.composerReply) return;
     const reply = state.replyDraft;
@@ -143,6 +153,7 @@
     messageContextSnippet,
     messageAuthorLabel,
     messageReferenceForIndex,
+    setReplyDraft,
     replyQuoteHtml,
     isComposerComposing,
     resizeChatInput,

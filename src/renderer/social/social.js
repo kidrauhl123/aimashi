@@ -6,6 +6,8 @@
   // Decision: cap initial-message fetch to 30 rooms to keep bootstrap fast.
   const INITIAL_ROOMS_CAP = 30;
 
+  // Lazy shared-dep accessor (mirrors unreadShared / sendPipelineShared) so the
+  // module still loads in test VMs where neither the global nor require exists.
   function conversationKinds() {
     if (global.aimashiConversationKinds) return global.aimashiConversationKinds;
     if (typeof require !== "undefined") return require("../../shared/conversation-kinds");
@@ -156,7 +158,14 @@
   function cloudRunFor(roomId, runId = "") {
     const existing = moduleState.cloudAgentRunsByRoom.get(roomId);
     if (existing) return existing;
-    const run = { roomId, runId, text: "", status: "running", createdAt: new Date().toISOString(), tools: [] };
+    const run = {
+      roomId,
+      runId,
+      text: "",
+      status: "running",
+      createdAt: new Date().toISOString(),
+      tools: []
+    };
     moduleState.cloudAgentRunsByRoom.set(roomId, run);
     return run;
   }
@@ -493,7 +502,10 @@
       } else if (name === "run.cancelled") {
         run.status = "cancelled";
       } else if (name === "tool.started") {
-        run.tools.push({ name: String(hermesEvent.tool || hermesEvent.name || hermesEvent.data?.tool || "工具"), status: "running" });
+        run.tools.push({
+          name: String(hermesEvent.tool || hermesEvent.name || hermesEvent.data?.tool || "工具"),
+          status: "running"
+        });
       } else if (name === "tool.completed") {
         const toolName = String(hermesEvent.tool || hermesEvent.name || hermesEvent.data?.tool || "");
         const tool = [...run.tools].reverse().find((item) => !toolName || item.name === toolName);
@@ -587,6 +599,21 @@
       // cleanup is needed here. Leftover pin entries (orphaned by a
       // room delete the server didn't broadcast for some reason) age
       // out at the next settings PUT or are tolerated harmlessly.
+      _schedulePersistSnapshot();
+      if (deps && typeof deps.render === "function") deps.render();
+      return;
+    }
+
+    // DELETE /api/rooms/:id/messages/:msgId from any device — drop the
+    // message from the cache and re-render. Mirrors room.message_appended.
+    if (type === "room.message_deleted") {
+      const { roomId, messageId } = payload || {};
+      if (!roomId || !messageId) return;
+      const entry = moduleState.messageCache.get(roomId);
+      if (entry) {
+        entry.messages = entry.messages.filter((m) => m.id !== messageId);
+      }
+      if (roomId === moduleState.activeRoomId) _removeMessageFromActiveChat(messageId);
       _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
@@ -707,6 +734,20 @@
     return source.listMessages()[0] || null;
   }
 
+  // Resolve author name / ownership / body for a cached message — used by the
+  // bubble context menu (reply chip + copy). Passes group members so fellow /
+  // friend names resolve correctly in groups, matching the rendered bubble.
+  function describeMessageForMenu(msg) {
+    if (!msg) return { authorName: "", isOwn: false, bodyMd: "" };
+    const members = _roomMembersCache.get(moduleState.activeRoomId) || [];
+    const spec = _specForMessage(msg, members);
+    return {
+      authorName: spec ? spec.authorName : "",
+      isOwn: Boolean(spec && spec.isOwn),
+      bodyMd: (spec ? spec.bodyMd : msg.body_md) || msg.body_md || ""
+    };
+  }
+
   // DM bubble mirrors fellow chat's renderMessageHtml shape EXACTLY so the
   // CSS targeting .message > .message-stack > .bubble paints it as a real
   // bubble. The bubble carries data-message-source="cloud-room" + a
@@ -724,23 +765,30 @@
       ? avatarHelpers.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatarColor)
       : `background-color:${avatarColor};`;
     const avatarLetter = avatar.image ? "" : ((authorName || "?")[0] || "?").toUpperCase();
+    const cache = moduleState.messageCache.get(moduleState.activeRoomId);
+    const messageIndex = cache ? cache.messages.findIndex((m) => m.id === msg.id) : -1;
     const bodyHtml = _renderMsgBody((spec ? spec.bodyMd : msg.body_md) || "");
+    // Render the bubble unconditionally (matching the group builder) so even an
+    // attachment-only / empty-body message keeps a right-clickable carrier with
+    // the data attributes the app.js contextmenu dispatcher looks for.
+    const bubbleHtml = `<div class="bubble" data-message-index="${messageIndex}" data-message-source="cloud-room" data-message-id="${escapeHtml(msg.id || "")}">${bodyHtml}</div>`;
     const attachmentHtml = renderAttachmentChips(spec?.attachments || msg.attachments || []);
     const createdAt = msg.created_at || msg.createdAt || "";
     const timeHtml = createdAt
       ? `<time class="message-time" datetime="${escapeHtml(createdAt)}">${escapeHtml(window.aimashiTimeFormat.formatMessageTime(createdAt))}</time>`
       : "";
 
-    const cache = moduleState.messageCache.get(moduleState.activeRoomId);
-    const messageIndex = cache ? cache.messages.findIndex((m) => m.id === msg.id) : -1;
-
     const article = document.createElement("article");
     article.className = `message ${roleClass}`;
+    // Tag the avatar like the group builder so the same app.js handlers fire:
+    // left-click → contact card, right-click → dropdown. Private chat and
+    // group chat share one avatar-interaction path (一视同仁).
     article.innerHTML = `
-      <div class="avatar" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}">${escapeHtml(avatarLetter)}</div>
+      <div class="avatar message-avatar" data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>
       <div class="message-stack">
-        <div class="bubble" data-message-index="${messageIndex}" data-message-source="cloud-room" data-message-id="${escapeHtml(msg.id || "")}">${bodyHtml}</div>
+        ${bubbleHtml}
         ${attachmentHtml}
+        ${_renderMsgTranslation(msg)}
         ${timeHtml}
       </div>
     `;
@@ -754,7 +802,7 @@
     const fellowKey = run.fellowId || room.decorations?.fellowKey || (room.id?.startsWith("fellow:") ? room.id.split(":")[2] : "aimashi");
     const synthetic = {
       id: `cloud-agent-stream-${run.runId || roomId}`,
-      sender_kind: conversationKinds().SenderKind.Fellow,
+      sender_kind: "fellow",
       sender_ref: fellowKey,
       body_md: run.text || "",
       created_at: run.createdAt || new Date().toISOString()
@@ -778,7 +826,7 @@
     const article = document.createElement("article");
     article.className = "message assistant streaming";
     article.innerHTML = `
-      <div class="avatar" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}">${escapeHtml(avatarLetter)}</div>
+      <div class="avatar message-avatar" data-sender-kind="fellow" data-sender-ref="${escapeHtml(fellowKey)}" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>
       <div class="message-stack">
         ${bodyHtml ? `<div class="bubble">${bodyHtml}</div>` : ""}
         ${statusHtml ? `<div class="bubble">${statusHtml}</div>` : ""}
@@ -786,6 +834,113 @@
       </div>
     `;
     return article;
+  }
+
+  // Translation block for a cloud-room bubble. Reuses the exact .message-translation
+  // markup/CSS from fellow chat (chat/message-menu.js translationHtml) so the
+  // in-place translate result looks identical. The translation lives on the
+  // cached message object (transient — never pushed to cloud).
+  function _renderMsgTranslation(msg) {
+    const t = msg && msg.translation;
+    if (!t) return "";
+    const status = t.status || (t.text ? "done" : "");
+    if (status === "loading") {
+      return `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><p class="message-translation-muted">正在翻译...</p></div>`;
+    }
+    if (status === "error") {
+      return `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><p class="message-translation-error">${escapeHtml(t.error || "翻译失败")}</p></div>`;
+    }
+    return `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><div class="message-translation-body">${_renderMsgBody(t.text || "")}</div></div>`;
+  }
+
+  function _reRenderActiveChat() {
+    const chatEl = document.getElementById("chat");
+    if (chatEl && moduleState.activeRoomId) renderRoomChat(chatEl);
+  }
+
+  // Remove a single message's bubble from the open chat without a full repaint.
+  function _removeMessageFromActiveChat(messageId) {
+    const chatEl = document.getElementById("chat");
+    if (!chatEl) return;
+    const bubble = chatEl.querySelector(`.bubble[data-message-id="${(window.CSS && window.CSS.escape) ? window.CSS.escape(messageId) : messageId}"]`);
+    bubble?.closest(".message")?.remove();
+  }
+
+  // Translate a cloud-room message in place. Mirrors message-menu.translateMessage
+  // but stores the result on the cached message and re-renders the room.
+  async function translateRoomMessage(roomId, messageId) {
+    const entry = moduleState.messageCache.get(roomId);
+    const msg = entry && entry.messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    const text = String(msg.body_md || msg.bodyMd || "").trim();
+    if (!text) return;
+    // sendChat needs a fellow to run the utility model on: prefer a fellow
+    // member of this room, else fall back to the first available persona.
+    const runtime = (deps && typeof deps.getState === "function" && deps.getState()?.runtime) || {};
+    const fellows = runtime.fellows || runtime.personas || [];
+    const { MemberKind } = conversationKinds();
+    const roomFellow = (_roomMembersCache.get(roomId) || []).find((m) => m.member_kind === MemberKind.Fellow);
+    const fellowKey = (roomFellow && roomFellow.member_ref) || (fellows[0] && (fellows[0].key || fellows[0].id)) || "";
+    if (!fellowKey) {
+      msg.translation = { status: "error", text: "", error: "没有可用于翻译的 fellow。" };
+      if (roomId === moduleState.activeRoomId) _reRenderActiveChat();
+      return;
+    }
+    msg.translation = { status: "loading", text: "", error: "" };
+    if (roomId === moduleState.activeRoomId) _reRenderActiveChat();
+    try {
+      const prompt = [
+        "请把下面这条聊天消息翻译成简体中文。",
+        "要求：只输出译文；保持原意、语气和代码/命令/链接；不要添加解释。",
+        "",
+        text
+      ].join("\n");
+      const cryptoRandomId = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+      const response = await window.aimashi.sendChat({
+        fellowKey,
+        sessionId: `utility:translate:${cryptoRandomId()}`,
+        utility: true,
+        messages: [{ role: "user", content: prompt }]
+      });
+      const translated = String(response?.choices?.[0]?.message?.content || "").trim();
+      msg.translation = translated
+        ? { status: "done", text: translated, error: "" }
+        : { status: "error", text: "", error: "模型没有返回译文。" };
+    } catch (error) {
+      msg.translation = { status: "error", text: "", error: `翻译失败: ${error?.message || error}` };
+    }
+    if (roomId === moduleState.activeRoomId) _reRenderActiveChat();
+  }
+
+  // Delete a cloud-room message: optimistically drop it locally, then DELETE on
+  // the server. The room.message_deleted broadcast keeps other devices in sync;
+  // for this device we apply immediately so the bubble vanishes with no lag.
+  async function deleteRoomMessage(roomId, messageId) {
+    const entry = moduleState.messageCache.get(roomId);
+    // Capture the message so we can roll the optimistic removal back if the
+    // server rejects — otherwise the bubble vanishes locally while the message
+    // still exists on the server (divergence until the next bootstrap).
+    const removed = entry ? entry.messages.find((m) => m.id === messageId) : null;
+    if (entry) entry.messages = entry.messages.filter((m) => m.id !== messageId);
+    if (roomId === moduleState.activeRoomId) _removeMessageFromActiveChat(messageId);
+    _schedulePersistSnapshot();
+    if (deps && typeof deps.render === "function") deps.render();
+    let ok = false;
+    try {
+      const res = await window.aimashi.social.deleteRoomMessage(roomId, messageId);
+      ok = Boolean(res && res.ok !== false);
+      if (!ok) console.warn("[social] deleteRoomMessage failed:", res?.error || "unknown");
+    } catch (err) {
+      console.warn("[social] deleteRoomMessage error:", err?.message || err);
+    }
+    if (!ok && removed && entry && !entry.messages.find((m) => m.id === messageId)) {
+      // Restore the message and re-render so the user doesn't silently lose it.
+      entry.messages.push(removed);
+      entry.messages.sort((a, b) => a.seq - b.seq);
+      _schedulePersistSnapshot();
+      if (roomId === moduleState.activeRoomId) _reRenderActiveChat();
+      if (deps && typeof deps.render === "function") deps.render();
+    }
   }
 
   function _renderMsgBody(md) {
@@ -1331,8 +1486,19 @@
     // Manual "标为未读" override surfaces as a single-pip badge.
     return isRoomManuallyUnread(roomId) ? 1 : 0;
   }
+  // Aggregate unread badge total. Muted rooms ("免打扰") are excluded so they
+  // don't drive the app/dock badge — the per-row grey pip still renders via
+  // getUnreadForRoom in renderSidebarRows, but a muted room never "notifies"
+  // at the aggregate level. Uses getUnreadForRoom so manual "标为未读"
+  // overrides count consistently.
   function getTotalRoomUnread() {
-    return unreadShared().totalUnreadFromConversations(null, moduleState.unreadByRoom);
+    let total = 0;
+    for (const room of moduleState.rooms) {
+      if (!room || !room.id) continue;
+      if (isRoomMuted(room.id)) continue;
+      total += getUnreadForRoom(room.id);
+    }
+    return total;
   }
   // Expose the cached room member list so app.js can build a composite
   // avatar for cloud group rooms via the same path as local fellow groups.
@@ -1366,6 +1532,9 @@
     openCreateGroupDialog,
     sendInActiveRoom,
     sendInActiveGroupRoom,
+    translateRoomMessage,
+    deleteRoomMessage,
+    describeMessageForMenu,
     getActiveRoomId,
     getRoomById,
     setActiveRoomId,

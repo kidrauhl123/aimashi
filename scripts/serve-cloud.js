@@ -1024,8 +1024,9 @@ async function handleRequest(req, res, context) {
 
     const roomAsFellowMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages\/as-fellow$/);
     const roomMembersMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/members$/);
+    const roomMsgDeleteMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages\/([A-Za-z0-9_-]+)$/);
     const roomMsgsMatch = !roomAsFellowMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages$/);
-    const roomDetailMatch = !roomAsFellowMatch && !roomMembersMatch && !roomMsgsMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
+    const roomDetailMatch = !roomAsFellowMatch && !roomMembersMatch && !roomMsgsMatch && !roomMsgDeleteMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
 
     // POST /api/rooms/:id/members — add member to existing group
     if (req.method === "POST" && roomMembersMatch) {
@@ -1283,6 +1284,29 @@ async function handleRequest(req, res, context) {
       const payload = { message };
       rememberOp(context, auth.user.id, body, 201, payload);
       return writeJson(res, 201, payload);
+    }
+
+    // DELETE /api/rooms/:id/messages/:msgId — remove a single message and
+    // tell every user-member to drop it from their cache (multi-device sync).
+    // Any member of the room may delete; these are the user's own rooms.
+    if (req.method === "DELETE" && roomMsgDeleteMatch) {
+      const roomId = roomMsgDeleteMatch[1];
+      const messageId = roomMsgDeleteMatch[2];
+      if (!userIsMemberOfRoom(context.socialStore, roomId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this room");
+      }
+      const existing = context.messagesStore.getMessage(messageId);
+      if (!existing || existing.room_id !== roomId) {
+        return writeError(res, 404, "message not found");
+      }
+      context.messagesStore.deleteMessage(messageId);
+      const allMembers = context.socialStore.listRoomMembers(roomId);
+      for (const m of allMembers) {
+        if (m.member_kind === "user") {
+          broadcastPersistedEvent(context, m.member_ref, { type: "room.message_deleted", roomId, messageId });
+        }
+      }
+      return writeJson(res, 200, { ok: true, roomId, messageId });
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {

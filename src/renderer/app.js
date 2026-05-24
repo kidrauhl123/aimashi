@@ -1690,8 +1690,17 @@ function renderMessageHtml(message, ctx) {
   const attachmentHtml = renderAttachmentChips([...(message.attachments || []), ...generatedAttachmentsForMessage(message)].map(hydrateAttachmentPreview));
   const pinnedHtml = message.pinned ? `<span class="message-pin-badge">${ICON_PARK_PIN_SVG}置顶</span>` : "";
   const roleClass = message.role === "user" ? "user" : "assistant";
+  // Tag the avatar so the same app.js handlers fire here as in cloud DM /
+  // group bubbles: left-click → contact card, right-click → dropdown. In a
+  // local fellow session the AI avatar opens its editable 模型/推理强度/权限
+  // card; the user avatar opens the self card. (一视同仁 across all chats.)
+  const senderKind = message.role === "assistant" ? "fellow" : "user";
+  const senderRef = message.role === "assistant"
+    ? (persona?.key || "")
+    : (state.runtime?.cloud?.user?.id || "");
+  const avatarTitle = message.role === "assistant" ? (persona?.name || "") : (user.displayName || "");
   return `<article class="message ${roleClass}">
-      <div class="avatar" style="background-color:${window.aimashiMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? window.aimashiMarkdown.escapeHtml(label) : ""}</div>
+      <div class="avatar message-avatar" data-sender-kind="${senderKind}" data-sender-ref="${window.aimashiMarkdown.escapeHtml(senderRef)}" title="${window.aimashiMarkdown.escapeHtml(avatarTitle)}" style="background-color:${window.aimashiMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? window.aimashiMarkdown.escapeHtml(label) : ""}</div>
       <div class="message-stack">${taskAffordanceHtml}${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${commandResultHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
     </article>`;
 }
@@ -3539,8 +3548,17 @@ els.chatForm.addEventListener("submit", async (event) => {
   // Branch: a cloud room (dm / group / fellow) is active → send via social.
   if (window.aimashiSocial?.getActiveRoomId?.() && !state.activeKey) {
     const roomId = window.aimashiSocial.getActiveRoomId();
-    const roomText = els.chatInput.value;
+    let roomText = els.chatInput.value;
     if (!roomText.trim()) return;
+    // Cloud rooms have no reply_to column, so a quote-reply is embedded as a
+    // markdown blockquote at the head of the message — visible to every member.
+    const roomReply = state.replyDraft ? { ...state.replyDraft } : null;
+    if (roomReply && roomReply.content) {
+      const quoted = String(roomReply.content).split("\n").map((line) => `> ${line}`).join("\n");
+      roomText = `> **${roomReply.author || "回复"}**\n${quoted}\n\n${roomText}`;
+      state.replyDraft = null;
+      window.aimashiMessageHelpers.renderComposerReply();
+    }
     els.chatInput.value = "";
     window.aimashiMessageHelpers.resizeChatInput();
     const activeRoomRecord = window.aimashiSocial.getRoomById?.(roomId);

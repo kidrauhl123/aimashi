@@ -26,6 +26,7 @@ function createMessagesStore(db) {
   const updateStatus = db.prepare(
     "UPDATE messages SET status = ?, error_json = COALESCE(?, error_json) WHERE id = ?"
   );
+  const deleteById = db.prepare("DELETE FROM messages WHERE id = ?");
 
   function appendMessage(args) {
     const {
@@ -81,7 +82,16 @@ function createMessagesStore(db) {
     updateStatus.run(String(status), errorJson ? JSON.stringify(errorJson) : null, String(id));
   }
 
-  return { appendMessage, getMessage, listMessagesSince, updateMessageStatus };
+  // Hard-delete a single message. Returns the deleted row (so callers can
+  // broadcast room.message_deleted with the room_id) or null if it was gone.
+  function deleteMessage(id) {
+    const row = selectMessage.get(String(id));
+    if (!row) return null;
+    deleteById.run(String(id));
+    return row;
+  }
+
+  return { appendMessage, getMessage, listMessagesSince, updateMessageStatus, deleteMessage };
 }
 
 module.exports = { createMessagesStore };

@@ -97,6 +97,7 @@
     SocialGetRoom: "social:get-room",
     SocialListRoomMessages: "social:list-room-messages",
     SocialPostRoomMessage: "social:post-room-message",
+    SocialDeleteRoomMessage: "social:delete-room-message",
     SocialMyUsername: "social:my-username",
     SocialCreateRoom: "social:create-room",
     SocialUpdateRoom: "social:update-room",

@@ -79,6 +79,20 @@
     const cache = moduleState.messageCache.get(roomId);
     const messageIndex = cache ? cache.messages.findIndex((m) => m.id === msg.id) : -1;
 
+    // In-place translation block (same .message-translation markup as 1-on-1).
+    const t = msg && msg.translation;
+    let translationHtml = "";
+    if (t) {
+      const status = t.status || (t.text ? "done" : "");
+      if (status === "loading") {
+        translationHtml = `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><p class="message-translation-muted">正在翻译...</p></div>`;
+      } else if (status === "error") {
+        translationHtml = `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><p class="message-translation-error">${escapeHtml(t.error || "翻译失败")}</p></div>`;
+      } else {
+        translationHtml = `<div class="message-translation"><div class="message-translation-head"><span>译文</span></div><div class="message-translation-body">${renderMsgBody(t.text || "")}</div></div>`;
+      }
+    }
+
     const article = document.createElement("article");
     article.className = `message ${roleClass}`;
     article.innerHTML = `
@@ -87,6 +101,7 @@
         ${senderLabel ? `<span class="message-sender">${escapeHtml(senderLabel)}</span>` : ""}
         <div class="bubble" data-message-index="${messageIndex}" data-message-source="cloud-room" data-message-id="${escapeHtml(msg.id || "")}">${bodyHtml}</div>
         ${attachmentHtml}
+        ${translationHtml}
         ${timeHtml}
       </div>
     `;
