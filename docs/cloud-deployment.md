@@ -19,10 +19,15 @@ AIMASHI_CLOUD_DATA=/var/lib/aimashi-cloud
 AIMASHI_CLOUD_ALLOWED_ORIGINS=https://aiweb.buytb01.com
 AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 AIMASHI_CLOUD_VERSION=2026-05-20
+AIMASHI_CLOUD_AGENT_MODE=docker
+AIMASHI_CLOUD_AGENT_ROOT=/opt/aimashi-cloud/agent-users
+AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026-05-24
+AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
 ```
 
 `AIMASHI_CLOUD_ALLOWED_ORIGINS` is required in production. Without it, WebSocket upgrades are limited to same-host/local origins only.
 `AIMASHI_CLOUD_PORT` takes precedence over the generic `PORT`; if `AIMASHI_CLOUD_PORT` is unset, the server honors `PORT` for platform-style deployments.
+`AIMASHI_CLOUD_AGENT_MODE=docker` enables the cloud-backed Hermes Fellow runtime. The service creates one worker container per user, mounts only `/opt/aimashi-cloud/agent-users/<userId>` at `/data`, binds the Hermes API to `127.0.0.1` on a random host port, and passes `HERMES_HOME=/data/hermes-home`, `HOME=/data/home`, `TERMINAL_CWD=/data/workspace`, and `HERMES_WRITE_SAFE_ROOT=/data/workspace` into the container. The worker container must not mount `/var/lib/aimashi-cloud`, global uploads, other users' agent directories, or `/var/run/docker.sock`.
 
 ## systemd Unit
 
@@ -45,10 +50,14 @@ Environment=AIMASHI_CLOUD_DATA=/var/lib/aimashi-cloud
 Environment=AIMASHI_CLOUD_ALLOWED_ORIGINS=https://aiweb.buytb01.com
 Environment=AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 Environment=AIMASHI_CLOUD_VERSION=2026-05-20
+Environment=AIMASHI_CLOUD_AGENT_MODE=docker
+Environment=AIMASHI_CLOUD_AGENT_ROOT=/opt/aimashi-cloud/agent-users
+Environment=AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026-05-24
+Environment=AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/aimashi-cloud
+ReadWritePaths=/var/lib/aimashi-cloud /opt/aimashi-cloud/agent-users
 
 [Install]
 WantedBy=multi-user.target

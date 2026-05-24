@@ -153,7 +153,7 @@ test("cloud smoke script can require and execute a bridge run", async () => {
       },
       timeout: 15_000
     });
-    assert.match(stdout, /OK health - features=9 release=smokecommit/);
+    assert.match(stdout, /OK health - features=11 release=smokecommit/);
     assert.match(stdout, /OK security headers - CORS and browser policies/);
     assert.match(stdout, /OK web app - index favicon and manifest served/);
     assert.match(stdout, /OK events websocket query token - rejected/);

@@ -100,7 +100,9 @@ const cloudFeatures = [
   "bridge-run-lifecycle",
   "bridge-run-cancel",
   "bridge-run-progress",
-  "desktop-sync"
+  "desktop-sync",
+  "cloud-hermes-agent",
+  "cloud-agent-user-isolation"
 ];
 const defaultAllowedOrigins = String(process.env.AIMASHI_CLOUD_ALLOWED_ORIGINS || "")
   .split(",")
