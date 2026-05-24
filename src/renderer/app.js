@@ -1299,8 +1299,17 @@ function render() {
   const visiblePersonas = filter
     ? personas.filter((persona) => `${persona.name || ""} ${persona.key || ""}`.toLowerCase().includes(filter))
     : personas;
-  const socialRows = window.aimashiSocial?.renderSidebarRows?.() || [];
-  const messageRows = window.aimashiFellowManager.sortMessageCardsForSidebar([
+  // Two data sources feed the sidebar: local fellow personas (instant) +
+  // cloud rooms (async, populated by social.bootstrapAfterLogin). If we
+  // render the moment the local data is ready, the cloud rows pop in
+  // seconds later and the user sees a two-step paint — exactly the
+  // "割裂" they complained about. For logged-in users, hold the sidebar
+  // until cloud bootstrap finishes so personas + rooms land in one paint.
+  const social = window.aimashiSocial;
+  const cloudLoggedIn = Boolean(state.runtime?.cloud?.loggedIn);
+  const cloudReady = !cloudLoggedIn || !social || social.isBootstrapped?.();
+  const socialRows = cloudReady ? (social?.renderSidebarRows?.() || []) : [];
+  const messageRows = !cloudReady ? [] : window.aimashiFellowManager.sortMessageCardsForSidebar([
     ...visiblePersonas.map((persona) => ({
       type: "fellow",
       key: persona.key,
@@ -1325,7 +1334,7 @@ function render() {
   if (!messageRows.length) {
     const empty = document.createElement("div");
     empty.className = "persona-empty";
-    empty.textContent = "没有匹配的消息";
+    empty.textContent = cloudReady ? "没有匹配的消息" : "正在同步会话…";
     els.personaList.appendChild(empty);
   }
   renderView();

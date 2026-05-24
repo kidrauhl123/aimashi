@@ -196,7 +196,16 @@
     } catch (err) {
       console.error("[social] bootstrapAfterLogin failed:", err);
     }
+    // Flip the bootstrap flag AFTER everything is in the cache so the
+    // first render that includes cloud rows also has fellow personas —
+    // the sidebar shows both data sources in one paint instead of
+    // "personas now, rooms later" (the visible "割裂" the user reported).
+    moduleState.bootstrapped = true;
     if (deps && typeof deps.render === "function") deps.render();
+  }
+
+  function isBootstrapped() {
+    return Boolean(moduleState.bootstrapped);
   }
 
   // ── toast helper (used for new friend-request notifications) ────────────
@@ -1080,6 +1089,7 @@
     moduleState,
     initSocialModule,
     bootstrapAfterLogin,
+    isBootstrapped,
     handleCloudEvent,
     renderSidebarRows,
     renderRoomChat,
