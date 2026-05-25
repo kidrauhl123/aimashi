@@ -28,6 +28,22 @@ test("fellow cloud rooms are not hidden from the sidebar", () => {
   assert.doesNotMatch(appSource, /if\s*\(\s*isFellow\s*\)\s*return\s+null/);
 });
 
+test("cloud room send and render do not depend on activeKey being empty", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+
+  assert.doesNotMatch(appSource, /getActiveRoomId\?\.\(\) && !state\.activeKey/);
+  assert.doesNotMatch(appSource, /activeRoomId && !state\.activeKey/);
+});
+
+test("logged-in active pane never falls back to local fellow sessions", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+
+  assert.match(appSource, /if\s*\(cloudSignedIn\)\s*\{\s*state\.activeKey = "";/);
+  assert.match(appSource, /const active = cloudSignedIn\s*\?\s*null\s*:/);
+  assert.match(appSource, /if\s*\(state\.runtime\?\.cloud\?\.enabled\)\s*\{\s*els\.chat\.innerHTML = "";\s*return;\s*\}/);
+  assert.match(appSource, /if\s*\(state\.runtime\?\.cloud\?\.enabled\)\s*return;/);
+});
+
 test("renderer app state factory owns default mutable state", () => {
   const source = fs.readFileSync(path.join(root, "src/renderer/app-state.js"), "utf8");
   const localStorage = {

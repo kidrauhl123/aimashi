@@ -254,7 +254,10 @@
     if (!api || typeof api.ensureFellowRoom !== "function") return;
     for (const fellow of localRuntimeFellows()) {
       try {
-        await api.ensureFellowRoom(fellow.key, { title: fellow.name || fellow.displayName || fellow.key, runtimeKind: "desktop-local" });
+        const result = await api.ensureFellowRoom(fellow.key, { title: fellow.name || fellow.displayName || fellow.key, runtimeKind: "desktop-local" });
+        if (result && result.ok === false) {
+          throw new Error(result.error || result.message || result.data?.error || "unknown ensure failure");
+        }
       } catch (error) {
         console.warn("[social] ensure fellow room failed", fellow.key, error);
       }

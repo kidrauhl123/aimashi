@@ -98,6 +98,44 @@ test("bootstrapAfterLogin ensures local fellow rooms before listing rooms", asyn
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0].body)), { title: "爱丽丝", runtimeKind: "desktop-local" });
 });
 
+test("bootstrapAfterLogin warns when fellow room ensure returns ok false", async () => {
+  const s = loadSocial();
+  const calls = [];
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    s.initSocialModule({
+      getState: () => ({ runtime: { fellows: [{ key: "alice", name: "爱丽丝" }] } }),
+      render: () => {},
+      els: {},
+      appendTransientChat: () => {}
+    });
+    s.__mockWindow.aimashi.social = {
+      myUsername: async () => ({ ok: true, data: { id: "u_1", username: "jung" } }),
+      listFriends: async () => ({ ok: true, data: { friends: [] } }),
+      listFriendRequests: async () => ({ ok: true, data: { requests: [] } }),
+      settingsGet: async () => ({}),
+      ensureFellowRoom: async (fellowId) => {
+        calls.push({ kind: "ensure", fellowId });
+        return { ok: false, error: "boom" };
+      },
+      listRooms: async () => {
+        calls.push({ kind: "listRooms" });
+        return { ok: true, data: { rooms: [] } };
+      },
+      listRoomMessages: async () => ({ ok: true, data: { messages: [] } })
+    };
+
+    await s.bootstrapAfterLogin();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(calls.map((call) => call.kind), ["ensure", "listRooms"]);
+  assert.equal(warnings.some((args) => args.some((part) => String(part).includes("alice") || String(part).includes("boom"))), true);
+});
+
 test("renderSidebarRows: dm room → private-room with otherUser resolved", () => {
   const s = loadSocial();
   s.moduleState.myUserId = "u_alice";

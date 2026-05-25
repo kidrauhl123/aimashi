@@ -309,7 +309,10 @@ syncNarrowLayout();
 
 function renderSendButton() {
   if (!els.sendChat) return;
-  const canSend = Boolean(String(els.chatInput?.value || "").trim()) || state.pendingAttachments.length > 0;
+  const hasContent = Boolean(String(els.chatInput?.value || "").trim()) || state.pendingAttachments.length > 0;
+  const cloudSignedIn = Boolean(state.runtime?.cloud?.enabled);
+  const hasActiveCloudRoom = Boolean(window.aimashiSocial?.getActiveRoomId?.());
+  const canSend = hasContent && (!cloudSignedIn || hasActiveCloudRoom);
   els.sendChat.classList.toggle("stop", state.isGenerating);
   els.sendChat.textContent = state.isGenerating ? "" : "↗";
   els.sendChat.title = state.isGenerating ? "停止生成" : "发送";
@@ -1257,10 +1260,20 @@ function render() {
   window.aimashiModelSettings.syncPermissionControl(runtime);
 
   const personas = runtime.fellows || runtime.personas || [];
+  const social = window.aimashiSocial;
+  // cloud.enabled = token present (signed in). NOTE: there is no
+  // cloud.loggedIn field — cloudStatus() exposes enabled/connected/
+  // connecting only. An earlier version gated on loggedIn, which was
+  // always undefined, so the gate never fired and personas always
+  // painted first.
+  const cloudSignedIn = Boolean(state.runtime?.cloud?.enabled);
+  const activeCloudRoomId = social?.getActiveRoomId?.();
   // Only fall back to personas[0] when no persona matches AND no group is active.
   // Without this guard, clicking a group (whose id doesn't match any persona key)
   // immediately resets activeKey back to personas[0], making group selection a no-op.
-  if (!personas.some((persona) => persona.key === state.activeKey) && personas.length && !window.aimashiSocial?.getActiveRoomId?.()) {
+  if (cloudSignedIn) {
+    state.activeKey = "";
+  } else if (!personas.some((persona) => persona.key === state.activeKey) && personas.length && !activeCloudRoomId) {
     state.activeKey = personas[0].key;
   }
   if (!personas.some((persona) => persona.key === state.activeContactKey) && personas.length) {
@@ -1274,10 +1287,9 @@ function render() {
   const unreadTotal = window.aimashiSessionReadState.totalUnreadCount(personas.filter((p) => !p.muted));
   els.personaCount.textContent = window.aimashiUnread.unreadBadgeText(unreadTotal);
   els.personaCount.classList.toggle("hidden", unreadTotal <= 0);
-  const active = personas.find((persona) => persona.key === state.activeKey) || personas[0];
-  const activeCloudRoomId = window.aimashiSocial?.getActiveRoomId?.();
+  const active = cloudSignedIn ? null : (personas.find((persona) => persona.key === state.activeKey) || personas[0]);
   const activeCloudRoom = activeCloudRoomId
-    ? window.aimashiSocial?.getRoomById?.(activeCloudRoomId)
+    ? social?.getRoomById?.(activeCloudRoomId)
     : null;
   const groupInfoBtn = document.getElementById("groupInfoButton");
   const composerBottom = document.querySelector(".composer-bottom");
@@ -1289,6 +1301,16 @@ function render() {
         : (activeCloudRoom.id?.startsWith("g_") || activeCloudRoom.id?.startsWith("g-")) ? "group"
         : "")) === "group";
     if (groupInfoBtn) groupInfoBtn.classList.toggle("hidden", !activeIsGroup);
+    if (els.sessionMenuButton) els.sessionMenuButton.classList.add("hidden");
+    if (composerBottom) composerBottom.classList.add("hidden");
+  } else if (cloudSignedIn) {
+    if (els.activeChatAvatar) {
+      els.activeChatAvatar.innerHTML = "";
+      els.activeChatAvatar.className = "profile-avatar";
+    }
+    setText(els.activeChatName, "选择对话");
+    if (els.activeChatMeta) setText(els.activeChatMeta, "云端同步已开启");
+    if (groupInfoBtn) groupInfoBtn.classList.add("hidden");
     if (els.sessionMenuButton) els.sessionMenuButton.classList.add("hidden");
     if (composerBottom) composerBottom.classList.add("hidden");
   } else if (active) {
@@ -1313,13 +1335,6 @@ function render() {
   // seconds later and the user sees a two-step paint — exactly the
   // "割裂" they complained about. For logged-in users, hold the sidebar
   // until cloud bootstrap finishes so personas + rooms land in one paint.
-  const social = window.aimashiSocial;
-  // cloud.enabled = token present (signed in). NOTE: there is no
-  // cloud.loggedIn field — cloudStatus() exposes enabled/connected/
-  // connecting only. An earlier version gated on loggedIn, which was
-  // always undefined, so the gate never fired and personas always
-  // painted first.
-  const cloudSignedIn = Boolean(state.runtime?.cloud?.enabled);
   const cloudReady = !cloudSignedIn || !social || social.isBootstrapped?.();
   const socialRows = cloudReady ? (social?.renderSidebarRows?.() || []) : [];
   const localConversationRows = cloudSignedIn
@@ -1758,10 +1773,14 @@ function renderChat() {
   // Branch: a cloud room (DM / group / fellow) is active → social paints
   // the message list. Header is painted by render() above.
   const activeRoomId = window.aimashiSocial?.getActiveRoomId?.();
-  if (activeRoomId && !state.activeKey) {
+  if (activeRoomId) {
     if (window.aimashiSocial && typeof window.aimashiSocial.renderRoomChat === "function") {
       window.aimashiSocial.renderRoomChat(els.chat);
     }
+    return;
+  }
+  if (state.runtime?.cloud?.enabled) {
+    els.chat.innerHTML = "";
     return;
   }
   const wasNearBottom = !els.chat || (els.chat.scrollHeight - els.chat.scrollTop - els.chat.clientHeight < 80);
@@ -3567,7 +3586,7 @@ els.chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (window.aimashiMessageHelpers.isComposerComposing()) return;
   // Branch: a cloud room (dm / group / fellow) is active → send via social.
-  if (window.aimashiSocial?.getActiveRoomId?.() && !state.activeKey) {
+  if (window.aimashiSocial?.getActiveRoomId?.()) {
     const roomId = window.aimashiSocial.getActiveRoomId();
     let roomText = els.chatInput.value;
     if (!roomText.trim()) return;
@@ -3596,6 +3615,7 @@ els.chatForm.addEventListener("submit", async (event) => {
     }
     return;
   }
+  if (state.runtime?.cloud?.enabled) return;
   if (state.isGenerating) {
     await window.aimashi.stopChat?.();
     return;
