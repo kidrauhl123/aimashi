@@ -6027,7 +6027,7 @@ function createActiveChatEngineAdapters() {
   });
 }
 
-async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false }) {
+async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false, allowSlashCommands = true }) {
   utility = Boolean(utility);
   let abortController;
   if (group || utility) {
@@ -6059,7 +6059,7 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, group, web
     if (emit) {
       emit("session_started", { fellowKey: fellow.key, engine: agentEngine });
     }
-    const slashText = isSlashCommandText(messages);
+    const slashText = allowSlashCommands ? isSlashCommandText(messages) : "";
     const response = await sendWithChatEngineAdapter(createActiveChatEngineAdapters(), {
       chatEngine,
       fellow,

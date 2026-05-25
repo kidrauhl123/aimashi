@@ -1,5 +1,5 @@
 // Renderer-side group-room feature: group message rendering, @mention send,
-// fellow invocation handler, and the create-group dialog.
+// and the create-group dialog.
 // Loaded by <script src="./social/social-groups.js"> AFTER social.js.
 // Uses window.aimashiSocial._internalCtx to share state.
 
@@ -7,10 +7,6 @@
   const { MemberKind } = (typeof window !== "undefined" && window.aimashiConversationKinds) || require("../../shared/conversation-kinds");
 
   let ctx = null; // set by attach()
-
-  // H1: dedup set to prevent double-invocation on repeated WS events
-  const _processedInvocations = new Set();
-  const PROCESSED_INVOCATIONS_CAP = 256;
 
   function attach(internalCtx) {
     ctx = internalCtx;
@@ -168,77 +164,6 @@
       }, 500);
     } catch (err) {
       console.warn("[social-groups] sendInActiveGroupRoom error:", err);
-    }
-  }
-
-  // ── handleFellowInvocation ────────────────────────────────────────────────
-
-  async function handleFellowInvocation(payload) {
-    // H1: dedup by triggeringMessage.id to prevent double AI invocation on repeated WS events
-    const triggerId = payload && payload.triggeringMessage && payload.triggeringMessage.id;
-    if (!triggerId) return;
-    if (_processedInvocations.has(triggerId)) return;
-    _processedInvocations.add(triggerId);
-    // Cap the set so it doesn't grow unboundedly
-    if (_processedInvocations.size > PROCESSED_INVOCATIONS_CAP) {
-      const first = _processedInvocations.values().next().value;
-      _processedInvocations.delete(first);
-    }
-
-    const { deps } = ctx;
-    const { roomId, fellowId, invokedBy, triggeringMessage, recentMessages } = payload || {};
-    if (!roomId || !fellowId) return;
-
-    const state = deps ? deps.getState() : {};
-    const fellow = (state.runtime?.fellows || state.runtime?.personas || []).find(
-      (f) => (f.key || f.id) === fellowId
-    );
-    if (!fellow) {
-      console.warn("[social-groups] fellow_invocation_requested for unknown fellow:", fellowId);
-      return;
-    }
-
-    // Build context lines from the cloud-room adapter's MessageSpec output
-    // instead of inspecting raw cloud schema fields here.
-    const members = ctx.roomMembersCache.get(roomId) || [];
-    const ctxSource = _cloudRoomSourceFor(roomId, recentMessages || [], members);
-    const specs = ctxSource ? ctxSource.listMessages() : [];
-    const contextLines = specs.map((s) => {
-      const tag = s.role === "assistant"
-        ? `fellow:${s.authorName}`
-        : (s.role === "system" ? "system" : `user:${s.authorName}`);
-      return `[${tag}] ${s.bodyMd}`;
-    }).join("\n");
-
-    const invokerName = (invokedBy && (invokedBy.username || invokedBy.account || invokedBy.id)) || "someone";
-    const systemPrompt = `你是 ${fellow.name || fellowId}，正在一个跨用户群聊里。最近的消息上下文：\n${contextLines}\n\n刚刚 ${invokerName} 在群里 @ 了你。请用自然的口吻接话，简短直接。`;
-    const userPrompt = (triggeringMessage && triggeringMessage.body_md) || "";
-
-    let responseText;
-    try {
-      const result = await window.aimashi.sendChatStateless({
-        fellowKey: fellowId,
-        systemPrompt,
-        userPrompt
-      });
-      responseText = (result && typeof result.content === "string" ? result.content : "").trim();
-    } catch (err) {
-      console.warn("[social-groups] fellow invocation engine call failed:", err?.message || err);
-      return;
-    }
-    if (!responseText) return;
-
-    try {
-      const postRes = await window.aimashi.social.postRoomMessageAsFellow(roomId, {
-        fellowId,
-        bodyMd: responseText,
-        turnId: (triggeringMessage && triggeringMessage.turn_id) || null
-      });
-      if (!postRes.ok) {
-        console.warn("[social-groups] post-as-fellow failed:", postRes.error);
-      }
-    } catch (err) {
-      console.warn("[social-groups] post-as-fellow error:", err?.message || err);
     }
   }
 
@@ -417,7 +342,6 @@
     buildGroupMessageArticle,
     fetchAndCacheRoomMembers,
     sendInActiveGroupRoom,
-    handleFellowInvocation,
     openCreateGroupDialog
   };
 

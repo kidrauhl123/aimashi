@@ -46,7 +46,8 @@ test("respond runs the local engine and posts the reply as the fellow", async ()
       { role: "user", content: "hi" }
     ],
     group: true,
-    utility: true
+    utility: true,
+    allowSlashCommands: false
   });
   assert.deepEqual(calls.post, [{
     roomId: "g_1",
@@ -92,6 +93,30 @@ test("respond dedups by dedupKey", async () => {
 
   assert.equal(calls.engine.length, 1);
   assert.equal(calls.post.length, 1);
+});
+
+test("respond retries after post failure and dedups after post success", async () => {
+  const calls = { engine: [], post: [], log: [] };
+  const responder = createLocalFellowResponder({
+    sendChat: async (args) => {
+      calls.engine.push(args);
+      return { choices: [{ message: { content: "retry reply" } }] };
+    },
+    postRoomMessageAsFellow: async () => {
+      calls.post.push({});
+      if (calls.post.length === 1) return { ok: false, error: "temporary" };
+      return { ok: true };
+    },
+    log: (line) => calls.log.push(line)
+  });
+
+  await responder.respond(base);
+  await responder.respond(base);
+  await responder.respond(base);
+
+  assert.equal(calls.engine.length, 2);
+  assert.equal(calls.post.length, 2);
+  assert.equal(calls.log.some((line) => line.includes("temporary")), true);
 });
 
 test("respond skips empty replies and incomplete invocations", async () => {

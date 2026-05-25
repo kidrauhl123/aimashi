@@ -59,9 +59,10 @@ function responseModeFor(room) {
   return room?.decorations?.responseMode === "mentions-only" ? "mentions-only" : "conductor";
 }
 
-function hostFellowIdFor(room, ownFellowMembers) {
+function hostFellowIdFor(room, ownFellowMembers, fellowMembers = []) {
   const explicit = room?.decorations?.hostMember || room?.hostMember;
   if (explicit && explicit.kind === MemberKind.Fellow && explicit.fellowId) return explicit.fellowId;
+  if (fellowMembers.some((member) => !ownFellowMembers.includes(member))) return null;
   return ownFellowMembers[0]?.member_ref || null;
 }
 
@@ -197,11 +198,9 @@ function createMainGroupConductor({
     const ownFellowMembers = fellowMembers.filter((member) => member.owner_id === userId);
     if (!ownFellowMembers.length) return;
 
-    const hostFellowId = hostFellowIdFor(room, ownFellowMembers);
+    const hostFellowId = hostFellowIdFor(room, ownFellowMembers, fellowMembers);
     const hostMember = fellowMembers.find((member) => member.member_ref === hostFellowId);
     if (!hostMember || hostMember.owner_id !== userId) return;
-
-    markProcessed(message.id);
 
     const fellowList = listFellows();
     const fellows = Array.isArray(fellowList) ? fellowList : [];
@@ -226,7 +225,10 @@ function createMainGroupConductor({
           triggeringMessage: message,
           recentMessages
         }, fellows);
-        if (args) await responder.respond(args);
+        if (args) {
+          const didRespond = await responder.respond(args);
+          if (didRespond) markProcessed(message.id);
+        }
       }
     };
 
@@ -278,5 +280,6 @@ function createMainGroupConductor({
 module.exports = {
   createMainGroupConductor,
   buildDispatchPrompt,
+  hostFellowIdFor,
   messageHasMentions
 };

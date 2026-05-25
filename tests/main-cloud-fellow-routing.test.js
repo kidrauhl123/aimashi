@@ -11,21 +11,51 @@ function read(rel) {
 
 test("main routes cloud room AI events to main-process responders", () => {
   const main = read("src/main.js");
+  const routedSource = fs.existsSync(path.join(root, "src/main/cloud/cloud-events-client.js"))
+    ? `${main}\n${read("src/main/cloud/cloud-events-client.js")}`
+    : main;
 
   assert.match(main, /createLocalFellowResponder/);
   assert.match(main, /createMainGroupConductor/);
   assert.match(main, /createMainFellowRoomResponder/);
   assert.match(main, /sendChat,\s*\n\s*postRoomMessageAsFellow/s);
   assert.match(
-    main,
+    routedSource,
     /message\.type === CloudEvent\.RoomFellowInvocationRequested[\s\S]*localFellowResponder\.respond/
   );
   assert.match(
-    main,
+    routedSource,
     /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainGroupConductor\.handleRoomMessageAppended/
   );
   assert.match(
-    main,
+    routedSource,
     /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainFellowRoomResponder\.handleRoomMessageAppended/
+  );
+});
+
+test("renderer no longer executes local fellow replies for cloud room events", () => {
+  const social = read("src/renderer/social/social.js");
+  const groups = read("src/renderer/social/social-groups.js");
+  const html = read("src/renderer/index.html");
+
+  assert.equal(
+    /window\.aimashiGroupConductor\.handleRoomMessageAppended/.test(social),
+    false,
+    "renderer must not run conductor dispatch from room.message_appended"
+  );
+  assert.equal(
+    /handleFellowInvocation\(payload\)/.test(social),
+    false,
+    "renderer must not run explicit @ fellow invocation from cloud events"
+  );
+  assert.equal(
+    /group-conductor\.js/.test(html),
+    false,
+    "renderer must not load the old conductor script after main owns conductor execution"
+  );
+  assert.equal(
+    /sendChatStateless|postRoomMessageAsFellow|handleFellowInvocation/.test(groups),
+    false,
+    "renderer social-groups must not retain local engine invocation code"
   );
 });

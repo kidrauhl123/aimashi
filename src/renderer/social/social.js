@@ -607,15 +607,6 @@
       _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
 
-      // Conductor: non-@ user messages in a conductor-mode group route
-      // through dispatch.md to pick a fellow that should reply. The
-      // handler self-gates on (group room, conductor mode, host fellow
-      // owned by us), so it's safe to call for every appended message.
-      if (window.aimashiGroupConductor) {
-        window.aimashiGroupConductor.handleRoomMessageAppended(payload).catch?.((err) => {
-          console.warn("[social] conductor handler failed:", err?.message || err);
-        });
-      }
       return;
     }
 
@@ -677,9 +668,8 @@
     }
 
     if (type === "room.fellow_invocation_requested") {
-      handleFellowInvocation(payload).catch((err) => {
-        console.warn("[social] handleFellowInvocation error:", err?.message || err);
-      });
+      // Main process owns local fellow execution. The renderer only observes
+      // this event so foreground and daemon processes cannot both reply.
       return;
     }
   }
@@ -1052,10 +1042,6 @@
 
   async function sendInActiveGroupRoom(text) {
     return window.aimashiSocialGroups?.sendInActiveGroupRoom(text);
-  }
-
-  async function handleFellowInvocation(payload) {
-    return window.aimashiSocialGroups?.handleFellowInvocation(payload);
   }
 
   function openCreateGroupDialog() {

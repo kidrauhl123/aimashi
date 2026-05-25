@@ -25,7 +25,10 @@ function setup(overrides = {}) {
       ];
     },
     responder: {
-      respond: async (args) => calls.respond.push(args)
+      respond: async (args) => {
+        calls.respond.push(args);
+        return true;
+      }
     },
     log: (line) => calls.log.push(line),
     ...overrides
@@ -49,6 +52,23 @@ test("handles user messages in owned fellow rooms", async () => {
   assert.equal(calls.respond[0].dedupKey, "m_1:alice");
   assert.equal(calls.respond[0].userPrompt, "你好");
   assert.match(calls.respond[0].systemPrompt, /前文/);
+});
+
+test("falls back to stable fellow room id suffix when details omit fellow metadata", async () => {
+  const { responder, calls } = setup({
+    getRoomDetails: async () => ({
+      room: { id: "fellow:u_1:alice", type: "fellow" },
+      members: []
+    })
+  });
+
+  await responder.handleRoomMessageAppended({
+    roomId: "fellow:u_1:alice",
+    message: { id: "m_1", seq: 2, sender_kind: "user", sender_ref: "u_1", body_md: "你好" }
+  });
+
+  assert.equal(calls.respond.length, 1);
+  assert.equal(calls.respond[0].fellowId, "alice");
 });
 
 test("ignores non-user messages and unowned fellow rooms", async () => {
@@ -86,4 +106,44 @@ test("dedups repeated message events", async () => {
   await responder.handleRoomMessageAppended(payload);
 
   assert.equal(calls.respond.length, 1);
+});
+
+test("retries repeated message events until responder succeeds", async () => {
+  const { responder, calls } = setup({
+    responder: {
+      respond: async (args) => {
+        calls.respond.push(args);
+        return calls.respond.length > 1;
+      }
+    }
+  });
+  const payload = {
+    roomId: "fellow:u_1:alice",
+    message: { id: "m_1", seq: 2, sender_kind: "user", sender_ref: "u_1", body_md: "你好" }
+  };
+
+  await responder.handleRoomMessageAppended(payload);
+  await responder.handleRoomMessageAppended(payload);
+  await responder.handleRoomMessageAppended(payload);
+
+  assert.equal(calls.respond.length, 2);
+});
+
+test("skips cloud runtime fellow rooms", async () => {
+  const { responder, calls } = setup({
+    getRoomDetails: async () => ({
+      room: { id: "fellow:u_1:alice", type: "fellow", decorations: { fellowKey: "alice", runtimeKind: "cloud-hermes" } },
+      members: [
+        { member_kind: "user", member_ref: "u_1" },
+        { member_kind: "fellow", member_ref: "alice", owner_id: "u_1" }
+      ]
+    })
+  });
+
+  await responder.handleRoomMessageAppended({
+    roomId: "fellow:u_1:alice",
+    message: { id: "m_1", seq: 2, sender_kind: "user", sender_ref: "u_1", body_md: "你好" }
+  });
+
+  assert.equal(calls.respond.length, 0);
 });

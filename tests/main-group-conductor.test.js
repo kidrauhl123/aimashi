@@ -29,7 +29,10 @@ function setup(overrides = {}) {
         room: {
           id: roomId,
           type: "group",
-          decorations: { responseMode: "conductor" },
+          decorations: {
+            responseMode: "conductor",
+            hostMember: { kind: "fellow", fellowId: "codex" }
+          },
           contextCard: { summary: "ship the feature" }
         },
         members
@@ -47,7 +50,10 @@ function setup(overrides = {}) {
       return { content: JSON.stringify({ speak: ["codex", "remote", "missing"] }) };
     },
     responder: {
-      respond: async (args) => calls.respond.push(args)
+      respond: async (args) => {
+        calls.respond.push(args);
+        return true;
+      }
     },
     log: (line) => calls.log.push(line),
     ...overrides
@@ -124,6 +130,27 @@ test("handleRoomMessageAppended skips when the conductor host fellow is remote-o
           responseMode: "conductor",
           hostMember: { kind: "fellow", fellowId: "remote" }
         }
+      },
+      members: [
+        { member_kind: "fellow", member_ref: "codex", owner_id: "u_me", fellow_name: "Codex" },
+        { member_kind: "fellow", member_ref: "remote", owner_id: "u_remote", fellow_name: "Remote" }
+      ]
+    })
+  });
+
+  await conductor.handleRoomMessageAppended({ roomId: "g_1", message: userMessage });
+
+  assert.equal(calls.dispatch.length, 0);
+  assert.equal(calls.respond.length, 0);
+});
+
+test("handleRoomMessageAppended requires explicit host when multiple owners have fellows", async () => {
+  const { conductor, calls } = setup({
+    getRoomDetails: async (roomId) => ({
+      room: {
+        id: roomId,
+        type: "group",
+        decorations: { responseMode: "conductor" }
       },
       members: [
         { member_kind: "fellow", member_ref: "codex", owner_id: "u_me", fellow_name: "Codex" },
