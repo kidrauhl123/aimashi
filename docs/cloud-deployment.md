@@ -74,6 +74,7 @@ RestartSec=3
 Environment=AIMASHI_CLOUD_HOST=127.0.0.1
 Environment=AIMASHI_CLOUD_PORT=4175
 Environment=AIMASHI_CLOUD_DATA=/var/lib/aimashi-cloud
+Environment=AIMASHI_WEB_ROOT=/var/www/aimashi-web
 Environment=AIMASHI_CLOUD_ALLOWED_ORIGINS=https://aiweb.buytb01.com
 Environment=AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 Environment=AIMASHI_CLOUD_VERSION=2026-05-20
