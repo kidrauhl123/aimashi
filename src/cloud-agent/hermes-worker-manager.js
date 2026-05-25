@@ -28,7 +28,7 @@ function assertSafeUserId(userId) {
 }
 
 function createHermesWorkerManager(options = {}) {
-  const rootDir = path.resolve(options.rootDir || process.env.AIMASHI_CLOUD_AGENT_ROOT || "/opt/aimashi-cloud/agent-users");
+  const rootDir = path.resolve(options.rootDir || process.env.AIMASHI_CLOUD_AGENT_ROOT || "/var/lib/aimashi-cloud-agent-users");
   const mode = options.mode || process.env.AIMASHI_CLOUD_AGENT_MODE || "disabled";
   const staticBaseUrl = options.staticBaseUrl || process.env.AIMASHI_CLOUD_HERMES_BASE_URL || "";
   const apiKey = options.apiKey || process.env.AIMASHI_CLOUD_HERMES_API_KEY || "aimashi-cloud";

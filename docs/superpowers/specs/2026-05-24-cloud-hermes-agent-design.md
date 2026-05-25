@@ -63,7 +63,7 @@ CREATE INDEX idx_fellow_runtime_bindings_user
 本期采用“每用户 Hermes worker 容器”的隔离模型：
 
 ```text
-/opt/aimashi-cloud/agent-users/<userId>/
+/var/lib/aimashi-cloud-agent-users/<userId>/
   hermes-home/
   home/
   workspace/
@@ -195,7 +195,7 @@ src/cloud-agent/
 运行前，`attachment-materializer` 将该用户本次消息可见的附件复制或硬链接到：
 
 ```text
-/opt/aimashi-cloud/agent-users/<userId>/attachments/<fileId>/
+/var/lib/aimashi-cloud-agent-users/<userId>/attachments/<fileId>/
 ```
 
 容器内看到的是：
@@ -212,7 +212,7 @@ Hermes 在 `/data/workspace` 或 `/data/attachments` 生成的可交付文件，
 
 ### 7.3 目录与权限
 
-用户容器只挂载自己的 `/opt/aimashi-cloud/agent-users/<userId>` 子树。即使 Hermes 终端执行 `ls /`、`find /data` 或脚本读写，也只能看到容器内命名空间和该用户目录。服务器宿主文件、其他用户目录、cloud sqlite、全局 uploads 目录都不进入容器挂载。
+用户容器只挂载自己的 `/var/lib/aimashi-cloud-agent-users/<userId>` 子树。即使 Hermes 终端执行 `ls /`、`find /data` 或脚本读写，也只能看到容器内命名空间和该用户目录。服务器宿主文件、其他用户目录、cloud sqlite、全局 uploads 目录都不进入容器挂载。
 
 ## 8. 运行状态、并发与恢复
 
