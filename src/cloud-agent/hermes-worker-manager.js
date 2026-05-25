@@ -43,6 +43,9 @@ function createHermesWorkerManager(options = {}) {
   const modelApiMode = String(options.modelApiMode || process.env.AIMASHI_CLOUD_AGENT_MODEL_API_MODE || "chat_completions").trim();
   const modelApiKey = String(options.modelApiKey || process.env[MODEL_API_KEY_ENV] || process.env.AIMASHI_LITELLM_API_KEY || "").trim();
   const modelProviderName = String(options.modelProviderName || process.env.AIMASHI_CLOUD_AGENT_MODEL_PROVIDER_NAME || "Aimashi LiteLLM").trim();
+  const fetchImpl = options.fetch || fetch;
+  const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const healthTimeoutMs = Number(options.healthTimeoutMs ?? process.env.AIMASHI_CLOUD_HERMES_START_TIMEOUT_MS ?? 45000);
 
   function pathsForUser(userId) {
     const id = assertSafeUserId(userId);
@@ -84,7 +87,7 @@ function createHermesWorkerManager(options = {}) {
       "platforms:",
       "  api_server:",
       "    enabled: true",
-      "    host: 127.0.0.1",
+      "    host: 0.0.0.0",
       `    port: ${containerPort}`,
       `    key: ${apiKey}`,
       "  feishu:",
@@ -160,6 +163,25 @@ function createHermesWorkerManager(options = {}) {
     return Number(match[1]);
   }
 
+  async function waitForHealth(baseUrl) {
+    if (!Number.isFinite(healthTimeoutMs) || healthTimeoutMs <= 0) return;
+    const started = Date.now();
+    let lastError = null;
+    while (Date.now() - started < healthTimeoutMs) {
+      try {
+        const response = await fetchImpl(`${baseUrl}/health`, {
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}
+        });
+        if (response.ok) return;
+        lastError = new Error(`health returned HTTP ${response.status}`);
+      } catch (error) {
+        lastError = error;
+      }
+      await sleep(500);
+    }
+    throw new Error(`Timed out waiting for cloud Hermes worker at ${baseUrl}: ${lastError?.message || "not ready"}`);
+  }
+
   async function ensureDockerWorker(paths) {
     if (!image) throw new Error("AIMASHI_CLOUD_HERMES_IMAGE is required for docker cloud Hermes workers.");
     const name = containerName(paths.userId);
@@ -189,9 +211,11 @@ function createHermesWorkerManager(options = {}) {
       ]);
     }
     const port = await dockerPort(name);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl);
     return {
       userId: paths.userId,
-      baseUrl: `http://127.0.0.1:${port}`,
+      baseUrl,
       apiKey,
       paths,
       env: envForUser(paths.userId),

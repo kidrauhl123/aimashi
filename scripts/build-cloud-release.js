@@ -9,7 +9,9 @@ const root = path.resolve(__dirname, "..");
 const distDir = path.join(root, "dist", "aimashi-cloud-release");
 const apiDir = path.join(distDir, "api");
 const webDir = path.join(distDir, "web");
+const hermesImageDir = path.join(distDir, "hermes-image");
 const rootPackage = require("../package.json");
+const { pluginFiles } = require("../src/main/engine-plugins-service.js");
 
 function copyFile(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -110,6 +112,24 @@ function writeReleaseManifest() {
   });
 }
 
+function writeHermesImageContext() {
+  copyFile("cloud/hermes-image/Dockerfile", path.join(hermesImageDir, "Dockerfile"));
+  copyFile("cloud/hermes-image/entrypoint.sh", path.join(hermesImageDir, "entrypoint.sh"));
+
+  const pluginDir = path.join(hermesImageDir, "aimashi_plugins");
+  fs.mkdirSync(pluginDir, { recursive: true });
+  for (const [fileName, content] of Object.entries(pluginFiles())) {
+    fs.writeFileSync(path.join(pluginDir, fileName), content);
+  }
+
+  const dockerfile = path.join(hermesImageDir, "Dockerfile");
+  const source = fs.readFileSync(dockerfile, "utf8");
+  fs.writeFileSync(
+    dockerfile,
+    source.replace(/ARG HERMES_VERSION=.*/, `ARG HERMES_VERSION=${rootPackage.hermes?.version || "2026.5.7"}`)
+  );
+}
+
 function writeReleaseReadme() {
   fs.writeFileSync(path.join(distDir, "README.md"), `# Aimashi Cloud Release
 
@@ -134,7 +154,7 @@ If this archive has already been extracted and the original tarball is not in th
 
 ## Platform Model Gateway
 
-Cloud Hermes workers use the platform model supplied through LiteLLM Proxy. Configure provider keys from the Aimashi admin page at \`/admin/model\`; it writes the \`aimashi-default\` model alias into LiteLLM over the private admin API. The service still needs \`AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http://litellm:4000/v1\`, \`AIMASHI_CLOUD_AGENT_MODEL=aimashi-default\`, \`AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>\`, \`LITELLM_MASTER_KEY=<LiteLLM admin key>\`, and \`AIMASHI_CLOUD_ADMIN_USERNAME/PASSWORD\` in systemd or \`/etc/aimashi-cloud/admin.env\`. Do not expose the LiteLLM UI directly on the public internet.
+Cloud Hermes workers use the platform model supplied through LiteLLM Proxy. Configure provider keys from the Aimashi admin page at \`/admin/model\`; it writes the \`aimashi-default\` model alias into LiteLLM over the private admin API. The release includes a \`hermes-image/\` Docker build context and the installer builds \`AIMASHI_CLOUD_HERMES_IMAGE\` on the VPS, so worker startup does not depend on pulling a private external image. The service still needs \`AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http://litellm:4000/v1\`, \`AIMASHI_CLOUD_AGENT_MODEL=aimashi-default\`, \`AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>\`, \`LITELLM_MASTER_KEY=<LiteLLM admin key>\`, and \`AIMASHI_CLOUD_ADMIN_USERNAME/PASSWORD\` in systemd or \`/etc/aimashi-cloud/admin.env\`. Do not expose the LiteLLM UI directly on the public internet.
 
 ## Install On The VPS
 
@@ -315,6 +335,11 @@ function verifyRelease() {
     "diagnose-deploy-ssh.js",
     "install-cloud-release-local.sh",
     "cloud-deployment.md",
+    "hermes-image/Dockerfile",
+    "hermes-image/entrypoint.sh",
+    "hermes-image/aimashi_plugins/__init__.py",
+    "hermes-image/aimashi_plugins/__main__.py",
+    "hermes-image/aimashi_plugins/fellow_overlay.py",
     "nginx/aimashi-websocket-map.conf",
     "nginx/aimashi-cloud-site.conf",
     "manifest.json"
@@ -349,6 +374,9 @@ function verifyRelease() {
     });
   }
   childProcess.execFileSync("bash", ["-n", assertFile("install-cloud-release-local.sh")], {
+    stdio: "inherit"
+  });
+  childProcess.execFileSync("bash", ["-n", assertFile("hermes-image/entrypoint.sh")], {
     stdio: "inherit"
   });
 
@@ -433,6 +461,7 @@ function verifyRelease() {
     !/LiteLLM Proxy/.test(releaseReadme) ||
     !/AIMASHI_CLOUD_AGENT_MODEL_BASE_URL=http:\/\/litellm:4000\/v1/.test(releaseReadme) ||
     !/AIMASHI_CLOUD_AGENT_MODEL_API_KEY=<LiteLLM virtual key>/.test(releaseReadme) ||
+    !/hermes-image\/` Docker build context/.test(releaseReadme) ||
     !/\/admin\/model/.test(releaseReadme) ||
     !/Do not expose the LiteLLM UI directly/.test(releaseReadme)
   ) {
@@ -501,6 +530,7 @@ function main() {
   copyFile("scripts/diagnose-deploy-ssh.js", path.join(distDir, "diagnose-deploy-ssh.js"));
   copyFile("scripts/install-cloud-release-local.sh", path.join(distDir, "install-cloud-release-local.sh"));
   copyFile("docs/cloud-deployment.md", path.join(distDir, "cloud-deployment.md"));
+  writeHermesImageContext();
   writeReleaseReadme();
   writeNginxConfigs();
 

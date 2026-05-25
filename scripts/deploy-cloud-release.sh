@@ -10,7 +10,7 @@ API_DIR="${AIMASHI_DEPLOY_API_DIR:-/opt/aimashi-cloud}"
 WEB_DIR="${AIMASHI_DEPLOY_WEB_DIR:-/var/www/aimashi-web}"
 DATA_DIR="${AIMASHI_DEPLOY_DATA_DIR:-/var/lib/aimashi-cloud}"
 AGENT_ROOT="${AIMASHI_CLOUD_AGENT_ROOT:-/var/lib/aimashi-cloud-agent-users}"
-HERMES_IMAGE="${AIMASHI_CLOUD_HERMES_IMAGE:-aimashi/hermes-cloud:2026-05-24}"
+HERMES_IMAGE="${AIMASHI_CLOUD_HERMES_IMAGE:-aimashi/hermes-cloud:2026.5.7}"
 AGENT_DOCKER_NETWORK="${AIMASHI_CLOUD_AGENT_DOCKER_NETWORK:-aimashi-cloud}"
 AGENT_MODEL_PROVIDER="${AIMASHI_CLOUD_AGENT_MODEL_PROVIDER:-aimashi-litellm}"
 AGENT_MODEL_NAME="${AIMASHI_CLOUD_AGENT_MODEL:-aimashi-default}"
@@ -321,6 +321,10 @@ if [ -f "$NGINX_SITE_CONF" ]; then
 fi
 
 run_as_root mkdir -p "$API_DIR" "$WEB_DIR" "$DATA_DIR" "$AGENT_ROOT"
+if [ -f "$REMOTE_RELEASE_DIR/hermes-image/Dockerfile" ]; then
+  echo "Building cloud Hermes worker image: $HERMES_IMAGE"
+  run_as_root docker build -t "$HERMES_IMAGE" "$REMOTE_RELEASE_DIR/hermes-image"
+fi
 run_as_root rsync -a --delete "$REMOTE_RELEASE_DIR/api/" "$API_DIR/"
 run_as_root cp "$REMOTE_RELEASE_DIR/manifest.json" "$API_DIR/release-manifest.json"
 run_as_root rsync -a --delete "$REMOTE_RELEASE_DIR/web/" "$WEB_DIR/"

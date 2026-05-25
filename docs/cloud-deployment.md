@@ -21,7 +21,7 @@ AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 AIMASHI_CLOUD_VERSION=2026-05-20
 AIMASHI_CLOUD_AGENT_MODE=docker
 AIMASHI_CLOUD_AGENT_ROOT=/var/lib/aimashi-cloud-agent-users
-AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026-05-24
+AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026.5.7
 AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
 AIMASHI_CLOUD_AGENT_DOCKER_NETWORK=aimashi-cloud
 AIMASHI_CLOUD_AGENT_MODEL_PROVIDER=aimashi-litellm
@@ -36,7 +36,7 @@ LITELLM_MASTER_KEY=<LiteLLM admin key>
 
 `AIMASHI_CLOUD_ALLOWED_ORIGINS` is required in production. Without it, WebSocket upgrades are limited to same-host/local origins only.
 `AIMASHI_CLOUD_PORT` takes precedence over the generic `PORT`; if `AIMASHI_CLOUD_PORT` is unset, the server honors `PORT` for platform-style deployments.
-`AIMASHI_CLOUD_AGENT_MODE=docker` enables the cloud-backed Hermes Fellow runtime. The service creates one worker container per user, mounts only `/var/lib/aimashi-cloud-agent-users/<userId>` at `/data`, binds the Hermes API to `127.0.0.1` on a random host port, and passes `HERMES_HOME=/data/hermes-home`, `HOME=/data/home`, `TERMINAL_CWD=/data/workspace`, and `HERMES_WRITE_SAFE_ROOT=/data/workspace` into the container. The worker container must not mount `/var/lib/aimashi-cloud`, global uploads, other users' agent directories, or `/var/run/docker.sock`.
+`AIMASHI_CLOUD_AGENT_MODE=docker` enables the cloud-backed Hermes Fellow runtime. The release includes `hermes-image/`, and the installer builds `AIMASHI_CLOUD_HERMES_IMAGE` locally on the VPS so the runtime does not depend on pulling a private image. The service creates one worker container per user, mounts only `/var/lib/aimashi-cloud-agent-users/<userId>` at `/data`, binds the Hermes API to `127.0.0.1` on a random host port, and passes `HERMES_HOME=/data/hermes-home`, `HOME=/data/home`, `TERMINAL_CWD=/data/workspace`, and `HERMES_WRITE_SAFE_ROOT=/data/workspace` into the container. The worker container must not mount `/var/lib/aimashi-cloud`, global uploads, other users' agent directories, or `/var/run/docker.sock`.
 `AIMASHI_CLOUD_AGENT_MODEL_*` configures the platform-supplied model for every user's cloud Hermes worker. The worker manager writes each user's private `hermes-home/config.yaml` with a custom provider named `aimashi-litellm`, pointing to the LiteLLM Proxy OpenAI-compatible endpoint. Store provider keys inside LiteLLM and give Aimashi only a limited LiteLLM virtual key, not raw OpenAI/Anthropic/other provider keys.
 
 ## LiteLLM Model Gateway
@@ -80,7 +80,7 @@ Environment=AIMASHI_BRIDGE_RUN_TIMEOUT_MS=300000
 Environment=AIMASHI_CLOUD_VERSION=2026-05-20
 Environment=AIMASHI_CLOUD_AGENT_MODE=docker
 Environment=AIMASHI_CLOUD_AGENT_ROOT=/var/lib/aimashi-cloud-agent-users
-Environment=AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026-05-24
+Environment=AIMASHI_CLOUD_HERMES_IMAGE=aimashi/hermes-cloud:2026.5.7
 Environment=AIMASHI_CLOUD_HERMES_CONTAINER_PORT=8765
 Environment=AIMASHI_CLOUD_AGENT_DOCKER_NETWORK=aimashi-cloud
 Environment=AIMASHI_CLOUD_AGENT_MODEL_PROVIDER=aimashi-litellm

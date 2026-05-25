@@ -53,6 +53,7 @@ test("worker manager writes platform LiteLLM config per user", () => {
   assert.match(config, /provider: "aimashi-litellm"/);
   assert.match(config, /default: "aimashi-default"/);
   assert.match(config, /base_url: "http:\/\/litellm:4000\/v1"/);
+  assert.match(config, /host: 0\.0\.0\.0/);
   assert.match(config, /key_env: "AIMASHI_CLOUD_AGENT_MODEL_API_KEY"/);
   assert.match(config, /key: worker-api-key/);
   assert.doesNotMatch(config, /sk-litellm/);
@@ -144,6 +145,7 @@ test("docker worker mode starts one isolated container per user", async () => {
     image: "aimashi/hermes-cloud:test",
     dockerNetwork: "aimashi-cloud",
     modelApiKey: "sk-litellm",
+    healthTimeoutMs: 0,
     execFile: fakeExecFile
   });
 
