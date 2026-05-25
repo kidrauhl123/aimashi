@@ -63,7 +63,16 @@ function createHermesWorkerManager(options = {}) {
 
   function envForUser(userId) {
     assertSafeUserId(userId);
-    const env = { ...CONTAINER_ENV };
+    const env = {
+      ...CONTAINER_ENV,
+      HERMES_ACCEPT_HOOKS: "1",
+      GATEWAY_ALLOW_ALL_USERS: "true",
+      PYTHONUNBUFFERED: "1",
+      API_SERVER_ENABLED: "true",
+      API_SERVER_HOST: "0.0.0.0",
+      API_SERVER_PORT: String(containerPort),
+      API_SERVER_KEY: apiKey
+    };
     if (modelApiKey) env[MODEL_API_KEY_ENV] = modelApiKey;
     return env;
   }
@@ -206,6 +215,13 @@ function createHermesWorkerManager(options = {}) {
         "--env", `HOME=${env.HOME}`,
         "--env", `TERMINAL_CWD=${env.TERMINAL_CWD}`,
         "--env", `HERMES_WRITE_SAFE_ROOT=${env.HERMES_WRITE_SAFE_ROOT}`,
+        "--env", `HERMES_ACCEPT_HOOKS=${env.HERMES_ACCEPT_HOOKS}`,
+        "--env", `GATEWAY_ALLOW_ALL_USERS=${env.GATEWAY_ALLOW_ALL_USERS}`,
+        "--env", `PYTHONUNBUFFERED=${env.PYTHONUNBUFFERED}`,
+        "--env", `API_SERVER_ENABLED=${env.API_SERVER_ENABLED}`,
+        "--env", `API_SERVER_HOST=${env.API_SERVER_HOST}`,
+        "--env", `API_SERVER_PORT=${env.API_SERVER_PORT}`,
+        "--env", `API_SERVER_KEY=${env.API_SERVER_KEY}`,
         ...(env[MODEL_API_KEY_ENV] ? ["--env", `${MODEL_API_KEY_ENV}=${env[MODEL_API_KEY_ENV]}`] : []),
         image
       ]);

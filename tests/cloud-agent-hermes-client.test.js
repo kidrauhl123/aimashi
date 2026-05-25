@@ -21,7 +21,14 @@ test("worker manager derives separate roots and env per user", () => {
     HERMES_HOME: "/data/hermes-home",
     HOME: "/data/home",
     TERMINAL_CWD: "/data/workspace",
-    HERMES_WRITE_SAFE_ROOT: "/data/workspace"
+    HERMES_WRITE_SAFE_ROOT: "/data/workspace",
+    HERMES_ACCEPT_HOOKS: "1",
+    GATEWAY_ALLOW_ALL_USERS: "true",
+    PYTHONUNBUFFERED: "1",
+    API_SERVER_ENABLED: "true",
+    API_SERVER_HOST: "0.0.0.0",
+    API_SERVER_PORT: "8765",
+    API_SERVER_KEY: "aimashi-cloud"
   });
 });
 
@@ -164,6 +171,10 @@ test("docker worker mode starts one isolated container per user", async () => {
   assert.ok(runCall.args.includes("HOME=/data/home"));
   assert.ok(runCall.args.includes("TERMINAL_CWD=/data/workspace"));
   assert.ok(runCall.args.includes("HERMES_WRITE_SAFE_ROOT=/data/workspace"));
+  assert.ok(runCall.args.includes("API_SERVER_ENABLED=true"));
+  assert.ok(runCall.args.includes("API_SERVER_HOST=0.0.0.0"));
+  assert.ok(runCall.args.includes("API_SERVER_PORT=8765"));
+  assert.ok(runCall.args.includes("API_SERVER_KEY=aimashi-cloud"));
   assert.ok(runCall.args.includes("AIMASHI_CLOUD_AGENT_MODEL_API_KEY=sk-litellm"));
   assert.equal(runCall.args.some((arg) => String(arg).includes("docker.sock")), false);
 });
