@@ -52,6 +52,7 @@ const { createTasksRoutes } = require("./main/tasks-routes.js");
 const { createSchedulerMcp } = require("./main/scheduler-mcp.js");
 const { createSocialApi } = require("./main/social/social-api.js");
 const { registerSocialIpc } = require("./main/social/social-ipc.js");
+const { createCloudDesktopSyncClient } = require("./main/cloud/desktop-sync-client.js");
 const { registerWindowIpc } = require("./main/ipc/window-ipc.js");
 const { registerTasksIpc } = require("./main/ipc/tasks-ipc.js");
 // (cloud/desktop-sync helpers removed in Phase 4 cutover — fellow chats
@@ -242,6 +243,7 @@ let cloudBridgeClient = null;
 let cloudBridgeReconnectTimer = null;
 let cloudEventsClient = null;
 let cloudEventsReconnectTimer = null;
+let cloudDesktopSyncRuntime = null;
 const cloudBridgeAbortControllers = new Map();
 let cloudBridgeState = {
   connecting: false,
@@ -4510,244 +4512,41 @@ function cloudStatus(includeToken = false) {
   };
 }
 
-async function cloudApi(pathSegment, { method = "GET", body = null, token = "" } = {}) {
-  const settings = settingsStore.cloudSettings();
-  const baseUrl = settingsStore.normalizeCloudUrl(settings.url);
-  const headers = { "Content-Type": "application/json" };
-  const bearer = token || settings.token;
-  if (bearer) headers.Authorization = `Bearer ${bearer}`;
-  const response = await fetch(`${baseUrl}${pathSegment}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Aimashi Cloud ${response.status}`);
-  return data;
+function cloudDesktopSync() {
+  if (!cloudDesktopSyncRuntime) throw new Error("Cloud desktop sync runtime is not initialized.");
+  return cloudDesktopSyncRuntime;
 }
 
-// (buildCloudWorkspaceFromLocalSessions removed in Phase 4 cutover —
-//  fellow chat sync is now done by pushAllFellowSessionsToCloudRooms
-//  which writes directly into rooms+messages.)
-
-// Phase 2: mirror a local fellow's identity to /api/me/fellows so other
-// devices (web, fresh desktop install, etc.) see proper attribution on
-// chat history. Runtime engine config stays local. Best-effort — sync
-// failure logs and continues; next manual "同步" or fellow edit will
-// re-push.
-async function pushFellowToCloud(fellow) {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token || !fellow || !fellow.key) return;
-  try {
-    let personaText = "";
-    try {
-      if (typeof fellowPersonaPath === "function" && fs.existsSync(fellowPersonaPath(fellow.key))) {
-        personaText = readFellowPersona(fellow.key, fellow.name, fellow.bio);
-      }
-    } catch { /* persona read best-effort */ }
-    await cloudApi(`/api/me/fellows/${encodeURIComponent(fellow.key)}`, {
-      method: "PUT",
-      body: {
-        name: fellow.name,
-        color: fellow.color || "",
-        avatarImage: fellow.avatarImage || "",
-        avatarCrop: fellow.avatarCrop || null,
-        bio: fellow.bio || "",
-        capabilities: Object.keys(fellow.capabilities || {}).filter((k) => fellow.capabilities[k]),
-        personaText
-      }
-    });
-  } catch (error) {
-    appendCloudLog(`Cloud fellow push failed for ${fellow.key}: ${error?.message || error}`);
-  }
+function pushFellowToCloud(fellow) {
+  return cloudDesktopSync().pushFellow(fellow);
 }
 
-async function deleteFellowFromCloud(fellowKey) {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token || !fellowKey) return;
-  try {
-    await cloudApi(`/api/me/fellows/${encodeURIComponent(fellowKey)}`, { method: "DELETE" });
-  } catch (error) {
-    appendCloudLog(`Cloud fellow delete failed for ${fellowKey}: ${error?.message || error}`);
-  }
+function deleteFellowFromCloud(fellowKey) {
+  return cloudDesktopSync().deleteFellow(fellowKey);
 }
 
-async function pushAllFellowsToCloud() {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token) return;
-  const manifest = loadFellowManifest();
-  for (const fellow of (manifest.fellows || [])) {
-    await pushFellowToCloud(fellow);
-  }
+function syncAimashiCloudWorkspace() {
+  return cloudDesktopSync().syncWorkspace();
 }
 
-async function pushUserProfileToCloud() {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token) return;
-  // Profile lives at runtimePaths().userProfile as a JSON blob written by
-  // the profile:save IPC handler. Shape: { displayName, avatarText,
-  // avatarColor, avatarImage, avatarCrop }.
-  const p = runtimePaths();
-  const profile = readJson(p.userProfile, null);
-  if (!profile) return;
-  const body = {
-    avatarImage: String(profile.avatarImage || ""),
-    avatarCrop: profile.avatarCrop || null,
-    avatarColor: String(profile.avatarColor || "")
-  };
-  try {
-    const data = await cloudApi("/api/me/profile", { method: "PATCH", body });
-    if (data && data.user) {
-      settingsStore.writeCloudSettings({ user: data.user });
-    }
-  } catch (error) {
-    appendCloudLog(`Aimashi Cloud profile sync failed: ${error?.message || error}`);
-  }
+function pushDesktopMessageToCloud(payload = {}) {
+  return cloudDesktopSync().pushDesktopMessage(payload);
 }
 
-async function syncAimashiCloudWorkspace() {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token) return cloudStatus(false);
-  // 0. Profile avatar so friends see the right image.
-  await pushUserProfileToCloud();
-  // 1. Push fellow identities so other devices render proper attribution.
-  await pushAllFellowsToCloud();
-  // 2. Mirror every fellow chat session + message into the unified
-  //    rooms+messages model. Idempotent — runs on every sync, no-op
-  //    when all sessions are already mirrored.
-  await pushAllFellowSessionsToCloudRooms();
-  // 3. Refresh cloud account meta (avatar/username might have changed
-  //    on another device).
-  try {
-    const data = await cloudApi("/api/me");
-    settingsStore.writeCloudSettings({ user: data?.user || settings.user });
-  } catch (error) {
-    appendCloudLog(`Aimashi Cloud /api/me refresh failed: ${error?.message || error}`);
-  }
-  return cloudStatus(false);
+function loginAimashiCloud(payload = {}) {
+  return cloudDesktopSync().login(payload);
 }
 
-async function pushDesktopMessageToCloud({ session, message, fellowKey = "" } = {}) {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token || !session?.id || !message) return cloudStatus(false);
-  const fellow = loadFellowManifest().fellows.find((item) => item.key === fellowKey || item.id === fellowKey) || {};
-  // Phase 4 cutover: single push path — mirror into rooms+messages.
-  await mirrorFellowSessionToCloudRoom(session, fellow, message).catch((e) =>
-    appendCloudLog(`Cloud fellow-room push failed: ${e?.message || e}`)
-  );
-  return cloudStatus(false);
+function logoutAimashiCloud() {
+  return cloudDesktopSync().logout();
 }
 
-// Sync-time backfill: walk every fellow chat session and every message
-// inside it, ensure the cloud fellow-room exists, post every message
-// with stable clientOpId. Idempotent — safe to run on every sync.
-// Slow on first call (proportional to total local chat history) but
-// gives us a clean, complete cloud mirror.
-async function pushAllFellowSessionsToCloudRooms() {
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token || !settings.user?.id) return;
-  let store;
-  try { store = loadChatStore(); }
-  catch (e) { appendCloudLog(`Cloud fellow-room backfill: failed to read chat store (${e?.message || e})`); return; }
-  const manifest = loadFellowManifest();
-  const fellowByKey = new Map((manifest.fellows || []).map((f) => [f.key, f]));
-  for (const [personaKey, sessions] of Object.entries(store.sessions || {})) {
-    if (!Array.isArray(sessions)) continue;
-    const fellow = fellowByKey.get(personaKey) || { key: personaKey, name: personaKey };
-    for (const session of sessions) {
-      if (!session?.id) continue;
-      try {
-        await cloudApi(`/api/me/fellow-rooms/${encodeURIComponent(session.id)}`, {
-          method: "PUT",
-          body: {
-            fellowKey: fellow.key,
-            title: session.title || fellow.name || "对话",
-            clientOpId: `op_fellow_room_${settings.user.id}_${session.id}`
-          }
-        });
-      } catch (e) {
-        appendCloudLog(`Cloud fellow-room upsert failed (${session.id}): ${e?.message || e}`);
-        continue;
-      }
-      const roomId = `fellow:${settings.user.id}:${session.id}`;
-      const messages = Array.isArray(session.messages) ? session.messages : [];
-      for (const message of messages) {
-        const text = String(message?.content || message?.text || "").trim();
-        if (!text) continue;
-        const clientOpId = `op_fellow_msg_${session.id}_${message.id || message.createdAt || ""}`;
-        try {
-          await cloudApi(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
-            method: "POST",
-            body: { bodyMd: text, attachments: message.attachments || null, clientOpId }
-          });
-        } catch (e) {
-          appendCloudLog(`Cloud fellow-room message backfill failed (${roomId}): ${e?.message || e}`);
-          break; // stop this session's backfill; next sync retries
-        }
-      }
-    }
-  }
+function cloudSettingsGet() {
+  return cloudDesktopSync().getUserSettings();
 }
 
-async function mirrorFellowSessionToCloudRoom(session, fellow, message) {
-  if (!session?.id || !fellow?.key) return;
-  const settings = settingsStore.cloudSettings();
-  if (!settings.enabled || !settings.token || !settings.user?.id) return;
-  // Step 1: ensure the fellow-type room exists for this session.
-  try {
-    await cloudApi(`/api/me/fellow-rooms/${encodeURIComponent(session.id)}`, {
-      method: "PUT",
-      body: {
-        fellowKey: fellow.key,
-        title: session.title || fellow.name || "对话",
-        clientOpId: `op_fellow_room_${settings.user.id}_${session.id}`
-      }
-    });
-  } catch (e) {
-    appendCloudLog(`Cloud fellow-room upsert failed (${session.id}): ${e?.message || e}`);
-    return;
-  }
-  // Step 2: post the message to that room.
-  const roomId = `fellow:${settings.user.id}:${session.id}`;
-  const text = String(message?.content || message?.text || "").trim();
-  if (!text) return;
-  const clientOpId = `op_fellow_msg_${session.id}_${message.id || message.createdAt || Date.now()}`;
-  try {
-    await cloudApi(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
-      method: "POST",
-      body: { bodyMd: text, attachments: message.attachments || null, clientOpId }
-    });
-  } catch (e) {
-    appendCloudLog(`Cloud fellow-room message push failed (${roomId}): ${e?.message || e}`);
-  }
-}
-
-async function loginAimashiCloud({ username, password, mode = "login", url = "" } = {}) {
-  const nextUrl = settingsStore.normalizeCloudUrl(url || settingsStore.cloudSettings().url);
-  settingsStore.writeCloudSettings({ url: nextUrl, enabled: false, token: "", user: null });
-  const pathSegment = mode === "register" ? "/api/auth/register" : "/api/auth/login";
-  const data = await cloudApi(pathSegment, {
-    method: "POST",
-    body: { username: String(username || "").trim(), password: String(password || "") },
-    token: ""
-  });
-  settingsStore.writeCloudSettings({ url: nextUrl, enabled: true, token: data.token, user: data.user || null });
-  startCloudEvents();
-  startCloudBridge();
-  return cloudStatus(false);
-}
-
-async function logoutAimashiCloud() {
-  try {
-    if (settingsStore.cloudSettings().token) await cloudApi("/api/auth/logout", { method: "POST", body: {} });
-  } catch {
-    // Local logout should still clear the desktop token.
-  }
-  settingsStore.writeCloudSettings({ enabled: false, token: "", user: null });
-  stopCloudEvents();
-  stopCloudBridge();
-  return cloudStatus(false);
+function cloudSettingsPut(settings = {}) {
+  return cloudDesktopSync().putUserSettings(settings);
 }
 
 function cloudWebSocketUrl(pathname, settings = settingsStore.cloudSettings()) {
@@ -6542,8 +6341,7 @@ ipcMain.handle(IpcChannel.CloudPushMessage, async (_event, payload) => {
 // the renderer.
 ipcMain.handle(IpcChannel.CloudSettingsGet, async () => {
   try {
-    const data = await cloudApi("/api/me/settings", { method: "GET" });
-    return data && data.settings ? data.settings : { pins: [], readMarks: {}, appearance: {} };
+    return await cloudSettingsGet();
   } catch (error) {
     appendCloudLog(`Cloud settings get failed: ${error?.message || error}`);
     return { pins: [], readMarks: {}, appearance: {} };
@@ -6551,8 +6349,7 @@ ipcMain.handle(IpcChannel.CloudSettingsGet, async () => {
 });
 ipcMain.handle(IpcChannel.CloudSettingsPut, async (_event, settings) => {
   try {
-    const data = await cloudApi("/api/me/settings", { method: "PUT", body: settings || {} });
-    return data && data.settings ? data.settings : null;
+    return await cloudSettingsPut(settings || {});
   } catch (error) {
     appendCloudLog(`Cloud settings put failed: ${error?.message || error}`);
     throw error;
@@ -6561,6 +6358,27 @@ ipcMain.handle(IpcChannel.CloudSettingsPut, async (_event, settings) => {
 ipcMain.handle(IpcChannel.CloudLogout, async () => {
   await logoutAimashiCloud();
   return getRuntimeStatus();
+});
+cloudDesktopSyncRuntime = createCloudDesktopSyncClient({
+  getCloudSettings: () => settingsStore.cloudSettings(),
+  writeCloudSettings: (patch) => settingsStore.writeCloudSettings(patch),
+  normalizeCloudUrl: settingsStore.normalizeCloudUrl,
+  cloudStatus: (includeToken) => cloudStatus(includeToken),
+  appendLog: (line) => appendCloudLog(line),
+  fetchImpl: fetch,
+  timeoutSignal: (timeoutMs) => AbortSignal.timeout(timeoutMs),
+  loadFellowManifest,
+  fellowPersonaPath,
+  fileExists: (filePath) => fs.existsSync(filePath),
+  readFellowPersona,
+  runtimePaths,
+  readJson,
+  loadChatStore,
+  startCloudEvents,
+  startCloudBridge,
+  stopCloudEvents,
+  stopCloudBridge,
+  now: () => Date.now()
 });
 const socialApi = createSocialApi({
   getSettings: () => settingsStore.cloudSettings(),
