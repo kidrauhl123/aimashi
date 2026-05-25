@@ -1265,11 +1265,11 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 201, payload);
     }
 
-    const roomAsFellowMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages\/as-fellow$/);
-    const roomMembersMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/members$/);
-    const roomMsgDeleteMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages\/([A-Za-z0-9_-]+)$/);
-    const roomMsgsMatch = !roomAsFellowMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)\/messages$/);
-    const roomDetailMatch = !roomAsFellowMatch && !roomMembersMatch && !roomMsgsMatch && !roomMsgDeleteMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_:-]+)$/);
+    const roomAsFellowMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_.:-]+)\/messages\/as-fellow$/);
+    const roomMembersMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_.:-]+)\/members$/);
+    const roomMsgDeleteMatch = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_.:-]+)\/messages\/([A-Za-z0-9_-]+)$/);
+    const roomMsgsMatch = !roomAsFellowMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_.:-]+)\/messages$/);
+    const roomDetailMatch = !roomAsFellowMatch && !roomMembersMatch && !roomMsgsMatch && !roomMsgDeleteMatch && url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9_.:-]+)$/);
 
     // POST /api/rooms/:id/members — add member to existing group
     if (req.method === "POST" && roomMembersMatch) {
@@ -1588,11 +1588,14 @@ async function handleRequest(req, res, context) {
       const body = await readJson(req);
       if (replayIfCached(context, res, auth.user.id, body)) return;
       const existingFellow = context.fellowsStore.getFellow(auth.user.id, fellowId);
-      const runtimeKind = String(body.runtimeKind || "").trim() || undefined;
       const name = String(body.title || "").trim() || existingFellow?.name || fellowId;
-      const decorations = runtimeKind ? { fellowKey: fellowId, runtimeKind } : { fellowKey: fellowId };
       const roomId = `fellow:${auth.user.id}:${fellowId}`;
       let room = context.socialStore.getRoom(roomId);
+      const hasRuntimeKind = Object.prototype.hasOwnProperty.call(body, "runtimeKind");
+      const requestedRuntimeKind = String(body.runtimeKind || "").trim() || undefined;
+      const existingRuntimeKind = room?.decorations?.runtimeKind;
+      const runtimeKind = hasRuntimeKind ? requestedRuntimeKind : existingRuntimeKind;
+      const decorations = runtimeKind ? { fellowKey: fellowId, runtimeKind } : { fellowKey: fellowId };
       const created = !room;
       let changed = false;
       const sameJson = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);

@@ -102,6 +102,64 @@ test("PUT /api/me/fellows/:fellowId/room creates a stable fellow room", async ()
   } finally { await stopServer(ctx); }
 });
 
+test("PUT /api/me/fellows/:fellowId/room preserves runtimeKind when omitted", async () => {
+  const ctx = await startServer();
+  try {
+    const A = await register(ctx.port, "runtime");
+    const first = await api(ctx.port, "PUT", "/api/me/fellows/alice/room", {
+      token: A.token,
+      body: { title: "爱丽丝", runtimeKind: "desktop-local" }
+    });
+    assert.equal(first.status, 200);
+    await new Promise((r) => setTimeout(r, 25));
+
+    const second = await api(ctx.port, "PUT", "/api/me/fellows/alice/room", {
+      token: A.token,
+      body: { title: "爱丽丝" }
+    });
+
+    assert.equal(second.status, 200);
+    assert.equal(second.body.room.id, first.body.room.id);
+    assert.equal(second.body.room.decorations.runtimeKind, "desktop-local");
+    assert.equal(second.body.room.updatedAt, first.body.room.updatedAt);
+
+    const { createCloudStore } = require("../src/cloud/sqlite-store");
+    const { createEventLogStore } = require("../src/cloud/event-log-store");
+    const store = createCloudStore({ dataDir: ctx.tmpDir });
+    try {
+      const log = createEventLogStore(store.getDb());
+      const roomUpdatedEvents = log.listEventsSince(A.user.id, 0).filter((event) =>
+        event.kind === "room.updated" &&
+        event.payload?.room?.id === first.body.room.id
+      );
+      assert.equal(roomUpdatedEvents.length, 1);
+    } finally { store.close?.(); }
+  } finally { await stopServer(ctx); }
+});
+
+test("stable fellow rooms with dotted fellow keys can be fetched and messaged", async () => {
+  const ctx = await startServer();
+  try {
+    const A = await register(ctx.port, "dotted");
+    const ensured = await api(ctx.port, "PUT", "/api/me/fellows/my.bot/room", {
+      token: A.token,
+      body: { title: "My Bot", runtimeKind: "desktop-local" }
+    });
+    assert.equal(ensured.status, 200);
+    assert.equal(ensured.body.room.id, `fellow:${A.user.id}:my.bot`);
+
+    const detail = await api(ctx.port, "GET", `/api/rooms/${ensured.body.room.id}`, { token: A.token });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.room.id, ensured.body.room.id);
+
+    const posted = await api(ctx.port, "POST", `/api/rooms/${ensured.body.room.id}/messages`, {
+      token: A.token,
+      body: { bodyMd: "hello dotted" }
+    });
+    assert.ok(posted.status === 200 || posted.status === 201);
+  } finally { await stopServer(ctx); }
+});
+
 test("PUT /api/me/fellow-rooms/:sessionId creates a fellow-type room owned by the user", async () => {
   const ctx = await startServer();
   try {
