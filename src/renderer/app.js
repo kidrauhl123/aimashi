@@ -1014,22 +1014,6 @@ async function persistSessionQuietly(session = activeSession()) {
   }
 }
 
-async function pushCloudMessageQuietly(session, message) {
-  if (!state.runtime?.cloud?.enabled || !window.aimashi?.cloudPushMessage || !session || !message || message.transient) return false;
-  try {
-    state.runtime = await window.aimashi.cloudPushMessage({
-      fellowKey: state.activeKey,
-      session,
-      message
-    });
-    window.aimashiSettingsRemote.renderCloudAccount(state.runtime?.cloud || {});
-    return true;
-  } catch (error) {
-    console.error("Failed to push cloud message", error);
-    return false;
-  }
-}
-
 async function replacePersistedSessionQuietly(session = activeSession()) {
   try {
     state.chatStore = await window.aimashi.saveChatSession({
@@ -3587,7 +3571,6 @@ els.chatForm.addEventListener("submit", async (event) => {
   if (window.aimashiMessageHelpers.isComposerComposing()) return;
   // Branch: a cloud room (dm / group / fellow) is active → send via social.
   if (window.aimashiSocial?.getActiveRoomId?.()) {
-    const roomId = window.aimashiSocial.getActiveRoomId();
     let roomText = els.chatInput.value;
     if (!roomText.trim()) return;
     // Cloud rooms have no reply_to column, so a quote-reply is embedded as a
@@ -3601,18 +3584,7 @@ els.chatForm.addEventListener("submit", async (event) => {
     }
     els.chatInput.value = "";
     window.aimashiMessageHelpers.resizeChatInput();
-    const activeRoomRecord = window.aimashiSocial.getRoomById?.(roomId);
-    const recordType = activeRoomRecord?.type
-      || (roomId.startsWith("dm:") ? "dm"
-        : roomId.startsWith("fellow:") ? "fellow"
-        : (roomId.startsWith("g_") || roomId.startsWith("g-")) ? "group"
-        : null);
-    const isGroupRoom = recordType === "group";
-    if (isGroupRoom && typeof window.aimashiSocial.sendInActiveGroupRoom === "function") {
-      await window.aimashiSocial.sendInActiveGroupRoom(roomText);
-    } else {
-      await window.aimashiSocial.sendInActiveRoom(roomText);
-    }
+    await window.aimashiSocial.sendInActiveRoom(roomText);
     return;
   }
   if (state.runtime?.cloud?.enabled) return;
@@ -3659,16 +3631,7 @@ els.chatForm.addEventListener("submit", async (event) => {
   renderSendButton();
   renderHeaderStatus();
   try {
-    const userMessage = session.messages[session.messages.length - 1];
-    // Persist BEFORE pushing to cloud: even though the cloud:event
-    // listener no longer reloads chatStore wholesale, persisting first
-    // still avoids races with anything else that may read from disk.
     await persistSessionQuietly(session);
-    // Capture the user-push promise so the later assistant push can wait
-    // on it — otherwise a fast local agent + slow user-attachment upload
-    // can cause the assistant message to land in /api/messages first,
-    // and Web/mobile clients will show the assistant before the prompt.
-    const userCloudPush = pushCloudMessageQuietly(session, userMessage);
     const outgoingBase = await window.aimashiComposer.outgoingMessageForSubmit(text);
     const outgoingText = window.aimashiMessageMenu
       ? window.aimashiMessageMenu.replyContextPrompt(outgoingBase, replyTo)
@@ -3701,14 +3664,9 @@ els.chatForm.addEventListener("submit", async (event) => {
     // (state.chatStore.sessions[...]), not into the orphan ref. Persisting
     // the orphan here would save its stale messages and clobber the assistant
     // we just appended — that's the "回复被吞" regression introduced by
-    // 0eb1458. Re-resolve to the live session before persist + cloud push.
+    // 0eb1458. Re-resolve to the live session before persisting.
     const liveSession = activeSession();
     await persistSessionQuietly(liveSession);
-    const assistantMessage = liveSession.messages[liveSession.messages.length - 1];
-    // Wait for the earlier user push to land first so /api/messages
-    // receives user → assistant in order (Codex review P2).
-    try { await userCloudPush; } catch { /* user push errors are non-fatal */ }
-    await pushCloudMessageQuietly(liveSession, assistantMessage);
     window.aimashiSessionReadState.persistReadStateQuietly();
     if (shouldGenerateTitle) {
       const current = activeSession();

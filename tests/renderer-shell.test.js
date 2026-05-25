@@ -16,6 +16,13 @@ test("renderer app shell loads state module before the entrypoint", () => {
   assert.doesNotMatch(appSource, /const fallbackSlashCommands = \[/);
 });
 
+test("cloud room composer uses one social send path for dm and group rooms", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+
+  assert.match(appSource, /await window\.aimashiSocial\.sendInActiveRoom\(roomText\);/);
+  assert.doesNotMatch(appSource, /sendInActiveGroupRoom\(roomText\)/);
+});
+
 test("logged-in message list uses social rows instead of local fellow rows", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
 
@@ -42,6 +49,16 @@ test("logged-in active pane never falls back to local fellow sessions", () => {
   assert.match(appSource, /const active = cloudSignedIn\s*\?\s*null\s*:/);
   assert.match(appSource, /if\s*\(state\.runtime\?\.cloud\?\.enabled\)\s*\{\s*els\.chat\.innerHTML = "";\s*return;\s*\}/);
   assert.match(appSource, /if\s*\(state\.runtime\?\.cloud\?\.enabled\)\s*return;/);
+});
+
+test("renderer no longer mirrors local sends through legacy cloud push", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
+  const channelSource = fs.readFileSync(path.join(root, "src/shared/ipc-channels.js"), "utf8");
+
+  assert.doesNotMatch(appSource, /pushCloudMessageQuietly|cloudPushMessage/);
+  assert.doesNotMatch(preloadSource, /cloudPushMessage/);
+  assert.doesNotMatch(channelSource, /CloudPushMessage/);
 });
 
 test("renderer app state factory owns default mutable state", () => {

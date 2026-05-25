@@ -27,7 +27,6 @@
     CloudStatus: "cloud:status",
     CloudLogin: "cloud:login",
     CloudSync: "cloud:sync",
-    CloudPushMessage: "cloud:push-message",
     CloudLogout: "cloud:logout",
     CloudEvent: "cloud:event",
     UtilQrSvg: "util:qr-svg",

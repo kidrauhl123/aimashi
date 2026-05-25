@@ -17,7 +17,6 @@ contextBridge.exposeInMainWorld("aimashi", {
   cloudStatus: () => ipcRenderer.invoke(IpcChannel.CloudStatus),
   cloudLogin: (payload) => ipcRenderer.invoke(IpcChannel.CloudLogin, payload),
   cloudSync: () => ipcRenderer.invoke(IpcChannel.CloudSync),
-  cloudPushMessage: (payload) => ipcRenderer.invoke(IpcChannel.CloudPushMessage, payload),
   cloudLogout: () => ipcRenderer.invoke(IpcChannel.CloudLogout),
   onCloudEvent: (handler) => {
     const listener = (_event, envelope) => { try { handler(envelope); } catch { /* ignore */ } };

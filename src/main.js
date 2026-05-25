@@ -4536,10 +4536,6 @@ function syncAimashiCloudWorkspace() {
   return cloudDesktopSync().syncWorkspace();
 }
 
-function pushDesktopMessageToCloud(payload = {}) {
-  return cloudDesktopSync().pushDesktopMessage(payload);
-}
-
 function loginAimashiCloud(payload = {}) {
   return cloudDesktopSync().login(payload);
 }
@@ -6371,10 +6367,6 @@ ipcMain.handle(IpcChannel.CloudLogin, async (_event, payload) => {
 });
 ipcMain.handle(IpcChannel.CloudSync, async () => {
   await syncAimashiCloudWorkspace();
-  return getRuntimeStatus();
-});
-ipcMain.handle(IpcChannel.CloudPushMessage, async (_event, payload) => {
-  await pushDesktopMessageToCloud(payload || {});
   return getRuntimeStatus();
 });
 // Phase 3: cross-device settings (pin / read marks / appearance). Renderer
