@@ -121,6 +121,7 @@ test("Hermes runs client sends Fellow headers and returns final text", async () 
   assert.equal(calls[0].headers["X-Alkaka-Fellow"], "aimashi");
   assert.equal(calls[0].headers["X-Hermes-Session-Key"], "cloud:u1:aimashi:fellow:u1:aimashi");
   assert.equal(calls[0].headers.Authorization, "Bearer secret");
+  assert.equal(calls[1].headers.Authorization, "Bearer secret");
   const body = JSON.parse(calls[0].body);
   assert.equal(body.session_id, "cloud:u1:aimashi:fellow:u1:aimashi");
   assert.deepEqual(body.conversation_history, [{ role: "user", content: "hi" }]);

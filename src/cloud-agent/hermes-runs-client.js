@@ -68,9 +68,12 @@ function createHermesRunsClient(deps = {}) {
     return runId;
   }
 
-  async function readEvents({ baseUrl, runId, signal, onEvent }) {
+  async function readEvents({ baseUrl, apiKey, runId, signal, onEvent }) {
     const response = await fetchImpl(`${cleanBaseUrl(baseUrl)}/v1/runs/${encodeURIComponent(runId)}/events`, {
       method: "GET",
+      headers: {
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
       signal
     });
     const text = await response.text();
@@ -131,6 +134,7 @@ function createHermesRunsClient(deps = {}) {
     if (typeof args.onRunCreated === "function") args.onRunCreated(runId);
     const stream = await readEvents({
       baseUrl: args.baseUrl,
+      apiKey: args.apiKey,
       runId,
       signal: args.signal,
       onEvent: args.onEvent
