@@ -1,10 +1,12 @@
 // Skill marketplace catalog source-of-truth (sub-project B, slice 3).
 //
-// The catalog is a folder of `<id>/SKILL.md` files (git-versioned). This is
-// the ONE place an operator edits the marketplace: add a folder to publish,
-// edit a file to update, delete a folder to retire. `scripts/sync-cloud-skills.js`
-// pushes the folder into the cloud `skills` table; the cloud server also
-// seeds a fresh DB from it on startup.
+// The catalog lives in the repo `skills/` folder, one `<id>/SKILL.md` per
+// skill (git-versioned). Top-level entries are the marketplace catalog —
+// add a folder to publish, edit to update, delete to retire. The `_builtin/`
+// subfolder (and any `_`-prefixed dir) is excluded: those ship pre-installed
+// with the app and are scanned locally, not offered as market installs.
+// `scripts/sync-cloud-skills.js` pushes the catalog into the cloud `skills`
+// table; the cloud server also seeds a fresh DB from it on startup.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -24,7 +26,7 @@ function parseFrontmatter(raw) {
 }
 
 function defaultCatalogDir() {
-  return path.join(__dirname, "..", "..", "skills-catalog");
+  return path.join(__dirname, "..", "..", "skills");
 }
 
 // Returns [{ id, name, category, description, sourceLabel, body }] sorted by id.
@@ -41,6 +43,8 @@ function loadSkillsCatalog(dir = defaultCatalogDir()) {
   const skills = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    // Skip pre-installed/bundled skills (_builtin) and any private dir.
+    if (entry.name.startsWith("_")) continue;
     let body;
     try {
       body = fs.readFileSync(path.join(dir, entry.name, "SKILL.md"), "utf8");

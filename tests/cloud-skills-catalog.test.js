@@ -52,13 +52,30 @@ test("parseFrontmatter returns {} for content without frontmatter", () => {
   assert.deepEqual(parseFrontmatter("# Title\nbody"), {});
 });
 
-test("the real skills-catalog/ folder loads the seeded first-party skills", () => {
+test("the real skills/ folder loads top-level catalog and excludes _builtin", () => {
   const skills = loadSkillsCatalog();
   const ids = skills.map((s) => s.id);
   assert.ok(ids.includes("commit-craft"), "commit-craft present");
   assert.ok(ids.includes("weekly-report"), "weekly-report present");
   assert.ok(ids.includes("trip-planner"), "trip-planner present");
+  // _builtin (pre-installed, e.g. pet-generator) is NOT part of the market catalog
+  assert.ok(!ids.includes("_builtin"), "_builtin dir is not a catalog entry");
+  assert.ok(!ids.includes("pet-generator"), "bundled pet-generator is excluded from the market");
   assert.ok(skills.every((s) => s.body.length > 0), "every catalog entry has a body");
+});
+
+test("loadSkillsCatalog skips _-prefixed dirs", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mia-catalog-"));
+  try {
+    fs.mkdirSync(path.join(dir, "_builtin", "x"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "_builtin", "x", "SKILL.md"), "---\nname: x\n---\n# X");
+    fs.mkdirSync(path.join(dir, "real"));
+    fs.writeFileSync(path.join(dir, "real", "SKILL.md"), "---\nname: real\n---\n# Real");
+    const ids = loadSkillsCatalog(dir).map((s) => s.id);
+    assert.deepEqual(ids, ["real"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("syncing a catalog into the store upserts (preserving install_count) and prunes", () => {

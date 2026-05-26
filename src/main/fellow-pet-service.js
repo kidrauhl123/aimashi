@@ -159,7 +159,7 @@ function createFellowPetService(deps = {}) {
       path.join(app.getAppPath(), "skills"),
       path.join(dirname, "..", "skills")
     ];
-    return candidates.find((candidate) => candidate && fs.existsSync(path.join(candidate, "pet-generator", "SKILL.md"))) || candidates[0];
+    return candidates.find((candidate) => candidate && fs.existsSync(path.join(candidate, "_builtin", "pet-generator", "SKILL.md"))) || candidates[0];
   }
 
   function officialLibraryManifestPath() {
