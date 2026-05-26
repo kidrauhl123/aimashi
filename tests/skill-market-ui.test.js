@@ -19,9 +19,10 @@ test("market IPC channels + preload bridge are wired", () => {
 test("main orchestrates cloud install → local write", () => {
   const main = read("src/main.js");
   assert.match(main, /SkillsMarketList.*listMarketSkills/);
-  // install: cloud call then write the body locally via skills-loader
+  // install: cloud call → download package → verify checksum → extract locally
   assert.match(main, /installMarketSkill\(skillId\)/);
-  assert.match(main, /skillsLoader\.installMarketplaceSkill\(skill\)/);
+  assert.match(main, /downloadSkillPackage\(download\.url\)/);
+  assert.match(main, /installMarketplaceSkill\(\{ id: skill\.id, zipBuffer \}\)/);
 });
 
 test("skill-library renders a market mode with an install action", () => {

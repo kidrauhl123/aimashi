@@ -78,10 +78,10 @@ function ctxWithCloudOwnedFellow() {
     moduleState: {
       myUserId: "bob",
       friends: [],
-      fellows: [{ key: "mia", name: "Mia", cloudOnly: true }],
+      fellows: [{ key: "mia", name: "Mia", runtimeKind: "cloud-hermes", runtimeLabel: "Mia Cloud" }],
     },
     adapterCtx: () => ({
-      fellows: [{ key: "mia", name: "Mia", cloudOnly: true, color: "#5e5ce6" }],
+      fellows: [{ key: "mia", name: "Mia", runtimeKind: "cloud-hermes", runtimeLabel: "Mia Cloud", color: "#5e5ce6" }],
       friends: [],
       self: { id: "bob" },
     }),
@@ -111,14 +111,13 @@ test("fellow I own renders editable controls card", () => {
   assert.match(html, /edit-fellow/);
 });
 
-test("cloud fellow I own renders as my cloud contact instead of remote-only", () => {
+test("cloud fellow I own renders editable controls instead of a separate cloud-only card", () => {
   const { card, body } = loadCard();
   card.attach(ctxWithCloudOwnedFellow());
   card.openCard({ kind: "fellow", ref: "mia", roomId: "fellow:bob:mia", anchor: null });
   const html = lastCardHtml(body);
   assert.doesNotMatch(html, /不在你的本地 fellow 列表里/);
-  assert.match(html, /云端伙伴/);
-  assert.match(html, /已经在联系人列表里/);
-  assert.match(html, /data-card-action="message"/);
-  assert.doesNotMatch(html, /edit-fellow/);
+  assert.match(html, /Mia Cloud/);
+  assert.match(html, /data-fellow-field="model"/);
+  assert.match(html, /data-card-action="edit-fellow"/);
 });

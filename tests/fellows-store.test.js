@@ -71,6 +71,30 @@ test("listFellows scopes to owner", () => {
   } finally { ctx.cleanup(); }
 });
 
+test("upsertFellow preserves object-shaped capabilities", () => {
+  const ctx = freshStore();
+  try {
+    const fellows = createFellowsStore(ctx.store.getDb());
+    const u = makeUser(ctx.store);
+    const capabilities = {
+      inheritEngineDefaults: false,
+      enabledPlugins: ["github"],
+      disabledPlugins: [],
+      enabledSkills: ["code-review"],
+      disabledSkills: [],
+      enabledConnectors: ["outlook"]
+    };
+    const saved = fellows.upsertFellow(u, {
+      id: "mia",
+      name: "Mia",
+      capabilities
+    });
+
+    assert.deepEqual(saved.capabilities, capabilities);
+    assert.deepEqual(fellows.getFellow(u, "mia").capabilities, capabilities);
+  } finally { ctx.cleanup(); }
+});
+
 test("deleteFellow removes only that owner's row", () => {
   const ctx = freshStore();
   try {

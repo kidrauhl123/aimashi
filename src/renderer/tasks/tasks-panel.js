@@ -162,7 +162,6 @@
 
     els.tasksNav.querySelectorAll("[data-task-id]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        state.creatingTask = false;
         state.selectedTaskId = btn.dataset.taskId;
         state.selectedRunId = btn.dataset.runId || "";
         state.tasksUnread.delete(state.selectedTaskId);
@@ -185,7 +184,6 @@
     setText(els.tasksPageTitle, "任务");
     const activeCount = state.tasks.filter((t) => t.status === "active").length;
     setText(els.tasksPageMeta, `${activeCount} 个活跃`);
-    if (state.creatingTask) { renderTaskCreate(); return; }
     if (!state.selectedTaskId) { renderTasksEmpty(); return; }
     const task = state.tasks.find((t) => t.id === state.selectedTaskId);
     if (!task) { renderTasksEmpty(); return; }
@@ -215,137 +213,139 @@
     `;
   }
 
+  let _taskCreateBound = false;
+
   function openTaskCreate() {
-    state.creatingTask = true;
-    state.selectedTaskId = "";
-    state.selectedRunId = "";
-    if (state.activeView !== "tasks") state.activeView = "tasks";
-    renderTaskSidebar();
-    renderTaskView();
-  }
-
-  function cancelTaskCreate() {
-    state.creatingTask = false;
-    renderTaskSidebar();
-    renderTaskView();
-  }
-
-  function renderTaskCreate() {
+    const dialog = document.getElementById("taskCreateDialog");
+    if (!dialog) return;
     const fellows = state.runtime?.fellows || state.runtime?.personas || [];
-    if (fellows.length === 0) {
-      els.tasksContent.innerHTML = `
-        <div class="tasks-empty">
-          <div class="tasks-empty-emoji">🤖</div>
-          <h2>先添加一个 Agent</h2>
-          <p>定时任务需要指定一个 Agent 来执行。请先在通讯录里添加。</p>
-          <button class="secondary" type="button" data-action="cancel-create">返回</button>
-        </div>
-      `;
-      els.tasksContent.querySelector("[data-action='cancel-create']")
-        ?.addEventListener("click", cancelTaskCreate);
-      return;
+    const fellowSel = document.getElementById("ntFellow");
+    if (fellowSel) {
+      if (fellows.length === 0) {
+        fellowSel.innerHTML = `<option value="">（请先在通讯录添加一个 Agent）</option>`;
+      } else {
+        const def = fellows.some((f) => f.key === state.activeKey) ? state.activeKey : fellows[0].key;
+        fellowSel.innerHTML = fellows
+          .map((f) => `<option value="${escapeHtml(f.key)}"${f.key === def ? " selected" : ""}>${escapeHtml(fellowName(f.key))}</option>`)
+          .join("");
+      }
     }
-    let localTz = "UTC";
-    try { localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
-    const defaultFellow = fellows.some((f) => f.key === state.activeKey) ? state.activeKey : fellows[0].key;
-    const options = fellows
-      .map((f) => `<option value="${escapeHtml(f.key)}"${f.key === defaultFellow ? " selected" : ""}>${escapeHtml(fellowName(f.key))}</option>`)
-      .join("");
-
-    els.tasksContent.innerHTML = `
-      <article class="task-detail task-create">
-        <header class="task-detail-head">
-          <div class="task-detail-source">
-            <small>新建定时任务</small>
-            <strong>到点自动让所选 Agent 执行下面的指令</strong>
-          </div>
-        </header>
-
-        <section class="task-schedule">
-          <div class="task-form-row">
-            <label>标题 <input id="newTaskTitle" placeholder="未命名任务"></label>
-          </div>
-          <div class="task-form-row">
-            <label>执行的 Agent <select id="newTaskFellow">${options}</select></label>
-          </div>
-        </section>
-
-        <section class="task-schedule">
-          <h3>调度</h3>
-          <div class="task-form-row">
-            <label><input type="radio" name="newTriggerType" value="cron" checked>重复</label>
-            <label><input type="radio" name="newTriggerType" value="oneshot">一次性</label>
-          </div>
-          <div class="task-form-row" id="newTaskCronRow">
-            <label>Cron <input id="newTaskCron" value="0 9 * * *"></label>
-          </div>
-          <div class="task-form-row" id="newTaskAtRow" hidden>
-            <label>触发时间 <input id="newTaskAt" type="datetime-local"></label>
-          </div>
-          <div class="task-form-row">
-            <label>时区 <input id="newTaskTimezone" value="${escapeHtml(localTz)}"></label>
-          </div>
-        </section>
-
-        <section class="task-prompt">
-          <h3>Prompt</h3>
-          <textarea id="newTaskPrompt" rows="3" placeholder="到点要让 Agent 做的事，比如：汇总今天的未读消息"></textarea>
-        </section>
-
-        <div class="task-create-actions">
-          <button class="secondary" type="button" data-action="cancel-create">取消</button>
-          <button class="primary" type="button" data-action="submit-create">创建任务</button>
-        </div>
-        <div class="task-create-error" id="newTaskError" hidden></div>
-      </article>
-    `;
-    attachTaskCreateHandlers();
+    setFieldValue("ntName", "");
+    setFieldValue("ntPrompt", "");
+    updateCount("ntName", "ntNameCount", 50);
+    updateCount("ntPrompt", "ntPromptCount", 8000);
+    const freq = document.getElementById("ntFreq");
+    if (freq) freq.value = "oneshot";
+    renderTimeControls("oneshot");
+    hideTaskError();
+    bindTaskCreateHandlers();
+    dialog.classList.remove("hidden");
+    document.getElementById("ntName")?.focus();
   }
 
-  function attachTaskCreateHandlers() {
-    document.querySelectorAll("[name=newTriggerType]").forEach((r) => {
-      r.addEventListener("change", () => {
-        const isCron = r.value === "cron";
-        const cronRow = document.getElementById("newTaskCronRow");
-        const atRow = document.getElementById("newTaskAtRow");
-        if (cronRow) cronRow.hidden = !isCron;
-        if (atRow) atRow.hidden = isCron;
-      });
+  function closeTaskCreate() {
+    document.getElementById("taskCreateDialog")?.classList.add("hidden");
+  }
+
+  function setFieldValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  }
+
+  function updateCount(inputId, countId, max) {
+    const input = document.getElementById(inputId);
+    const out = document.getElementById(countId);
+    if (input && out) out.textContent = `${input.value.length}/${max}`;
+  }
+
+  function hideTaskError() {
+    const el = document.getElementById("ntError");
+    if (el) { el.hidden = true; el.textContent = ""; }
+  }
+
+  // The 执行时间 row swaps its detail controls to match the chosen frequency:
+  // a one-shot needs a date + time; recurring modes need a time plus an optional
+  // weekday / day-of-month, which submitTaskCreate folds into a cron expression.
+  function renderTimeControls(freq) {
+    const host = document.getElementById("ntTimeControls");
+    if (!host) return;
+    const pad = (n) => String(n).padStart(2, "0");
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const timeInput = `<input type="time" id="ntTime" value="09:00">`;
+    if (freq === "daily") {
+      host.innerHTML = timeInput;
+    } else if (freq === "weekly") {
+      const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+      host.innerHTML = `<select id="ntWeekday">${days.map((d, i) => `<option value="${i}">${d}</option>`).join("")}</select>${timeInput}`;
+    } else if (freq === "monthly") {
+      let opts = "";
+      for (let i = 1; i <= 28; i += 1) opts += `<option value="${i}">${i} 号</option>`;
+      host.innerHTML = `<select id="ntDay">${opts}</select>${timeInput}`;
+    } else {
+      host.innerHTML = `<input type="date" id="ntDate" value="${todayStr}">${timeInput}`;
+    }
+  }
+
+  function bindTaskCreateHandlers() {
+    if (_taskCreateBound) return;
+    _taskCreateBound = true;
+    const dialog = document.getElementById("taskCreateDialog");
+    document.getElementById("closeTaskCreate")?.addEventListener("click", closeTaskCreate);
+    document.getElementById("cancelTaskCreate")?.addEventListener("click", closeTaskCreate);
+    dialog?.addEventListener("click", (e) => { if (e.target === dialog) closeTaskCreate(); });
+    document.getElementById("taskCreateForm")?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitTaskCreate();
     });
-    els.tasksContent.querySelector("[data-action='cancel-create']")
-      ?.addEventListener("click", cancelTaskCreate);
-    els.tasksContent.querySelector("[data-action='submit-create']")
-      ?.addEventListener("click", submitTaskCreate);
+    document.getElementById("ntName")?.addEventListener("input", () => updateCount("ntName", "ntNameCount", 50));
+    document.getElementById("ntPrompt")?.addEventListener("input", () => updateCount("ntPrompt", "ntPromptCount", 8000));
+    document.getElementById("ntFreq")?.addEventListener("change", (e) => renderTimeControls(e.target.value));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !dialog?.classList.contains("hidden")) closeTaskCreate();
+    });
   }
 
   async function submitTaskCreate() {
-    const errEl = document.getElementById("newTaskError");
     const showError = (msg) => {
-      if (!errEl) return;
-      errEl.textContent = msg;
-      errEl.hidden = false;
+      const el = document.getElementById("ntError");
+      if (el) { el.textContent = msg; el.hidden = false; }
     };
-    const fellowId = document.getElementById("newTaskFellow")?.value || "";
-    const prompt = (document.getElementById("newTaskPrompt")?.value || "").trim();
-    const title = (document.getElementById("newTaskTitle")?.value || "").trim() || "未命名任务";
-    const timezone = (document.getElementById("newTaskTimezone")?.value || "UTC").trim() || "UTC";
-    const triggerType = document.querySelector("[name=newTriggerType]:checked")?.value || "cron";
+    const fellowId = document.getElementById("ntFellow")?.value || "";
+    const title = (document.getElementById("ntName")?.value || "").trim();
+    const prompt = (document.getElementById("ntPrompt")?.value || "").trim();
+    const freq = document.getElementById("ntFreq")?.value || "oneshot";
 
-    if (!fellowId) return showError("请选择一个执行的 Agent。");
-    if (!prompt) return showError("请填写 Prompt。");
+    if (!fellowId) return showError("请先选择执行的 Agent（去通讯录添加一个）。");
+    if (!title) return showError("请填写任务名称。");
+    if (!prompt) return showError("请填写要求说明。");
+
+    const time = document.getElementById("ntTime")?.value || "";
+    if (!time) return showError("请选择执行时间。");
+    const [hh, mm] = time.split(":");
+    const h = Number(hh);
+    const m = Number(mm);
 
     let trigger;
-    if (triggerType === "cron") {
-      const cron = (document.getElementById("newTaskCron")?.value || "").trim();
-      if (!cron) return showError("请填写 Cron 表达式。");
-      trigger = { type: "cron", cron };
+    if (freq === "oneshot") {
+      const date = document.getElementById("ntDate")?.value || "";
+      if (!date) return showError("请选择执行日期。");
+      const at = new Date(`${date}T${time}`);
+      if (Number.isNaN(at.getTime())) return showError("执行时间无效。");
+      if (at.getTime() <= Date.now()) return showError("执行时间必须在未来。");
+      trigger = { type: "oneshot", at: at.toISOString() };
+    } else if (freq === "daily") {
+      trigger = { type: "cron", cron: `${m} ${h} * * *` };
+    } else if (freq === "weekly") {
+      const w = document.getElementById("ntWeekday")?.value || "0";
+      trigger = { type: "cron", cron: `${m} ${h} * * ${w}` };
     } else {
-      const at = document.getElementById("newTaskAt")?.value || "";
-      const atMs = new Date(at).getTime();
-      if (!at || Number.isNaN(atMs)) return showError("请选择有效的触发时间。");
-      if (atMs <= Date.now()) return showError("触发时间必须在未来。");
-      trigger = { type: "oneshot", at: new Date(at).toISOString() };
+      const d = document.getElementById("ntDay")?.value || "1";
+      trigger = { type: "cron", cron: `${m} ${h} ${d} * *` };
     }
+
+    let timezone = "UTC";
+    try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
 
     let sessionId;
     try {
@@ -357,7 +357,7 @@
 
     try {
       const created = await window.mia.tasks.create({ title, fellowId, sessionId, prompt, trigger, timezone });
-      state.creatingTask = false;
+      closeTaskCreate();
       state.selectedTaskId = created?.id || "";
       state.selectedRunId = "";
       await loadTasksFromDaemon();

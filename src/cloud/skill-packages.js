@@ -38,4 +38,19 @@ function packageDir(srcDir, destZipPath, entryName = "SKILL.md") {
   return { ...writeZip(zip, destZipPath), entryPath: entryName, fileCount: files.length, files };
 }
 
-module.exports = { packageBody, packageDir, sha256 };
+// Store an already-built zip (user upload). Validates it contains a SKILL.md,
+// returns its checksum/manifest. Throws if the zip has no SKILL.md entry.
+function packageFromZip(zipBuffer, destZipPath, entryName = "SKILL.md") {
+  const buf = Buffer.from(zipBuffer);
+  const zip = new AdmZip(buf);
+  const files = zip.getEntries().filter((entry) => !entry.isDirectory).map((entry) => entry.entryName);
+  const entryPath = files.includes(entryName)
+    ? entryName
+    : files.find((name) => name.endsWith("SKILL.md"));
+  if (!entryPath) throw new Error("package must contain a SKILL.md");
+  fs.mkdirSync(path.dirname(destZipPath), { recursive: true });
+  fs.writeFileSync(destZipPath, buf);
+  return { checksum: sha256(buf), sizeBytes: buf.length, entryPath, fileCount: files.length, files };
+}
+
+module.exports = { packageBody, packageDir, packageFromZip, sha256 };

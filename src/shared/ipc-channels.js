@@ -64,6 +64,8 @@
     SkillsOpenDirectory: "skills:open-directory",
     SkillsMarketList: "skills:market-list",
     SkillsMarketInstall: "skills:market-install",
+    SkillsPublish: "skills:publish",
+    SkillsReport: "skills:report",
     PluginsInstall: "plugins:install",
     PermissionsSave: "permissions:save",
     EffortSave: "effort:save",

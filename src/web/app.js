@@ -7,6 +7,7 @@ const { formatConversationTime, formatMessageTime } = window.miaTimeFormat;
 const { computeUnreadForConversation, totalUnreadFromConversations, unreadBadgeHtml } = window.miaUnread;
 const { prepareOutgoingMessage } = window.miaSendPipeline;
 const { SenderKind } = window.miaConversationKinds;
+const sessionHistory = window.miaSessionHistory || {};
 const engineContracts = window.miaEngineContracts || {};
 const normalizeAgentEngine = engineContracts.normalizeAgentEngine || ((value) => {
   const id = String(value || "hermes").trim().toLowerCase().replace(/_/g, "-");
@@ -903,19 +904,11 @@ function roomDisplayTitle(room) {
 }
 
 function roomTypeForControls(room) {
-  if (!room) return "";
-  return room.type
-    || (room.id?.startsWith("dm:") ? "dm"
-      : room.id?.startsWith("fellow:") ? "fellow"
-      : (room.id?.startsWith("g_") || room.id?.startsWith("g-")) ? "group"
-      : "");
+  return sessionHistory.roomType(room, room?.id || "");
 }
 
 function fellowKeyForRoom(room) {
-  const decorated = room?.decorations?.fellowKey || room?.fellowKey || room?.fellow_id || "";
-  if (decorated) return String(decorated);
-  const id = String(room?.id || "");
-  return id.startsWith("fellow:") ? id.split(":").slice(2).join(":") : "";
+  return sessionHistory.fellowKey(room);
 }
 
 function fellowByKey(key) {
@@ -925,8 +918,7 @@ function fellowByKey(key) {
 
 function runtimeKindForFellowRoom(room, fellow) {
   void fellow;
-  const runtimeKind = String(room?.decorations?.runtimeKind || "").trim();
-  return runtimeKind || "desktop-local";
+  return sessionHistory.runtimeKind(room, "desktop-local");
 }
 
 function engineForRuntimeKind(runtimeKind) {
@@ -1161,9 +1153,7 @@ function roomLastMessageText(room) {
 }
 
 function roomSortKey(room) {
-  const cached = state.messageCache.get(room.id);
-  const last = cached?.messages?.[cached.messages.length - 1];
-  return new Date(last?.created_at || room.updated_at || room.created_at || 0).getTime();
+  return sessionHistory.roomSortTime(room, state.messageCache);
 }
 
 function cryptoRandomId() {
@@ -1176,25 +1166,17 @@ function activeSessionRoom() {
 }
 
 function sessionTitleForRoom(room) {
-  if (!room) return "新对话";
-  const type = roomTypeForControls(room);
-  if (type === "fellow") {
-    return room.name || roomDisplayTitle(room) || "新对话";
-  }
-  if (type === "group") return room.name || "群聊";
-  return roomDisplayTitle(room) || "私聊";
+  return sessionHistory.sessionTitle(room, {
+    fellows: state.fellows,
+    defaultTitle: "新对话",
+    groupTitle: "群聊",
+    dmTitle: roomDisplayTitle,
+    dmTitleFallback: "私聊"
+  });
 }
 
 function sessionRoomsForRoom(room) {
-  if (!room) return [];
-  const type = roomTypeForControls(room);
-  if (type !== "fellow") return [room];
-  const fellowKey = fellowKeyForRoom(room);
-  if (!fellowKey) return [room];
-  return state.rooms
-    .filter((candidate) => roomTypeForControls(candidate) === "fellow")
-    .filter((candidate) => fellowKeyForRoom(candidate) === fellowKey)
-    .sort((a, b) => roomSortKey(b) - roomSortKey(a));
+  return sessionHistory.sessionRoomsForRoom(room, state.rooms, { messageCache: state.messageCache });
 }
 
 function updateCurrentSessionTitle(title) {
@@ -1232,18 +1214,20 @@ function selectSessionRoom(room) {
 
 async function createNewSessionForActive() {
   const room = activeSessionRoom();
-  if (roomTypeForControls(room) !== "fellow") return;
-  const fellowKey = fellowKeyForRoom(room);
+  if (!sessionHistory.canCreateSession(room)) return;
+  const payload = sessionHistory.createFellowSessionPayload(room, cryptoRandomId(), {
+    title: "新对话",
+    runtimeKindFallback: "desktop-local"
+  });
+  const fellowKey = payload.fellowKey;
   if (!fellowKey) return;
-  const runtimeKind = runtimeKindForFellowRoom(room, fellowByKey(fellowKey));
-  const sessionId = cryptoRandomId();
   try {
-    const res = await api(`/api/me/fellow-rooms/${encodeURIComponent(sessionId)}`, {
+    const res = await api(`/api/me/fellow-rooms/${encodeURIComponent(payload.sessionId)}`, {
       method: "PUT",
       body: {
         fellowKey,
-        title: "新对话",
-        runtimeKind
+        title: payload.title,
+        runtimeKind: payload.runtimeKind
       }
     });
     const created = res?.room;
@@ -1271,7 +1255,7 @@ function renderSessionMenu() {
   }
 
   const rooms = sessionRoomsForRoom(room);
-  const canCreate = roomTypeForControls(room) === "fellow" && Boolean(fellowKeyForRoom(room));
+  const canCreate = sessionHistory.canCreateSession(room);
   els.newSession?.classList.toggle("hidden", !canCreate);
   updateCurrentSessionTitle(sessionTitleForRoom(room));
   els.sessionList.innerHTML = "";

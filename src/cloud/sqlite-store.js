@@ -94,7 +94,7 @@ function defaultWorkspace(user, now = nowIso, id = randomId) {
       }]
     }],
     contacts: [
-      { id: "contact_mia", title: "Mia", meta: "默认云端伙伴", avatar: "./assets/avatar-01.png", status: "可用", note: "负责日常对话、信息整理和轻量任务推进。" },
+      { id: "contact_mia", title: "Mia", meta: "默认 Fellow", avatar: "./assets/avatar-01.png", status: "可用", note: "负责日常对话、信息整理和轻量任务推进。" },
       { id: "contact_codex", title: "Codex", meta: "代码与自动化", avatar: "./assets/avatar-08.png", status: "本地桥接待接入", note: "通过桌面端 Bridge 调用本机 Codex / Claude Code / Hermes。" }
     ],
     skills: [

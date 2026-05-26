@@ -142,7 +142,7 @@
     const modelHelpers = global.miaModelHelpers;
     const modelSettings = global.miaModelSettings;
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
-    const runtimeKind = local.runtimeKind || (local.cloudOnly ? "cloud-hermes" : "desktop-local");
+    const runtimeKind = local.runtimeKind || "desktop-local";
     const engine = local.agentEngine || local.agent_engine || "hermes";
     const config = local.engineConfig || local.engine_config || {};
     const isExternal = engine === "claude-code" || engine === "codex";
@@ -220,7 +220,7 @@
         <span class="avatar contact-card-avatar" style="${avatarStyleFor(avatar)}"></span>
         <div class="contact-card-head-text">
           <strong class="contact-card-name">${escapeHtml(name)}</strong>
-          <span class="contact-card-kind">${escapeHtml(local.runtimeLabel || engine)}</span>
+          <span class="contact-card-kind">${escapeHtml(local.runtimeLabel || (isCloudHermes ? "Mia Cloud" : engine))}</span>
         </div>
       </div>
       <dl class="contact-card-controls">

@@ -20,6 +20,12 @@ function parseJsonOr(value, fallback) {
   } catch { return fallback; }
 }
 
+function serializableCapabilities(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return value;
+  return [];
+}
+
 function rowToFellow(row) {
   if (!row) return null;
   return {
@@ -72,7 +78,7 @@ function createFellowsStore(db) {
       String(fellow.avatarImage || ""),
       fellow.avatarCrop ? JSON.stringify(fellow.avatarCrop) : "",
       String(fellow.bio || ""),
-      JSON.stringify(Array.isArray(fellow.capabilities) ? fellow.capabilities : []),
+      JSON.stringify(serializableCapabilities(fellow.capabilities)),
       String(fellow.personaText || ""),
       createdAt,
       now

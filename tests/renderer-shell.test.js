@@ -49,11 +49,16 @@ test("desktop cloud fellow rooms keep private AI composer controls visible", () 
 
 test("desktop cloud fellow rooms expose the restored chat history menu", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
   const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
   const socialApiSource = fs.readFileSync(path.join(root, "src/main/social/social-api.js"), "utf8");
 
+  assert.match(html, /shared\/session-history\.js/);
+  assert.match(appSource, /const sessionHistory = \(typeof window !== "undefined" && window\.miaSessionHistory\)/);
   assert.match(appSource, /if \(els\.sessionMenuButton\) els\.sessionMenuButton\.classList\.remove\("hidden"\);/);
   assert.match(appSource, /function renderCloudRoomSessionMenu\(activeRoom\)/);
+  assert.match(appSource, /sessionHistory\.sessionRoomsForRoom/);
+  assert.match(appSource, /sessionHistory\.createFellowSessionPayload/);
   assert.match(appSource, /function createNewCloudSessionForActive\(room\)/);
   assert.match(appSource, /window\.mia\.social\.ensureFellowSessionRoom/);
   assert.match(preloadSource, /ensureFellowSessionRoom: \(sessionId, body\) => ipcRenderer\.invoke\(IpcChannel\.SocialEnsureFellowSessionRoom, sessionId, body\)/);
@@ -63,7 +68,7 @@ test("desktop cloud fellow rooms expose the restored chat history menu", () => {
 test("desktop cloud-Hermes fellow controls save through cloud runtime binding", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
 
-  assert.match(appSource, /function runtimeKindForCloudFellowRoom\(room\)\s*\{[\s\S]*return String\(room\?\.decorations\?\.runtimeKind \|\| ""\)\.trim\(\) \|\| "desktop-local";/);
+  assert.match(appSource, /function runtimeKindForCloudFellowRoom\(room\)\s*\{[\s\S]*return sessionHistory\.runtimeKind\(room, "desktop-local"\);/);
   assert.match(appSource, /async function saveActiveCloudFellowRuntimeConfig/);
   assert.match(appSource, /window\.mia\.social\.saveFellowRuntime\(context\.fellowKey/);
   assert.match(appSource, /if\s*\(await saveActiveCloudFellowRuntimeConfig\([\s\S]*\)\)\s*return;/);
@@ -127,15 +132,19 @@ test("creating or messaging a fellow opens its conversation through the unified 
 
 test("contacts merge local fellows with owned cloud fellows", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
+  const fellowDirectorySource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-directory.js"), "utf8");
   const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");
   const socialSource = fs.readFileSync(path.join(root, "src/renderer/social/social.js"), "utf8");
 
-  assert.match(socialSource, /cloudOnly:\s*true/);
-  assert.match(socialSource, /cloudOnly:\s*false/);
+  assert.match(html, /fellow\/fellow-directory\.js/);
+  assert.match(fellowDirectorySource, /function listOwnedFellows/);
+  assert.match(socialSource, /window\.miaFellowDirectory[\s\S]*listOwnedFellows/);
   assert.match(fellowManagerSource, /function allOwnedFellows\(\)/);
-  assert.match(fellowManagerSource, /window\.miaSocial\?\._internalCtx\?\.adapterCtx\?\.\(\)\?\.fellows/);
+  assert.match(fellowManagerSource, /window\.miaFellowDirectory\.listOwnedFellows/);
   assert.match(fellowManagerSource, /const fellows = allOwnedFellows\(\);/);
-  assert.match(fellowManagerSource, /云端伙伴/);
+  assert.doesNotMatch(fellowManagerSource, /cloudOnly/);
+  assert.doesNotMatch(socialSource, /cloudOnly:\s*(true|false)/);
   assert.match(appSource, /const cloudFellowKeys = new Set/);
   assert.match(appSource, /const contactKeys = new Set/);
 });
@@ -155,18 +164,25 @@ test("contact detail shows engine logo and fellow device label", () => {
   assert.match(styleSource, /\.contact-engine-badge \.contact-engine-logo/);
 });
 
-test("contact detail allows deleting owned cloud-only fellows", () => {
+test("contact detail deletes fellows through runtime-backed ownership rules", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
   const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");
+  const commandsSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-commands.js"), "utf8");
   const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
   const channelSource = fs.readFileSync(path.join(root, "src/shared/ipc-channels.js"), "utf8");
   const socialApiSource = fs.readFileSync(path.join(root, "src/main/social/social-api.js"), "utf8");
   const socialIpcSource = fs.readFileSync(path.join(root, "src/main/social/social-ipc.js"), "utf8");
 
   assert.doesNotMatch(appSource, /if \(!fellow \|\| fellow\.key === "mia"\) return;/);
-  assert.match(appSource, /if \(!fellow\.cloudOnly && fellow\.key === "mia"\) return;/);
-  assert.match(appSource, /window\.mia\.social\.deleteFellow\(fellow\.key\)/);
-  assert.match(fellowManagerSource, /const canDeleteFellow = fellow\.cloudOnly \|\| \(canEditLocalFellow && fellow\.key !== "mia"\);/);
+  assert.match(appSource, /if \(fellow\.canDelete === false\) return;/);
+  assert.match(appSource, /const isCloudFellow = fellow\.runtimeKind === "cloud-hermes"/);
+  assert.match(appSource, /window\.miaFellowCommands\.deleteFellow\(\{/);
+  assert.doesNotMatch(appSource, /window\.mia\.social\.deleteFellow\(fellow\.key\)/);
+  assert.match(commandsSource, /async function deleteCloudHermesFellow/);
+  assert.match(commandsSource, /api\.social\.deleteFellow\(key\)/);
+  assert.match(commandsSource, /async function deleteDesktopLocalFellow/);
+  assert.match(commandsSource, /api\.deleteFellow\(\{ key \}\)/);
+  assert.match(fellowManagerSource, /const canDeleteFellow = fellow\.canDelete !== false;/);
   assert.match(channelSource, /SocialDeleteFellow/);
   assert.match(preloadSource, /deleteFellow: \(fellowId\) => ipcRenderer\.invoke\(IpcChannel\.SocialDeleteFellow, fellowId\)/);
   assert.match(socialApiSource, /async deleteFellow\(fellowId\)/);
@@ -189,13 +205,18 @@ test("fellow creation dialog separates runtime location from agent engine", () =
 
 test("fellow creation branches cloud-hermes without saving local manifest", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
+  const commandsSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-commands.js"), "utf8");
 
-  assert.match(appSource, /function cloudFellowKeyFromName\(name, existingKeys = \[\]\)/);
-  assert.match(appSource, /async function createCloudHermesFellow\(fellow\)/);
-  assert.match(appSource, /window\.mia\.social\.saveFellowIdentity\(key,/);
-  assert.match(appSource, /runtimeKind:\s*"cloud-hermes"/);
-  assert.match(appSource, /if \(runtimeKind === "cloud-hermes"\)/);
-  assert.match(appSource, /state\.runtime = await window\.mia\.saveFellow\(fellow\)/);
+  assert.match(html, /fellow\/fellow-commands\.js/);
+  assert.match(appSource, /window\.miaFellowCommands\.saveFellow\(\{/);
+  assert.doesNotMatch(appSource, /async function createCloudHermesFellow/);
+  assert.doesNotMatch(appSource, /window\.mia\.social\.saveFellowIdentity\(key,/);
+  assert.match(commandsSource, /async function saveCloudHermesFellow/);
+  assert.match(commandsSource, /api\.social\.saveFellowIdentity\(key,/);
+  assert.match(commandsSource, /runtimeKind:\s*"cloud-hermes"/);
+  assert.match(commandsSource, /async function saveDesktopLocalFellow/);
+  assert.match(commandsSource, /api\.saveFellow\(fellow\)/);
 });
 
 test("opening a fellow conversation preserves existing cloud runtime kind", () => {

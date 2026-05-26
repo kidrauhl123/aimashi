@@ -1,4 +1,8 @@
 const { parseAttachmentsFromMessage } = require("./attachment-materializer.js");
+const {
+  directFellowIdsForMessage,
+  messageHasMentions
+} = require("../shared/group-fellow-routing.js");
 
 function requireDep(deps, key) {
   if (!deps || !deps[key]) throw new Error(`${key} dependency is required`);
@@ -49,17 +53,26 @@ function createCloudAgentDispatcher(deps = {}) {
     const message = args.message || {};
     if (!userId || !roomId || !message.id) return null;
     if (message.sender_kind && message.sender_kind !== "user") return null;
+    if (!requestedFellowId && messageHasMentions(message)) return null;
 
     const room = socialStore.getRoom(roomId);
     if (!room) return null;
     if (room.type === "fellow" && room.decorations?.runtimeKind !== "cloud-hermes") return null;
-    if (room.type !== "fellow" && !requestedFellowId) return null;
-    const fellowMember = socialStore.listRoomMembers(roomId)
-      .find((member) =>
-        member.member_kind === "fellow"
-        && member.owner_id === userId
-        && (!requestedFellowId || member.member_ref === requestedFellowId)
-      );
+    const fellowMembers = socialStore.listRoomMembers(roomId)
+      .filter((member) => member.member_kind === "fellow" && member.owner_id === userId);
+    const enabledFellowMembers = fellowMembers.filter((member) =>
+      runtimeBindingsStore.getEnabledBinding(userId, member.member_ref, "cloud-hermes")
+    );
+    let fellowMember = null;
+    if (requestedFellowId) {
+      fellowMember = fellowMembers.find((member) => member.member_ref === requestedFellowId) || null;
+    } else if (room.type === "fellow") {
+      fellowMember = enabledFellowMembers[0] || null;
+    } else {
+      const fellows = fellowsStore.listFellows(userId);
+      const directFellowIds = directFellowIdsForMessage(message, enabledFellowMembers, enabledFellowMembers, fellows);
+      fellowMember = enabledFellowMembers.find((member) => member.member_ref === directFellowIds[0]) || null;
+    }
     if (!fellowMember) return null;
 
     const fellowId = fellowMember.member_ref;

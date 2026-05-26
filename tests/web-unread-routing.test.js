@@ -68,6 +68,15 @@ test("src/web/index.html loads shared engine contracts before app.js", () => {
   assert.ok(engineIdx < appIdx, "engine contracts must be loaded before app.js");
 });
 
+test("src/web/index.html loads shared session-history before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const historyIdx = html.indexOf("shared/session-history.js");
+  const appIdx = html.indexOf("./app.js");
+  assert.ok(historyIdx >= 0, "index.html must reference shared/session-history.js");
+  assert.ok(appIdx >= 0, "index.html must load app.js");
+  assert.ok(historyIdx < appIdx, "session-history must be loaded before app.js");
+});
+
 test("src/web/index.html loads desktop markdown helper before app.js", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
   const markdownIdx = html.indexOf("helpers/markdown-helpers.js");
@@ -102,6 +111,31 @@ test("scripts/build-cloud-release.js copies shared/engine-contracts.js into the 
     /copyFile\(["']src\/shared\/engine-contracts\.js["'][^)]+["']shared["'][^)]+["']engine-contracts\.js["']\)/,
     "build-cloud-release must copy src/shared/engine-contracts.js to web/shared/engine-contracts.js"
   );
+});
+
+test("scripts/build-cloud-release.js copies shared/session-history.js into the web tree", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/session-history\.js["'][^)]+["']shared["'][^)]+["']session-history\.js["']\)/,
+    "build-cloud-release must copy src/shared/session-history.js to web/shared/session-history.js"
+  );
+});
+
+test("scripts/build-cloud-release.js copies cloud shared modules into the api tree", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/engine-contracts\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']engine-contracts\.js["']\)\)/,
+    "build-cloud-release must copy engine-contracts.js for api shared modules"
+  );
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/group-fellow-routing\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']group-fellow-routing\.js["']\)\)/,
+    "build-cloud-release must copy group-fellow-routing.js for api cloud-agent modules"
+  );
+  assert.match(build, /api\/src\/shared\/engine-contracts\.js/);
+  assert.match(build, /api\/src\/shared\/group-fellow-routing\.js/);
 });
 
 test("cloud release and local web server expose desktop model icon assets", () => {
@@ -190,7 +224,7 @@ test("src/web/app.js supports desktop-style markdown links and code copy", () =>
 
 test("src/web/app.js lets web controls update desktop-local fellow runtime bindings", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
-  assert.match(source, /function runtimeKindForFellowRoom\(room, fellow\)[\s\S]*return runtimeKind \|\| "desktop-local";/);
+  assert.match(source, /function runtimeKindForFellowRoom\(room, fellow\)[\s\S]*return sessionHistory\.runtimeKind\(room, "desktop-local"\);/);
   assert.doesNotMatch(source, /return runtimeKind \|\| "cloud-hermes";/);
   assert.doesNotMatch(source, /runtimeKind === "desktop-local"\)\s*return null/);
   assert.doesNotMatch(source, /Desktop controls/);
@@ -226,11 +260,14 @@ test("src/web/app.js switches conversations before awaiting network hydration", 
 
 test("src/web/app.js restores the topbar chat history selector for fellow rooms", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /const sessionHistory = window\.miaSessionHistory/);
   assert.match(source, /sessionMenuButton: document\.getElementById\("sessionMenuButton"\)/);
   assert.match(source, /function renderSessionMenu\(\)/);
   assert.match(source, /function sessionRoomsForRoom\(room\)/);
+  assert.match(source, /sessionHistory\.sessionRoomsForRoom/);
+  assert.match(source, /sessionHistory\.createFellowSessionPayload/);
   assert.match(source, /function createNewSessionForActive\(\)/);
-  assert.match(source, /\/api\/me\/fellow-rooms\/\$\{encodeURIComponent\(sessionId\)\}/);
+  assert.match(source, /\/api\/me\/fellow-rooms\/\$\{encodeURIComponent\(payload\.sessionId\)\}/);
   assert.match(source, /sessionMenuOpen/);
   assert.match(source, /currentSessionTitle/);
   assert.match(source, /newSession\?\.classList\.toggle\("hidden", !canCreate\)/);

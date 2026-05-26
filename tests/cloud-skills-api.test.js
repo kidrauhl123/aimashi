@@ -5,7 +5,14 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+const AdmZip = require("adm-zip");
 const { freePort } = require("./helpers/free-port");
+
+function skillZipBase64(bodyText) {
+  const zip = new AdmZip();
+  zip.addFile("SKILL.md", Buffer.from(bodyText || "---\nname: x\n---\n# X"));
+  return zip.toBuffer().toString("base64");
+}
 
 async function startServer() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-test-"));
@@ -137,6 +144,48 @@ test("POST install bumps count once per user, returns download info; package dow
     // a different user → count grows
     const i3 = await api(ctx.port, "POST", "/api/skills/commit-craft/install", { token: bob.token });
     assert.equal(i3.body.skill.installCount, 2);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/skills publishes a user skill; it appears in the market and is installable", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const pub = await api(ctx.port, "POST", "/api/skills", {
+      token: alice.token,
+      body: { name: "My Helper", category: "办公学习", description: "mine", packageBase64: skillZipBase64("---\nname: My Helper\n---\n# Mine") }
+    });
+    assert.equal(pub.status, 201);
+    assert.equal(pub.body.skill.id, "alice.my-helper");
+    assert.equal(pub.body.skill.ownerLabel, "alice");
+    assert.equal(pub.body.skill.latestVersion, "1.0.0");
+
+    const list = await api(ctx.port, "GET", "/api/skills", { token: alice.token });
+    assert.ok(list.body.skills.some((s) => s.id === "alice.my-helper"));
+
+    const inst = await api(ctx.port, "POST", "/api/skills/alice.my-helper/install", { token: alice.token });
+    assert.equal(inst.status, 200);
+    assert.ok(inst.body.download.url);
+    const pkg = await api(ctx.port, "GET", inst.body.download.url, { token: alice.token });
+    assert.equal(pkg.status, 200);
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/skills rejects republishing another owner's skill (403)", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const bob = await register(ctx.port, "bob");
+    await api(ctx.port, "POST", "/api/skills", {
+      token: alice.token,
+      body: { name: "Shared", packageBase64: skillZipBase64() }
+    });
+    // bob tries to publish to alice's id
+    const r = await api(ctx.port, "POST", "/api/skills", {
+      token: bob.token,
+      body: { id: "alice.shared", name: "Shared", packageBase64: skillZipBase64() }
+    });
+    assert.equal(r.status, 403);
   } finally { await stopServer(ctx); }
 });
 

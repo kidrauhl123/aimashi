@@ -272,7 +272,30 @@ function createCloudDesktopSyncClient({
       method: "POST",
       body: {}
     });
+    return { skill: data && data.skill ? data.skill : null, download: data && data.download ? data.download : null };
+  }
+
+  async function publishSkill(payload) {
+    const data = await cloudApi("/api/skills", { method: "POST", body: payload || {} });
     return data && data.skill ? data.skill : null;
+  }
+
+  async function reportSkill(skillId, reason = "") {
+    const data = await cloudApi(`/api/skills/${encodeURIComponent(String(skillId))}/report`, {
+      method: "POST",
+      body: { reason }
+    });
+    return data && data.reportId ? data.reportId : null;
+  }
+
+  async function downloadSkillPackage(pathSegment) {
+    const current = settings();
+    const baseUrl = normalizeCloudUrl(current.url);
+    const headers = {};
+    if (current.token) headers.Authorization = `Bearer ${current.token}`;
+    const response = await fetchImpl(`${baseUrl}${pathSegment}`, { headers, signal: timeoutSignal(30000) });
+    if (!response.ok) throw new Error(`Mia Cloud ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
   }
 
   async function login({ username, password, mode = "login", url = "" } = {}) {
@@ -306,6 +329,9 @@ function createCloudDesktopSyncClient({
     deleteFellow,
     getUserSettings,
     installMarketSkill,
+    downloadSkillPackage,
+    publishSkill,
+    reportSkill,
     listMarketSkills,
     login,
     logout,

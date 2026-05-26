@@ -174,27 +174,30 @@
 }
 .task-fire-affordance .link:hover { text-decoration: underline; }
 
-/* ── Manual task create form ───────────────────────────────────────────── */
-.task-form-row select {
-  padding: 4px 8px; border: 1px solid var(--color-border, #d1d5db);
-  border-radius: 4px; font-family: inherit; font-size: 13px;
+/* ── Manual task create dialog (reuses .fellow-dialog / .fellow-form) ────── */
+.task-create-dialog .fellow-form { width: min(520px, calc(100vw - 48px)); }
+.task-create-dialog .req { color: #e5484d; font-style: normal; }
+/* Char counter sits inside the field, anchored to the corner. */
+.task-field { position: relative; display: block; }
+.task-field-count {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; color: var(--muted); font-style: normal; pointer-events: none;
 }
-.task-create-actions {
-  display: flex; justify-content: flex-end; gap: 8px;
-  margin-top: 8px; padding-top: 16px;
-  border-top: 1px solid var(--color-border, #e5e7eb);
+.task-field input { padding-right: 56px; }
+.task-field-count-area { top: auto; bottom: 10px; transform: none; }
+.task-create-dialog .task-field textarea { min-height: 150px; padding-bottom: 24px; }
+.task-time-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.task-time-controls { display: flex; gap: 8px; align-items: center; flex: 1; min-width: 0; }
+.task-time-row > select,
+.task-time-controls > input,
+.task-time-controls > select {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; background: var(--surface); color: var(--text); outline: 0;
 }
-.task-create .primary {
-  background: var(--accent, #0162db); color: #fff;
-  border: 1px solid var(--accent, #0162db); border-radius: 6px;
-  padding: 6px 16px; font-size: 13px; cursor: pointer;
-}
-.task-create .primary:hover { filter: brightness(1.05); }
-.task-create-error {
-  margin-top: 12px; color: #b91c1c; font-size: 13px; text-align: right;
-}
+.task-create-error { color: #e5484d; font-size: 13px; }
 .tasks-empty .secondary {
   margin-top: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer;
-  border: 1px solid var(--color-border, #d1d5db); border-radius: 6px;
-  background: var(--color-surface, #fff); color: var(--color-text-primary, #111);
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--text);
 }

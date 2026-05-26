@@ -293,7 +293,12 @@
       : (seed ? "创建你的第一个伙伴" : "添加伙伴");
     if (els.fellowKey) els.fellowKey.value = actualFellow?.key || "";
     els.fellowName.value = actualFellow?.name || seed?.name || "";
-    renderFellowRuntimeLocationSelect("desktop-local");
+    const runtimeKind = window.miaFellowDirectory?.normalizeRuntimeKind?.(
+      actualFellow?.runtimeKind || actualFellow?.runtime_kind || seed?.runtimeKind,
+      actualFellow?.sourceKinds?.includes?.("cloud") ? "cloud-hermes" : "desktop-local"
+    ) || "desktop-local";
+    renderFellowRuntimeLocationSelect(runtimeKind);
+    if (els.fellowRuntimeLocation) els.fellowRuntimeLocation.disabled = Boolean(actualFellow);
     renderFellowAgentEngineSelect(actualFellow?.agentEngine || actualFellow?.agent_engine || seed?.agentEngine || "hermes");
     const avatarImage = actualFellow?.avatarImage || window.miaAvatar.defaultAvatarAssets()[0];
     state.fellowAvatarPresetGroup = window.miaAvatar.avatarPresetGroupForSrc(avatarImage) || "human";

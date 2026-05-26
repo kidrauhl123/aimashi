@@ -181,7 +181,7 @@ function createFellowManifest(deps = {}) {
     return [
       `# ${name}`,
       "",
-      `你是${name}，Mia App 里的本地伙伴。`,
+      `你是${name}，Mia App 里的 Fellow。`,
       description ? String(description).trim() : "请保持清楚、可靠、可执行的沟通风格。",
       ""
     ].join("\n");

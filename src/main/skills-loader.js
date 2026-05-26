@@ -12,6 +12,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { shell } = require("electron");
+const AdmZip = require("adm-zip");
 
 function cleanYamlScalar(value) {
   return String(value || "").trim().replace(/^['"]|['"]$/g, "");
@@ -217,15 +218,33 @@ function createSkillsLoader(deps = {}) {
   // Install a marketplace skill by writing its SKILL.md body into the
   // private source. The cloud returns the full body (with frontmatter);
   // we drop it at <home>/skills/<id>/SKILL.md so the next scan surfaces it.
-  async function installMarketplaceSkill(skill) {
-    if (!skill || !skill.id || !skill.body) {
-      throw new Error("installMarketplaceSkill: skill.id and skill.body required");
+  // Extract a downloaded skill package (zip buffer) into the private source
+  // <home>/skills/<id>. The dir is cleared first so re-install/update replaces
+  // cleanly. Multi-file skills (scripts/references/assets) land intact.
+  async function installMarketplaceSkill({ id, zipBuffer } = {}) {
+    if (!id || !zipBuffer) {
+      throw new Error("installMarketplaceSkill: id and zipBuffer required");
     }
-    const safeId = String(skill.id).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "skill";
+    const safeId = String(id).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "skill";
     const skillDir = path.join(runtimePaths().home, "skills", safeId);
+    fs.rmSync(skillDir, { recursive: true, force: true });
     fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, "SKILL.md"), String(skill.body), "utf8");
+    new AdmZip(Buffer.from(zipBuffer)).extractAllTo(skillDir, true);
     return loadLocalSkills();
+  }
+
+  // Zip a local skill's directory for publishing to the marketplace.
+  function packageLocalSkill(skillId) {
+    const found = resolveLocalSkill(skillId);
+    if (!found) throw new Error("Skill not found.");
+    const skillDir = path.dirname(found.filePath);
+    const zip = new AdmZip();
+    zip.addLocalFolder(skillDir);
+    return {
+      name: found.skill?.name || path.basename(skillDir),
+      description: found.skill?.description || "",
+      packageBase64: zip.toBuffer().toString("base64")
+    };
   }
 
   function readMiaOfficialSkillSources() {
@@ -469,6 +488,7 @@ function createSkillsLoader(deps = {}) {
     deleteLocalSkill,
     openLocalSkillDirectory,
     installMarketplaceSkill,
+    packageLocalSkill,
     installMarketplacePlugin,
     // Used by chat-engine adapters
     expandLeadingSkillCommand,

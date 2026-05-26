@@ -1,0 +1,59 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { test } = require("node:test");
+
+const root = path.join(__dirname, "..");
+const sessionHistory = require("../src/shared/session-history");
+
+function loadBrowserGlobal() {
+  const source = fs.readFileSync(path.join(root, "src/shared/session-history.js"), "utf8");
+  const context = { window: {} };
+  context.globalThis = context.window;
+  vm.runInNewContext(source, context, { filename: "src/shared/session-history.js" });
+  return context.window.miaSessionHistory;
+}
+
+test("session-history contract is available in Node and browser contexts", () => {
+  const browserContract = loadBrowserGlobal();
+  assert.equal(sessionHistory.roomType({ id: "fellow:u:mia" }), "fellow");
+  assert.equal(browserContract.roomType({ id: "dm:a:b" }), "dm");
+  assert.equal(browserContract.fellowKey({ id: "fellow:u:sess", decorations: { fellowKey: "mia" } }), "mia");
+});
+
+test("session-history groups fellow rooms by fellow key and sorts by latest message", () => {
+  const messages = new Map([
+    ["fellow:u:s1", { messages: [{ created_at: "2026-01-01T00:00:00.000Z" }] }],
+    ["fellow:u:s2", { messages: [{ created_at: "2026-01-02T00:00:00.000Z" }] }]
+  ]);
+  const rooms = [
+    { id: "fellow:u:s1", type: "fellow", decorations: { fellowKey: "mia" } },
+    { id: "fellow:u:s2", type: "fellow", decorations: { fellowKey: "mia" } },
+    { id: "fellow:u:c1", type: "fellow", decorations: { fellowKey: "codex" } },
+    { id: "g_1", type: "group", name: "群聊" }
+  ];
+
+  const grouped = sessionHistory.sessionRoomsForRoom(rooms[0], rooms, { messageCache: messages });
+  assert.deepEqual(grouped.map((room) => room.id), ["fellow:u:s2", "fellow:u:s1"]);
+});
+
+test("session-history derives title and new-session payload consistently", () => {
+  const room = {
+    id: "fellow:u:s1",
+    type: "fellow",
+    decorations: { fellowKey: "mia", runtimeKind: "cloud-hermes" }
+  };
+  const title = sessionHistory.sessionTitle(room, {
+    fellows: [{ id: "mia", name: "Mia" }]
+  });
+  const payload = sessionHistory.createFellowSessionPayload(room, "sess_new", { title: "新对话" });
+
+  assert.equal(title, "Mia");
+  assert.deepEqual(payload, {
+    fellowKey: "mia",
+    title: "新对话",
+    runtimeKind: "cloud-hermes",
+    sessionId: "sess_new"
+  });
+});

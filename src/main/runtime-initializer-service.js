@@ -145,7 +145,7 @@ function createRuntimeInitializerService(deps = {}) {
     if (writeFileIfMissing(p.soul, [
       "# Mia Shared Soul",
       "",
-      "你是 Mia 应用中的本地伙伴。这里是所有 Fellow 共享的基础语气。",
+      "你是 Mia 应用中的 Fellow。这里是所有 Fellow 共享的基础语气。",
       "具体名字、身份和关系写在 fellows/<fellow_id>.md。",
       "",
       "## Style",

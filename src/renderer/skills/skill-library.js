@@ -202,6 +202,7 @@
     menu.innerHTML = `
       ${menuItemHtml({ icon: "preview", label: "预览", attrs: 'data-skill-action="preview"' })}
       ${menuItemHtml({ icon: "folderOpen", label: "打开目录", attrs: 'data-skill-action="open-directory"' })}
+      ${menuItemHtml({ icon: "edit", label: "发布到市场", attrs: 'data-skill-action="publish"' })}
       <div class="skill-context-menu-separator" role="separator"></div>
       ${menuItemHtml({ icon: "delete", label: "删除", attrs: `data-skill-action="delete" ${canDelete ? "" : "disabled"}`, className: "danger" })}
     `;
@@ -222,6 +223,34 @@
       closeSkillContextMenu();
       openSkillDirectory(skill.id);
     });
+    menu.querySelector('[data-skill-action="publish"]')?.addEventListener("click", () => {
+      closeSkillContextMenu();
+      publishLocalSkill(skill.id);
+    });
+  }
+
+  async function publishLocalSkill(skillId) {
+    const category = window.prompt("发布到市场 —— 填写分类（如 办公学习 / 生活日常）：", "uncategorized");
+    if (category === null) return;
+    try {
+      const published = await window.mia.publishSkill({ skillId, category: category.trim() || "uncategorized", version: "1.0.0" });
+      window.alert(published ? `已发布「${published.name}」到市场。` : "发布失败。");
+      state.skillMarket.loaded = false;
+      if (state.skillMarketMode) loadMarketSkills();
+    } catch (error) {
+      window.alert(`发布失败：${error?.message || error}`);
+    }
+  }
+
+  async function reportMarketSkill(skillId) {
+    const reason = window.prompt("举报这个技能的原因：", "");
+    if (reason === null) return;
+    try {
+      await window.mia.reportMarketSkill({ skillId, reason });
+      window.alert("已提交举报，我们会尽快处理。");
+    } catch (error) {
+      window.alert(`举报失败：${error?.message || error}`);
+    }
   }
 
   // ---- Marketplace (探索发现) ----
@@ -302,6 +331,12 @@
         installMarketSkill(button.dataset.skillInstall);
       });
     });
+    els.skillCardGrid.querySelectorAll("[data-market-id]").forEach((card) => {
+      card.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        reportMarketSkill(card.dataset.marketId);
+      });
+    });
   }
 
   async function loadMarketSkills() {
@@ -324,6 +359,10 @@
 
   async function installMarketSkill(skillId) {
     if (!skillId || !state || state.installingSkillIds.has(skillId)) return;
+    const entry = state.skillMarket.skills.find((skill) => skill.id === skillId);
+    const owner = entry?.ownerLabel || "未知来源";
+    const ok = window.confirm(`添加「${entry?.name || skillId}」？\n\n来源：${owner}\n技能会作为可执行能力安装到本机，且未经审核。确认从该来源安装？`);
+    if (!ok) return;
     state.installingSkillIds.add(skillId);
     renderSkillLibrary();
     try {

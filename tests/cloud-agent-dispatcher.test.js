@@ -255,6 +255,198 @@ test("invokeFellow runs enabled cloud-hermes fellows in group rooms", async () =
   }
 });
 
+test("handleUserMessage runs the single owned cloud-hermes fellow in a group room", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    const group = ctx.socialStore.createRoom({
+      id: "g_cloud_auto",
+      type: "group",
+      name: "Cloud Group"
+    });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.runtimeBindingsStore.upsertBinding({
+      userId: ctx.user.id,
+      fellowId: "mia",
+      runtimeKind: "cloud-hermes",
+      enabled: true,
+      config: { model: "hermes-agent" }
+    });
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_group_auto", content: "single fellow reply", events: [] };
+        }
+      },
+      broadcastPersistedEvent() {},
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "谁能总结一下"
+    });
+
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      roomId: group.id,
+      message
+    });
+
+    assert.equal(reply.sender_ref, "mia");
+    assert.equal(reply.body_md, "single fellow reply");
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].roomId, group.id);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("handleUserMessage routes multi-fellow cloud groups by the named fellow", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "xiaoli", name: "小栗", capabilities: ["chat"] });
+    const group = ctx.socialStore.createRoom({
+      id: "g_cloud_named",
+      type: "group",
+      name: "Cloud Group"
+    });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "xiaoli", ownerId: ctx.user.id });
+    for (const fellowId of ["alice", "xiaoli"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_group_named", content: "alice cloud reply", events: [] };
+        }
+      },
+      broadcastPersistedEvent() {},
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "爱丽丝你说一下"
+    });
+
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      roomId: group.id,
+      message
+    });
+
+    assert.equal(reply.sender_ref, "alice");
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].fellow.id, "alice");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("handleUserMessage routes cloud group search requests to a search-capable fellow", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, {
+      id: "blackcat",
+      name: "黑猫",
+      capabilities: { webSearch: true }
+    });
+    const group = ctx.socialStore.createRoom({
+      id: "g_cloud_search",
+      type: "group",
+      name: "Cloud Group"
+    });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "blackcat", ownerId: ctx.user.id });
+    for (const fellowId of ["alice", "blackcat"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_group_search", content: "search cloud reply", events: [] };
+        }
+      },
+      broadcastPersistedEvent() {},
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "爱丽丝你帮我找下AI领域最新新闻"
+    });
+
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      roomId: group.id,
+      message
+    });
+
+    assert.equal(reply.sender_ref, "blackcat");
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].fellow.id, "blackcat");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("dispatcher skips fellow rooms without enabled cloud-hermes binding", async () => {
   const ctx = setup();
   try {

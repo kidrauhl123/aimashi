@@ -9,7 +9,7 @@
 
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { packageBody, packageDir } = require("./skill-packages.js");
+const { packageBody, packageDir, packageFromZip } = require("./skill-packages.js");
 
 function nowIso() {
   return new Date().toISOString();
@@ -103,12 +103,14 @@ function createSkillsStore(db, options = {}) {
     const {
       id, ownerUserId = null, ownerLabel = "", name,
       category = "uncategorized", description = "",
-      version = "1.0.0", body = "", srcDir = "", changelog = ""
+      version = "1.0.0", body = "", srcDir = "", zipBuffer = null, changelog = ""
     } = input || {};
     if (!id || !name) throw new Error("publishVersion: id and name required");
-    if (!srcDir && !body) throw new Error("publishVersion: srcDir or body required");
+    if (!srcDir && !body && !zipBuffer) throw new Error("publishVersion: srcDir, body or zipBuffer required");
     const destZip = path.join(pkgRoot, String(id), `${version}.zip`);
-    const pkg = srcDir ? packageDir(srcDir, destZip) : packageBody(body, destZip);
+    const pkg = zipBuffer ? packageFromZip(zipBuffer, destZip)
+      : srcDir ? packageDir(srcDir, destZip)
+      : packageBody(body, destZip);
     const relPath = path.relative(dataDir, destZip);
     const now = nowIso();
     upsertSkillStmt.run(String(id), ownerUserId, String(ownerLabel), String(name), String(category), String(description), String(version), now, now);

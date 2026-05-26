@@ -2036,6 +2036,38 @@ async function handleRequest(req, res, context) {
       const categories = context.skillsStore.listCategories();
       return writeJson(res, 200, { skills, categories });
     }
+    // Open publish: any signed-in user can publish a packaged skill version.
+    if (req.method === "POST" && url.pathname === "/api/skills") {
+      const pubBody = await readJson(req).catch(() => ({}));
+      const name = String(pubBody?.name || "").trim();
+      const packageBase64 = String(pubBody?.packageBase64 || "");
+      if (!name || !packageBase64) return writeError(res, 400, "name and packageBase64 required.");
+      const username = auth.user.username || auth.user.id;
+      const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "skill";
+      const id = pubBody?.id ? String(pubBody.id) : `${username}.${slug}`;
+      const existing = context.skillsStore.getSkill(id);
+      if (existing && existing.ownerUserId && existing.ownerUserId !== auth.user.id) {
+        return writeError(res, 403, "你不是这个技能的拥有者。");
+      }
+      const zipBuffer = Buffer.from(packageBase64, "base64");
+      if (zipBuffer.length > 25 * 1024 * 1024) return writeError(res, 413, "package too large.");
+      try {
+        const skill = context.skillsStore.publishVersion({
+          id,
+          ownerUserId: auth.user.id,
+          ownerLabel: username,
+          name,
+          category: String(pubBody?.category || "uncategorized"),
+          description: String(pubBody?.description || ""),
+          version: String(pubBody?.version || "1.0.0"),
+          zipBuffer,
+          changelog: String(pubBody?.changelog || "")
+        });
+        return writeJson(res, 201, { skill });
+      } catch (error) {
+        return writeError(res, 400, error.message || "publish failed.");
+      }
+    }
     const skillPackageMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/versions\/([A-Za-z0-9._-]+)\/package$/);
     if (req.method === "GET" && skillPackageMatch) {
       const version = context.skillsStore.getVersion(skillPackageMatch[1], skillPackageMatch[2]);

@@ -1866,11 +1866,29 @@ ipcMain.handle(IpcChannel.SkillsDelete, (_event, skillId) => skillsLoader.delete
 ipcMain.handle(IpcChannel.SkillsOpenDirectory, (_event, skillId) => skillsLoader.openLocalSkillDirectory(skillId));
 ipcMain.handle(IpcChannel.SkillsMarketList, (_event, params) => cloudDesktopSync().listMarketSkills(params || {}));
 ipcMain.handle(IpcChannel.SkillsMarketInstall, async (_event, skillId) => {
-  const skill = await cloudDesktopSync().installMarketSkill(skillId);
-  if (!skill) throw new Error("技能不存在或安装失败。");
-  const library = await skillsLoader.installMarketplaceSkill(skill);
+  const sync = cloudDesktopSync();
+  const { skill, download } = await sync.installMarketSkill(skillId);
+  if (!skill || !download || !download.url) throw new Error("技能不存在或安装失败。");
+  const zipBuffer = await sync.downloadSkillPackage(download.url);
+  const checksum = crypto.createHash("sha256").update(zipBuffer).digest("hex");
+  if (download.checksum && checksum !== download.checksum) {
+    throw new Error("技能包校验失败（checksum 不匹配），已中止安装。");
+  }
+  const library = await skillsLoader.installMarketplaceSkill({ id: skill.id, zipBuffer });
   return { skill, library };
 });
+ipcMain.handle(IpcChannel.SkillsPublish, async (_event, payload) => {
+  const pkg = skillsLoader.packageLocalSkill(payload?.skillId);
+  return cloudDesktopSync().publishSkill({
+    name: pkg.name,
+    description: pkg.description,
+    category: payload?.category || "uncategorized",
+    version: payload?.version || "1.0.0",
+    packageBase64: pkg.packageBase64
+  });
+});
+ipcMain.handle(IpcChannel.SkillsReport, (_event, payload) =>
+  cloudDesktopSync().reportSkill(payload?.skillId, payload?.reason || ""));
 ipcMain.handle(IpcChannel.PermissionsSave, async (_event, settings) => {
   settingsStore.writePermissionSettings(settings);
   return getRuntimeStatus();

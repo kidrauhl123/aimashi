@@ -157,7 +157,7 @@
           <div id="activeChatAvatar" class="profile-avatar">A</div>
           <div>
             <h1><span id="activeChatName">Mia</span></h1>
-            <p id="activeChatMeta">本地伙伴</p>
+            <p id="activeChatMeta">Fellow</p>
           </div>
         </div>
         <div class="top-actions">
@@ -259,7 +259,7 @@
         <div class="group-title">
           <div>
             <h1><span id="contactPageTitle">联系人</span></h1>
-            <p id="contactPageMeta">本地伙伴通讯录</p>
+            <p id="contactPageMeta">Fellow 通讯录</p>
           </div>
         </div>
       </header>
@@ -842,6 +842,60 @@
       </div>
     </div>
   </section>
+
+  <!-- Manual task create dialog — reuses .fellow-dialog / .fellow-form modal style -->
+  <section id="taskCreateDialog" class="fellow-dialog task-create-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="taskCreateTitle">
+    <form id="taskCreateForm" class="fellow-form">
+      <header class="fellow-dialog-head">
+        <div>
+          <h2 id="taskCreateTitle">新建自动任务</h2>
+        </div>
+        <button id="closeTaskCreate" class="icon-button" type="button" title="关闭">×</button>
+      </header>
+
+      <label>
+        <span>名称 <i class="req">*</i></span>
+        <span class="task-field">
+          <input id="ntName" maxlength="50" autocomplete="off" placeholder="请输入任务名称">
+          <em class="task-field-count" id="ntNameCount">0/50</em>
+        </span>
+      </label>
+
+      <label>
+        <span>执行的 Agent <i class="req">*</i></span>
+        <select id="ntFellow"></select>
+      </label>
+
+      <label>
+        <span>要求说明 <i class="req">*</i></span>
+        <span class="task-field">
+          <textarea id="ntPrompt" maxlength="8000" placeholder="请输入任务要求说明"></textarea>
+          <em class="task-field-count task-field-count-area" id="ntPromptCount">0/8000</em>
+        </span>
+      </label>
+
+      <label>
+        <span>执行时间 <i class="req">*</i></span>
+        <div class="task-time-row">
+          <select id="ntFreq">
+            <option value="oneshot">单次</option>
+            <option value="daily">每天</option>
+            <option value="weekly">每周</option>
+            <option value="monthly">每月</option>
+          </select>
+          <div id="ntTimeControls" class="task-time-controls"></div>
+        </div>
+      </label>
+
+      <div class="task-create-error" id="ntError" hidden></div>
+
+      <footer class="fellow-dialog-actions">
+        <button id="cancelTaskCreate" class="secondary" type="button">取消</button>
+        <button class="primary" type="submit">确定</button>
+      </footer>
+    </form>
+  </section>
+
   <!-- Shared helpers (loaded first — others depend on them) -->
   <script src="./helpers/avatar-helpers.js"></script>
   <script src="./helpers/group-avatar.js"></script>
@@ -856,6 +910,7 @@
   <script src="../shared/cloud-events.js"></script>
   <script src="../shared/unread.js"></script>
   <script src="../shared/conversation-kinds.js"></script>
+  <script src="../shared/session-history.js"></script>
   <script src="../shared/group-tiles.js"></script>
   <script src="../shared/send-pipeline.js"></script>
   <script src="./app-state.js"></script>
@@ -872,6 +927,7 @@
   <script src="./skills/skill-library.js"></script>
   <script src="./fellow/pet-dialog.js"></script>
   <script src="./fellow/fellow-directory.js"></script>
+  <script src="./fellow/fellow-commands.js"></script>
   <script src="./fellow/fellow-dialog.js"></script>
   <script src="./fellow/fellow-manager.js"></script>
   <script src="./tasks/tasks-panel.js"></script>

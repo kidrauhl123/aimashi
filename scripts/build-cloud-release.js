@@ -316,6 +316,8 @@ function verifyRelease() {
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
+    "api/src/shared/engine-contracts.js",
+    "api/src/shared/group-fellow-routing.js",
     "api/src/permission-modes.js",
     "web/index.html",
     "web/admin-model.html",
@@ -360,6 +362,8 @@ function verifyRelease() {
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
+    "api/src/shared/engine-contracts.js",
+    "api/src/shared/group-fellow-routing.js",
     "api/src/permission-modes.js",
     "web/app.js",
     "web/admin-model.js",
@@ -513,6 +517,8 @@ function main() {
   copyFile("scripts/serve-cloud.js", path.join(apiDir, "server.js"));
   copyDir("src/cloud", path.join(apiDir, "src", "cloud"));
   copyDir("src/cloud-agent", path.join(apiDir, "src", "cloud-agent"));
+  copyFile("src/shared/engine-contracts.js", path.join(apiDir, "src", "shared", "engine-contracts.js"));
+  copyFile("src/shared/group-fellow-routing.js", path.join(apiDir, "src", "shared", "group-fellow-routing.js"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
   copyDir("src/web", webDir);
   copyDir("src/renderer/assets/model-icons", path.join(webDir, "assets", "model-icons"));
@@ -523,6 +529,7 @@ function main() {
   copyFile("src/shared/contact.js", path.join(webDir, "shared", "contact.js"));
   copyFile("src/shared/engine-contracts.js", path.join(webDir, "shared", "engine-contracts.js"));
   copyFile("src/shared/conversation-kinds.js", path.join(webDir, "shared", "conversation-kinds.js"));
+  copyFile("src/shared/session-history.js", path.join(webDir, "shared", "session-history.js"));
   copyFile("src/shared/unread.js", path.join(webDir, "shared", "unread.js"));
   copyFile("src/shared/group-tiles.js", path.join(webDir, "shared", "group-tiles.js"));
   copyFile("src/shared/send-pipeline.js", path.join(webDir, "shared", "send-pipeline.js"));

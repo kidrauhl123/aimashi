@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld("mia", {
   openSkillDirectory: (skillId) => ipcRenderer.invoke(IpcChannel.SkillsOpenDirectory, skillId),
   marketSkills: (params) => ipcRenderer.invoke(IpcChannel.SkillsMarketList, params),
   installMarketSkill: (skillId) => ipcRenderer.invoke(IpcChannel.SkillsMarketInstall, skillId),
+  publishSkill: (payload) => ipcRenderer.invoke(IpcChannel.SkillsPublish, payload),
+  reportMarketSkill: (payload) => ipcRenderer.invoke(IpcChannel.SkillsReport, payload),
   saveModel: (settings) => ipcRenderer.invoke(IpcChannel.ModelSave, settings),
   savePermissions: (settings) => ipcRenderer.invoke(IpcChannel.PermissionsSave, settings),
   saveEffort: (settings) => ipcRenderer.invoke(IpcChannel.EffortSave, settings),
