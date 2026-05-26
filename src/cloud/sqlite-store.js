@@ -586,6 +586,8 @@ function createCloudStore(options = {}) {
     getUserPublic,
     getUserByUsername,
     getDb: () => db,
+    uploadDir,
+    dataDir: path.dirname(dbPath),
     close: () => db.close()
   };
 }
@@ -861,6 +863,28 @@ function migrate(db) {
       created_at TEXT NOT NULL,
       PRIMARY KEY (skill_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS skill_versions (
+      skill_id      TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+      version       TEXT NOT NULL,
+      package_path  TEXT NOT NULL,
+      checksum      TEXT NOT NULL,
+      size_bytes    INTEGER NOT NULL DEFAULT 0,
+      entry_path    TEXT NOT NULL DEFAULT 'SKILL.md',
+      manifest_json TEXT NOT NULL DEFAULT '{}',
+      changelog     TEXT NOT NULL DEFAULT '',
+      scan_status   TEXT NOT NULL DEFAULT 'unscanned',
+      created_at    TEXT NOT NULL,
+      PRIMARY KEY (skill_id, version)
+    );
+
+    CREATE TABLE IF NOT EXISTS skill_reports (
+      id          TEXT PRIMARY KEY,
+      skill_id    TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+      reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason      TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL
+    );
   `);
   if (!hasColumn(db, "bridge_runs", "request_attachments_json")) {
     db.exec("ALTER TABLE bridge_runs ADD COLUMN request_attachments_json TEXT NOT NULL DEFAULT '[]'");
@@ -915,6 +939,25 @@ function migrate(db) {
     .run(nowIso());
   // v10: skill marketplace registry (skills + per-user install ledger).
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (10, ?)")
+    .run(nowIso());
+  // v11: community marketplace — skills become listings with versioned zip
+  // packages + ownership. (skill_versions / skill_reports created above.)
+  if (!hasColumn(db, "skills", "owner_user_id")) {
+    db.exec("ALTER TABLE skills ADD COLUMN owner_user_id TEXT");
+  }
+  if (!hasColumn(db, "skills", "owner_label")) {
+    db.exec("ALTER TABLE skills ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, "skills", "latest_version")) {
+    db.exec("ALTER TABLE skills ADD COLUMN latest_version TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, "skills", "status")) {
+    db.exec("ALTER TABLE skills ADD COLUMN status TEXT NOT NULL DEFAULT 'published'");
+  }
+  if (!hasColumn(db, "skill_installs", "installed_version")) {
+    db.exec("ALTER TABLE skill_installs ADD COLUMN installed_version TEXT NOT NULL DEFAULT ''");
+  }
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (11, ?)")
     .run(nowIso());
 }
 

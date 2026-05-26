@@ -57,6 +57,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.139",
     "@openai/codex-sdk": "^0.130.0",
+    "adm-zip": "^0.5.17",
     "cron-parser": "^4.9.0",
     "js-yaml": "^4.1.1",
     "qrcode": "^1.5.4",

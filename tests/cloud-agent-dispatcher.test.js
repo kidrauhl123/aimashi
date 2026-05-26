@@ -186,6 +186,75 @@ test("dispatcher defaults cloud-hermes runs to the platform model alias", async 
   }
 });
 
+test("invokeFellow runs enabled cloud-hermes fellows in group rooms", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  const broadcasts = [];
+  try {
+    const group = ctx.socialStore.createRoom({
+      id: "g_cloud",
+      type: "group",
+      name: "Cloud Group"
+    });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.runtimeBindingsStore.upsertBinding({
+      userId: ctx.user.id,
+      fellowId: "mia",
+      runtimeKind: "cloud-hermes",
+      enabled: true,
+      config: { model: "hermes-agent" }
+    });
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_group", content: "group cloud reply", events: [] };
+        }
+      },
+      broadcastPersistedEvent(userId, payload) {
+        broadcasts.push({ userId, payload });
+      },
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "@mia hello"
+    });
+
+    const reply = await dispatcher.invokeFellow({
+      userId: ctx.user.id,
+      roomId: group.id,
+      fellowId: "mia",
+      message
+    });
+
+    assert.equal(reply.sender_kind, "fellow");
+    assert.equal(reply.sender_ref, "mia");
+    assert.equal(reply.body_md, "group cloud reply");
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].roomId, group.id);
+    assert.equal(hermesCalls[0].fellow.id, "mia");
+    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((m) => m.sender_kind), ["user", "fellow"]);
+    assert.equal(broadcasts.length, 1);
+    assert.equal(broadcasts[0].payload.type, "room.message_appended");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("dispatcher skips fellow rooms without enabled cloud-hermes binding", async () => {
   const ctx = setup();
   try {

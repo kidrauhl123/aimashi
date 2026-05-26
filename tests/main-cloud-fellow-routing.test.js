@@ -18,21 +18,22 @@ test("main routes cloud room AI events to main-process responders", () => {
   assert.match(main, /createLocalFellowResponder/);
   assert.match(main, /createMainGroupConductor/);
   assert.match(main, /createMainFellowRoomResponder/);
+  assert.match(main, /createMainFellowRuntimeDispatcher/);
   assert.match(main, /getFellowRuntime:\s*async\s*\(fellowId,\s*runtimeKind\)/);
   assert.match(main, /socialApi\.getFellowRuntime\(fellowId,\s*runtimeKind\)/);
   assert.match(main, /sendChat,\s*\n\s*postRoomMessageAsFellow/s);
   assert.match(
     routedSource,
-    /message\.type === CloudEvent\.RoomFellowInvocationRequested[\s\S]*localFellowResponder\.respond/
+    /message\.type === CloudEvent\.RoomFellowInvocationRequested[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/
   );
   assert.match(
     routedSource,
-    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainGroupConductor\.handleRoomMessageAppended/
+    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/
   );
-  assert.match(
-    routedSource,
-    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainFellowRoomResponder\.handleRoomMessageAppended/
-  );
+  const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
+  assert.match(dispatcher, /localFellowResponder\.respond/);
+  assert.match(dispatcher, /mainGroupConductor\.handleRoomMessageAppended/);
+  assert.match(dispatcher, /mainFellowRoomResponder\.handleRoomMessageAppended/);
 });
 
 test("renderer no longer executes local fellow replies for cloud room events", () => {

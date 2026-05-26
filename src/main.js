@@ -43,16 +43,15 @@ const { createScheduler } = require("./main/scheduler.js");
 const { createFireRunner } = require("./main/scheduler-fire.js");
 const { createTasksEventBus } = require("./main/tasks-events.js");
 const { createTasksRoutes } = require("./main/tasks-routes.js");
-const { createSchedulerMcp } = require("./main/scheduler-mcp.js");
 const { createSocialApi } = require("./main/social/social-api.js");
 const { registerSocialIpc } = require("./main/social/social-ipc.js");
 const {
   createLocalFellowResponder,
   shouldHandleLocalCloudRoomAi
 } = require("./main/social/local-fellow-responder.js");
-const { buildInvocation } = require("./main/social/fellow-invocation.js");
 const { createMainGroupConductor } = require("./main/social/group-conductor.js");
 const { createMainFellowRoomResponder } = require("./main/social/fellow-room-responder.js");
+const { createMainFellowRuntimeDispatcher } = require("./main/social/fellow-runtime-dispatcher.js");
 const { createCloudEventsClient } = require("./main/cloud/cloud-events-client.js");
 const { createCloudBridgeClient } = require("./main/cloud/cloud-bridge-client.js");
 const { createCloudDesktopSyncClient } = require("./main/cloud/desktop-sync-client.js");
@@ -883,7 +882,6 @@ let tasksStore = null;
 let tasksEvents = null;
 let scheduler = null;
 let tasksRoutes = null;
-let schedulerMcp = null;
 
 function initSchedulerSubsystem() {
   if (tasksStore) return; // idempotent
@@ -910,16 +908,6 @@ function initSchedulerSubsystem() {
     },
     onChange: () => scheduler.rescan()
   });
-  schedulerMcp = createSchedulerMcp({
-    store: tasksStore,
-    scheduler,
-    events: tasksEvents
-  });
-  // schedulerMcp is created here so the MCP server object exists alongside the
-  // other subsystem state, but it is not yet started or exposed. Wiring it into
-  // the Claude Code / Codex bridge requires a stdio MCP server contract that
-  // the current Claude bridge plugin installer (SKILL.md symlinks) does not cover.
-  // TODO(scheduler-mcp-bridge): expose schedule.* tools via stdio MCP server.
   if (IS_DAEMON_PROCESS) {
     sweepExpiredOneshotTasks(tasksStore);
     scheduler.start();
@@ -1810,6 +1798,14 @@ const mainFellowRoomResponder = createMainFellowRoomResponder({
   responder: localFellowResponder,
   log: (line) => appendCloudLog(line)
 });
+const mainFellowRuntimeDispatcher = createMainFellowRuntimeDispatcher({
+  shouldHandle: shouldHandleCloudRoomAi,
+  listFellows: () => loadFellowManifest().fellows || [],
+  localFellowResponder,
+  mainGroupConductor,
+  mainFellowRoomResponder,
+  log: (line) => appendCloudLog(line)
+});
 cloudEventSocketRuntime = createCloudEventsClient({
   WebSocketImpl: WebSocket,
   getSettings: () => settingsStore.cloudSettings(),
@@ -1820,12 +1816,7 @@ cloudEventSocketRuntime = createCloudEventsClient({
   broadcastRendererEvent,
   cloudEventChannel: IpcChannel.CloudEvent,
   appendCloudLog,
-  shouldHandleCloudRoomAi,
-  buildInvocation,
-  listFellows: () => loadFellowManifest().fellows || [],
-  localFellowResponder,
-  mainGroupConductor,
-  mainFellowRoomResponder
+  fellowRuntimeDispatcher: mainFellowRuntimeDispatcher
 });
 registerSocialIpc({ ipcMain, socialApi });
 ipcMain.handle(IpcChannel.SocialMyUsername, () => {

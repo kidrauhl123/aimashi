@@ -16,6 +16,9 @@
     els = deps.els;
     renderView = deps.renderView;
     render = deps.render;
+    els.fellowRuntimeLocation?.addEventListener("change", () => {
+      renderFellowAgentEngineSelect(els.fellowAgentEngine?.value || "hermes");
+    });
   }
 
   function setFellowAvatarDraft(image, crop = null) {
@@ -229,11 +232,40 @@
     return options;
   }
 
+  function fellowRuntimeLocationOptions() {
+    const cloudEnabled = Boolean(state && state.runtime?.cloud?.enabled);
+    return [
+      { id: "desktop-local", label: "当前设备", disabled: false },
+      { id: "cloud-hermes", label: cloudEnabled ? "Mia Cloud" : "Mia Cloud（需先登录）", disabled: !cloudEnabled }
+    ];
+  }
+
+  function selectedRuntimeLocation() {
+    const value = String(els?.fellowRuntimeLocation?.value || "desktop-local").trim();
+    return value === "cloud-hermes" ? "cloud-hermes" : "desktop-local";
+  }
+
+  function renderFellowRuntimeLocationSelect(current = "desktop-local") {
+    if (!els?.fellowRuntimeLocation) return;
+    const options = fellowRuntimeLocationOptions();
+    els.fellowRuntimeLocation.innerHTML = "";
+    for (const option of options) {
+      const node = document.createElement("option");
+      node.value = option.id;
+      node.textContent = option.label;
+      node.disabled = Boolean(option.disabled);
+      els.fellowRuntimeLocation.appendChild(node);
+    }
+    const allowed = options.some((option) => option.id === current && !option.disabled);
+    els.fellowRuntimeLocation.value = allowed ? current : "desktop-local";
+  }
+
   function renderFellowAgentEngineSelect(current = "hermes") {
     if (!els) return;
+    const runtimeKind = selectedRuntimeLocation();
     const options = detectedAgentEngineOptions();
     const showField = options.length > 1;
-    els.fellowAgentEngineField?.classList.toggle("hidden", !showField);
+    els.fellowAgentEngineField?.classList.toggle("hidden", runtimeKind === "cloud-hermes" || !showField);
     if (!els.fellowAgentEngine) return;
     els.fellowAgentEngine.innerHTML = "";
     for (const option of options) {
@@ -261,6 +293,7 @@
       : (seed ? "创建你的第一个伙伴" : "添加伙伴");
     if (els.fellowKey) els.fellowKey.value = actualFellow?.key || "";
     els.fellowName.value = actualFellow?.name || seed?.name || "";
+    renderFellowRuntimeLocationSelect("desktop-local");
     renderFellowAgentEngineSelect(actualFellow?.agentEngine || actualFellow?.agent_engine || seed?.agentEngine || "hermes");
     const avatarImage = actualFellow?.avatarImage || window.miaAvatar.defaultAvatarAssets()[0];
     state.fellowAvatarPresetGroup = window.miaAvatar.avatarPresetGroupForSrc(avatarImage) || "human";
@@ -294,6 +327,7 @@
     readFellowAvatarFile,
     readProfileAvatarFile,
     detectedAgentEngineOptions,
+    renderFellowRuntimeLocationSelect,
     renderFellowAgentEngineSelect,
     openFellowDialog,
     closeFellowDialog,

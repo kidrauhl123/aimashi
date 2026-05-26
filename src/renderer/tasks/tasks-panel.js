@@ -162,6 +162,7 @@
 
     els.tasksNav.querySelectorAll("[data-task-id]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        state.creatingTask = false;
         state.selectedTaskId = btn.dataset.taskId;
         state.selectedRunId = btn.dataset.runId || "";
         state.tasksUnread.delete(state.selectedTaskId);
@@ -184,6 +185,7 @@
     setText(els.tasksPageTitle, "任务");
     const activeCount = state.tasks.filter((t) => t.status === "active").length;
     setText(els.tasksPageMeta, `${activeCount} 个活跃`);
+    if (state.creatingTask) { renderTaskCreate(); return; }
     if (!state.selectedTaskId) { renderTasksEmpty(); return; }
     const task = state.tasks.find((t) => t.id === state.selectedTaskId);
     if (!task) { renderTasksEmpty(); return; }
@@ -198,8 +200,11 @@
           <div class="tasks-empty-emoji">📅</div>
           <h2>还没有定时任务</h2>
           <p>回到任意聊天告诉 Mia：<br><em>"每天 9 点帮我做 X"</em><br>它会自动帮你建好任务。</p>
+          <button class="secondary" type="button" data-action="new-task">＋ 手动新建任务</button>
         </div>
       `;
+      els.tasksContent.querySelector("[data-action='new-task']")
+        ?.addEventListener("click", openTaskCreate);
       return;
     }
     els.tasksContent.innerHTML = `
@@ -208,6 +213,172 @@
         <p>选择左侧任务查看详情</p>
       </div>
     `;
+  }
+
+  function openTaskCreate() {
+    state.creatingTask = true;
+    state.selectedTaskId = "";
+    state.selectedRunId = "";
+    if (state.activeView !== "tasks") state.activeView = "tasks";
+    renderTaskSidebar();
+    renderTaskView();
+  }
+
+  function cancelTaskCreate() {
+    state.creatingTask = false;
+    renderTaskSidebar();
+    renderTaskView();
+  }
+
+  function renderTaskCreate() {
+    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    if (fellows.length === 0) {
+      els.tasksContent.innerHTML = `
+        <div class="tasks-empty">
+          <div class="tasks-empty-emoji">🤖</div>
+          <h2>先添加一个 Agent</h2>
+          <p>定时任务需要指定一个 Agent 来执行。请先在通讯录里添加。</p>
+          <button class="secondary" type="button" data-action="cancel-create">返回</button>
+        </div>
+      `;
+      els.tasksContent.querySelector("[data-action='cancel-create']")
+        ?.addEventListener("click", cancelTaskCreate);
+      return;
+    }
+    let localTz = "UTC";
+    try { localTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
+    const defaultFellow = fellows.some((f) => f.key === state.activeKey) ? state.activeKey : fellows[0].key;
+    const options = fellows
+      .map((f) => `<option value="${escapeHtml(f.key)}"${f.key === defaultFellow ? " selected" : ""}>${escapeHtml(fellowName(f.key))}</option>`)
+      .join("");
+
+    els.tasksContent.innerHTML = `
+      <article class="task-detail task-create">
+        <header class="task-detail-head">
+          <div class="task-detail-source">
+            <small>新建定时任务</small>
+            <strong>到点自动让所选 Agent 执行下面的指令</strong>
+          </div>
+        </header>
+
+        <section class="task-schedule">
+          <div class="task-form-row">
+            <label>标题 <input id="newTaskTitle" placeholder="未命名任务"></label>
+          </div>
+          <div class="task-form-row">
+            <label>执行的 Agent <select id="newTaskFellow">${options}</select></label>
+          </div>
+        </section>
+
+        <section class="task-schedule">
+          <h3>调度</h3>
+          <div class="task-form-row">
+            <label><input type="radio" name="newTriggerType" value="cron" checked>重复</label>
+            <label><input type="radio" name="newTriggerType" value="oneshot">一次性</label>
+          </div>
+          <div class="task-form-row" id="newTaskCronRow">
+            <label>Cron <input id="newTaskCron" value="0 9 * * *"></label>
+          </div>
+          <div class="task-form-row" id="newTaskAtRow" hidden>
+            <label>触发时间 <input id="newTaskAt" type="datetime-local"></label>
+          </div>
+          <div class="task-form-row">
+            <label>时区 <input id="newTaskTimezone" value="${escapeHtml(localTz)}"></label>
+          </div>
+        </section>
+
+        <section class="task-prompt">
+          <h3>Prompt</h3>
+          <textarea id="newTaskPrompt" rows="3" placeholder="到点要让 Agent 做的事，比如：汇总今天的未读消息"></textarea>
+        </section>
+
+        <div class="task-create-actions">
+          <button class="secondary" type="button" data-action="cancel-create">取消</button>
+          <button class="primary" type="button" data-action="submit-create">创建任务</button>
+        </div>
+        <div class="task-create-error" id="newTaskError" hidden></div>
+      </article>
+    `;
+    attachTaskCreateHandlers();
+  }
+
+  function attachTaskCreateHandlers() {
+    document.querySelectorAll("[name=newTriggerType]").forEach((r) => {
+      r.addEventListener("change", () => {
+        const isCron = r.value === "cron";
+        const cronRow = document.getElementById("newTaskCronRow");
+        const atRow = document.getElementById("newTaskAtRow");
+        if (cronRow) cronRow.hidden = !isCron;
+        if (atRow) atRow.hidden = isCron;
+      });
+    });
+    els.tasksContent.querySelector("[data-action='cancel-create']")
+      ?.addEventListener("click", cancelTaskCreate);
+    els.tasksContent.querySelector("[data-action='submit-create']")
+      ?.addEventListener("click", submitTaskCreate);
+  }
+
+  async function submitTaskCreate() {
+    const errEl = document.getElementById("newTaskError");
+    const showError = (msg) => {
+      if (!errEl) return;
+      errEl.textContent = msg;
+      errEl.hidden = false;
+    };
+    const fellowId = document.getElementById("newTaskFellow")?.value || "";
+    const prompt = (document.getElementById("newTaskPrompt")?.value || "").trim();
+    const title = (document.getElementById("newTaskTitle")?.value || "").trim() || "未命名任务";
+    const timezone = (document.getElementById("newTaskTimezone")?.value || "UTC").trim() || "UTC";
+    const triggerType = document.querySelector("[name=newTriggerType]:checked")?.value || "cron";
+
+    if (!fellowId) return showError("请选择一个执行的 Agent。");
+    if (!prompt) return showError("请填写 Prompt。");
+
+    let trigger;
+    if (triggerType === "cron") {
+      const cron = (document.getElementById("newTaskCron")?.value || "").trim();
+      if (!cron) return showError("请填写 Cron 表达式。");
+      trigger = { type: "cron", cron };
+    } else {
+      const at = document.getElementById("newTaskAt")?.value || "";
+      const atMs = new Date(at).getTime();
+      if (!at || Number.isNaN(atMs)) return showError("请选择有效的触发时间。");
+      if (atMs <= Date.now()) return showError("触发时间必须在未来。");
+      trigger = { type: "oneshot", at: new Date(at).toISOString() };
+    }
+
+    let sessionId;
+    try {
+      sessionId = await resolveSessionForFellow(fellowId);
+    } catch (e) {
+      return showError("无法为该 Agent 准备会话：" + (e?.message || e));
+    }
+    if (!sessionId) return showError("该 Agent 还没有可用会话，请先和它聊一句。");
+
+    try {
+      const created = await window.mia.tasks.create({ title, fellowId, sessionId, prompt, trigger, timezone });
+      state.creatingTask = false;
+      state.selectedTaskId = created?.id || "";
+      state.selectedRunId = "";
+      await loadTasksFromDaemon();
+      renderTaskSidebar();
+      renderTaskView();
+    } catch (e) {
+      showError("创建失败：" + (e?.message || e));
+    }
+  }
+
+  // Manual tasks post into the chosen fellow's current conversation, matching
+  // how chat-created tasks bind to the originating session. Fall back to the
+  // fellow's most recent session, and only create a fresh one if it has none.
+  async function resolveSessionForFellow(fellowKey) {
+    const active = state.activeSessionIdByPersona?.[fellowKey];
+    if (active) return active;
+    const existing = state.chatStore?.sessions?.[fellowKey];
+    if (Array.isArray(existing) && existing.length) return existing[0].id;
+    state.chatStore = await window.mia.createChatSession({ personaKey: fellowKey });
+    const created = state.chatStore?.sessions?.[fellowKey];
+    return Array.isArray(created) && created.length ? created[0].id : null;
   }
 
   function renderRunDetail(task) {
@@ -503,6 +674,7 @@
 
   window.miaTasksPanel = {
     initTasksPanel,
+    openTaskCreate,
     renderTaskSidebar,
     renderTaskView,
     renderTaskDetail,

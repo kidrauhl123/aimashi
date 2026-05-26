@@ -36,9 +36,27 @@ test("src/web/index.html loads shared/unread.js before app.js", () => {
 test("src/web/index.html includes private AI composer controls", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
   assert.match(html, /id="composerBottom"/);
+  assert.match(html, /id="quickModelAvatar"/);
   assert.match(html, /id="quickModelSelect"/);
   assert.match(html, /id="effortSelect"/);
   assert.match(html, /id="permissionMode"/);
+});
+
+test("src/web/index.html includes the desktop-style chat history menu", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  assert.match(html, /id="sessionMenuButton"/);
+  assert.match(html, /id="currentSessionTitle"/);
+  assert.match(html, /id="sessionMenu"/);
+  assert.match(html, /id="sessionList"/);
+  assert.match(html, /id="newSession"/);
+  assert.match(html, />\s*聊天记录\s*</);
+});
+
+test("src/web/index.html uses the signed-in user avatar in the rail", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  assert.match(html, /id="userAvatar"/);
+  assert.match(html, /class="[^"]*\brail-avatar\b/);
+  assert.doesNotMatch(html, /<div class="rail-logo">A<\/div>/);
 });
 
 test("src/web/index.html loads shared engine contracts before app.js", () => {
@@ -48,6 +66,24 @@ test("src/web/index.html loads shared engine contracts before app.js", () => {
   assert.ok(engineIdx >= 0, "index.html must reference shared/engine-contracts.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(engineIdx < appIdx, "engine contracts must be loaded before app.js");
+});
+
+test("src/web/index.html loads desktop markdown helper before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const markdownIdx = html.indexOf("helpers/markdown-helpers.js");
+  const appIdx = html.indexOf("./app.js");
+  assert.ok(markdownIdx >= 0, "index.html must reference the shared desktop markdown helper");
+  assert.ok(appIdx >= 0, "index.html must load app.js");
+  assert.ok(markdownIdx < appIdx, "markdown helper must be loaded before app.js so web bubbles can render rich text");
+});
+
+test("src/web/index.html omits redundant status labels from the chat chrome", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.doesNotMatch(html, /id="statusText"/);
+  assert.doesNotMatch(html, /id="modelSwitchStatus"/);
+  assert.doesNotMatch(source, /statusText: document\.getElementById/);
+  assert.doesNotMatch(source, /modelSwitchStatus: document\.getElementById/);
 });
 
 test("scripts/build-cloud-release.js copies shared/unread.js into the web tree", () => {
@@ -66,6 +102,31 @@ test("scripts/build-cloud-release.js copies shared/engine-contracts.js into the 
     /copyFile\(["']src\/shared\/engine-contracts\.js["'][^)]+["']shared["'][^)]+["']engine-contracts\.js["']\)/,
     "build-cloud-release must copy src/shared/engine-contracts.js to web/shared/engine-contracts.js"
   );
+});
+
+test("cloud release and local web server expose desktop model icon assets", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  const serveWeb = fs.readFileSync(path.join(ROOT, "scripts/serve-web.js"), "utf8");
+  assert.match(build, /src\/renderer\/assets\/model-icons/);
+  assert.match(build, /src\/renderer\/assets\/provider-icons/);
+  assert.match(serveWeb, /target\.startsWith\("assets\/model-icons\/"\)/);
+  assert.match(serveWeb, /target\.startsWith\("assets\/provider-icons\/"\)/);
+  assert.match(serveWeb, /path\.join\(sourceRoot, "renderer", target\)/);
+});
+
+test("cloud release and local web server expose desktop markdown helper", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  const serveWeb = fs.readFileSync(path.join(ROOT, "scripts/serve-web.js"), "utf8");
+  assert.match(build, /src\/renderer\/helpers\/markdown-helpers\.js/);
+  assert.match(build, /path\.join\(webDir, "helpers", "markdown-helpers\.js"\)/);
+  assert.match(serveWeb, /target === "helpers\/markdown-helpers\.js"/);
+  assert.match(serveWeb, /path\.join\(sourceRoot, "renderer", target\)/);
+});
+
+test("cloud release API package includes runtime dependencies required by server modules", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(build, /"adm-zip": rootPackage\.dependencies\?\.\["adm-zip"\]/);
+  assert.match(build, /ws: rootPackage\.dependencies\?\.ws/);
 });
 
 test("src/web/app.js has no inline '> 99 ? 99+' truncation literals", () => {
@@ -96,6 +157,37 @@ test("src/web/app.js uses platform model catalog for cloud fellow controls", () 
   assert.doesNotMatch(source, /return \[\{ value: "hermes-agent", label: "Hermes Agent" \}\];/);
 });
 
+test("src/web/app.js mirrors desktop rail avatar and model icon behavior", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /userAvatar: document\.getElementById\("userAvatar"\)/);
+  assert.match(source, /function renderUserAvatar\(\)/);
+  assert.match(source, /avatarBackgroundStyle\(user\.avatarImage/);
+  assert.match(source, /quickModelAvatar: document\.getElementById\("quickModelAvatar"\)/);
+  assert.match(source, /function modelIconSrc\(model = \{\}\)/);
+  assert.match(source, /function setModelAvatar\(engine, entry = \{\}, config = \{\}\)/);
+  assert.match(source, /setModelAvatar\(engine, selectedModelEntry, config\)/);
+});
+
+test("src/web/app.js renders web bubbles through desktop markdown", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /function renderMarkdown\(value\)/);
+  assert.match(source, /window\.miaMarkdown\?\.renderMarkdown/);
+  assert.match(source, /<div class="bubble">\$\{renderMarkdown\(spec\.bodyMd\)\}<\/div>/);
+  assert.match(source, /<div class="bubble">\$\{renderMarkdown\(run\.text\)\}<\/div>/);
+  assert.doesNotMatch(source, /escapeHtml\(run\.text\)\.replace\(\/\\n\/g, "<br>"\)/);
+  assert.doesNotMatch(source, /escapeHtml\(body\)\.replace\(\/&lt;br&gt;\/g, "<br>"\)/);
+});
+
+test("src/web/app.js supports desktop-style markdown links and code copy", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /function copyTextToClipboard\(text\)/);
+  assert.match(source, /function flashCopiedCode\(code\)/);
+  assert.match(source, /data-copy-code/);
+  assert.match(source, /a\.message-link\[data-external-link\]/);
+  assert.match(source, /window\.open\(link\.dataset\.externalLink, "_blank", "noopener,noreferrer"\)/);
+  assert.match(source, /\.bubble code\.inline-code/);
+});
+
 test("src/web/app.js lets web controls update desktop-local fellow runtime bindings", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.match(source, /function runtimeKindForFellowRoom\(room, fellow\)[\s\S]*return runtimeKind \|\| "desktop-local";/);
@@ -118,6 +210,32 @@ test("src/web/app.js adds clientOpId to PUT runtime writes", () => {
   assert.match(source, /\/api\/me\/fellows\/\$\{encodeURIComponent\(fellowKey\)\}\/runtime[\s\S]*method:\s*"PUT"/);
 });
 
+test("src/web/app.js switches conversations before awaiting network hydration", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  const match = source.match(/function setActiveConversation\(id\) \{([\s\S]*?)\n\}/);
+  assert.ok(match, "setActiveConversation should be a synchronous optimistic renderer");
+  const body = match[1];
+  assert.doesNotMatch(body, /await ensureRoomMessages/);
+  assert.doesNotMatch(body, /await ensureRoomMembers/);
+  assert.match(source, /async function hydrateActiveConversation\(id\)/);
+  assert.ok(
+    body.indexOf("renderActiveChat();") >= 0 && body.indexOf("renderActiveChat();") < body.indexOf("hydrateActiveConversation(id);"),
+    "active chat should render from cached state before background hydration starts"
+  );
+});
+
+test("src/web/app.js restores the topbar chat history selector for fellow rooms", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /sessionMenuButton: document\.getElementById\("sessionMenuButton"\)/);
+  assert.match(source, /function renderSessionMenu\(\)/);
+  assert.match(source, /function sessionRoomsForRoom\(room\)/);
+  assert.match(source, /function createNewSessionForActive\(\)/);
+  assert.match(source, /\/api\/me\/fellow-rooms\/\$\{encodeURIComponent\(sessionId\)\}/);
+  assert.match(source, /sessionMenuOpen/);
+  assert.match(source, /currentSessionTitle/);
+  assert.match(source, /newSession\?\.classList\.toggle\("hidden", !canCreate\)/);
+});
+
 test("src/web/styles.css carries desktop-style AI control switchers", () => {
   const css = fs.readFileSync(path.join(ROOT, "src/web/styles.css"), "utf8");
   assert.match(css, /\.model-switcher/);
@@ -125,6 +243,25 @@ test("src/web/styles.css carries desktop-style AI control switchers", () => {
   assert.match(css, /\.permission-switcher/);
   assert.match(css, /\.model-current-label/);
   assert.match(css, /\.permission-switcher\.yolo/);
+});
+
+test("src/web/styles.css carries desktop-style chat history menu styling", () => {
+  const css = fs.readFileSync(path.join(ROOT, "src/web/styles.css"), "utf8");
+  assert.match(css, /\.session-trigger/);
+  assert.match(css, /\.current-session-title/);
+  assert.match(css, /\.session-menu/);
+  assert.match(css, /\.session-menu-head/);
+  assert.match(css, /\.session-row/);
+});
+
+test("src/web/styles.css carries desktop-style rich bubble formatting", () => {
+  const css = fs.readFileSync(path.join(ROOT, "src/web/styles.css"), "utf8");
+  assert.match(css, /\.bubble h1,/);
+  assert.match(css, /\.bubble ul,/);
+  assert.match(css, /\.bubble a\.message-link/);
+  assert.match(css, /\.bubble code\.inline-code/);
+  assert.match(css, /\.message-code-block/);
+  assert.match(css, /\.syntax-keyword/);
 });
 
 test("src/web/app.js routes through window.miaUnread", () => {

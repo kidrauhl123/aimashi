@@ -78,27 +78,28 @@ test("loadSkillsCatalog skips _-prefixed dirs", () => {
   }
 });
 
-test("syncing a catalog into the store upserts (preserving install_count) and prunes", () => {
+test("publishVersion packages a version, preserves install_count across versions, deleteSkill prunes", () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "mia-catalog-db-"));
   try {
     const store = createCloudStore({ dataDir });
-    const skills = createSkillsStore(store.getDb());
+    const skills = createSkillsStore(store.getDb(), { uploadDir: store.uploadDir, dataDir: store.dataDir });
 
-    // initial sync of two skills
-    skills.upsertSkill({ id: "a", name: "A", category: "x", description: "d", sourceLabel: "Mia", body: "# A" });
-    skills.upsertSkill({ id: "b", name: "B", category: "y", description: "d", sourceLabel: "Mia", body: "# B" });
-    // "a" accumulates installs over time
+    skills.publishVersion({ id: "a", ownerLabel: "Mia", name: "A", category: "x", description: "d", version: "1.0.0", body: "# A" });
+    skills.publishVersion({ id: "b", ownerLabel: "Mia", name: "B", category: "y", description: "d", version: "1.0.0", body: "# B" });
+
+    const a1 = skills.getSkill("a");
+    assert.equal(a1.latestVersion, "1.0.0");
+    assert.ok(a1.version && a1.version.checksum, "version carries a package checksum");
+    assert.ok(fs.existsSync(skills.packageAbsPath(a1.version)), "package zip written to uploads/");
+
+    // installs accumulate, then a new version is published → listing updates, count preserved
     store.getDb().prepare("UPDATE skills SET install_count = 5 WHERE id = ?").run("a");
-    assert.equal(skills.getSkill("a").installCount, 5);
+    skills.publishVersion({ id: "a", ownerLabel: "Mia", name: "A v2", category: "x", description: "d2", version: "1.1.0", body: "# A v2" });
+    const a2 = skills.getSkill("a");
+    assert.equal(a2.name, "A v2");
+    assert.equal(a2.latestVersion, "1.1.0");
+    assert.equal(a2.installCount, 5, "install_count preserved across new version");
 
-    // re-sync "a" with edited content → updates body, keeps install_count
-    skills.upsertSkill({ id: "a", name: "A v2", category: "x", description: "d2", sourceLabel: "Mia", body: "# A v2" });
-    const a = skills.getSkill("a");
-    assert.equal(a.name, "A v2");
-    assert.equal(a.body, "# A v2");
-    assert.equal(a.installCount, 5, "install_count preserved across re-sync");
-
-    // prune "b"
     assert.equal(skills.deleteSkill("b"), 1);
     assert.equal(skills.getSkill("b"), null);
   } finally {

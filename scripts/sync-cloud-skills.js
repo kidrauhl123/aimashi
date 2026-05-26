@@ -36,7 +36,7 @@ function main() {
   }
 
   const store = createCloudStore({ dataDir });
-  const skills = createSkillsStore(store.getDb());
+  const skills = createSkillsStore(store.getDb(), { uploadDir: store.uploadDir, dataDir: store.dataDir });
   const existingIds = new Set(skills.listSkills({ limit: 1000 }).map((s) => s.id));
   const catalogIds = new Set(catalog.map((s) => s.id));
 
@@ -44,7 +44,17 @@ function main() {
   for (const skill of catalog) {
     const verb = existingIds.has(skill.id) ? "update" : "add";
     console.log(`[sync-cloud-skills] ${dryRun ? "(dry-run) " : ""}${verb}: ${skill.id} [${skill.category}]`);
-    if (!dryRun) skills.upsertSkill(skill);
+    if (!dryRun) {
+      skills.publishVersion({
+        id: skill.id,
+        ownerLabel: skill.sourceLabel || "Mia 官方",
+        name: skill.name,
+        category: skill.category,
+        description: skill.description,
+        version: "1.0.0",
+        srcDir: skill.dir
+      });
+    }
     upserted += 1;
   }
 

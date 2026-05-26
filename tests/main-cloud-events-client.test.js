@@ -43,6 +43,7 @@ function setup(overrides = {}) {
     fellowRoom: [],
     logs: [],
     responder: [],
+    runtimeDispatcher: [],
     settingsWrites: [],
     timers: []
   };
@@ -66,11 +67,9 @@ function setup(overrides = {}) {
     cloudEventChannel: "cloud:event",
     appendCloudLog: (line) => calls.logs.push(line),
     shouldHandleCloudRoomAi: () => true,
-    buildInvocation: (message, fellows) => ({ roomId: message.roomId, fellowId: fellows[0]?.key, dedupKey: "m_1:codex" }),
-    listFellows: () => [{ key: "codex" }],
-    localFellowResponder: { respond: async (args) => calls.responder.push(args) },
-    mainGroupConductor: { handleRoomMessageAppended: async (args) => calls.conductor.push(args) },
-    mainFellowRoomResponder: { handleRoomMessageAppended: async (args) => calls.fellowRoom.push(args) },
+    fellowRuntimeDispatcher: {
+      handleCloudEvent: async (message) => calls.runtimeDispatcher.push(message)
+    },
     setTimeoutFn: (fn, delayMs) => {
       const timer = { fn, delayMs };
       calls.timers.push(timer);
@@ -192,15 +191,15 @@ test("room AI events are handled in main and still forwarded to renderer", async
   await Promise.resolve();
 
   assert.deepEqual(calls.settingsWrites, [{ lastEventSeq: 4 }, { lastEventSeq: 5 }]);
-  assert.deepEqual(calls.responder, [{ roomId: "g_1", fellowId: "codex", dedupKey: "m_1:codex" }]);
-  assert.deepEqual(calls.conductor, [{
-    roomId: "g_1",
-    message: { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" }
-  }]);
-  assert.deepEqual(calls.fellowRoom, [{
-    roomId: "g_1",
-    message: { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" }
-  }]);
+  assert.deepEqual(calls.runtimeDispatcher.map((message) => message.type), [
+    "room.fellow_invocation_requested",
+    "room.message_appended"
+  ]);
+  assert.equal(calls.runtimeDispatcher[0].fellowId, "codex");
+  assert.deepEqual(calls.runtimeDispatcher[1].message, { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" });
+  assert.deepEqual(calls.responder, []);
+  assert.deepEqual(calls.conductor, []);
+  assert.deepEqual(calls.fellowRoom, []);
   assert.equal(calls.broadcasts.map((item) => item.envelope.type).join(","), "room.fellow_invocation_requested,room.message_appended");
 });
 

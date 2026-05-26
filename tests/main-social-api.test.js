@@ -135,6 +135,37 @@ test("ensureFellowRoom sends PUT to the stable fellow room route", async () => {
   } finally { await teardown(ctx); }
 });
 
+test("ensureFellowSessionRoom sends PUT to the per-session fellow room route", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud(async (req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, body });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, room: { id: "fellow:u_1:sess_1" }, created: true }));
+    });
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.ensureFellowSessionRoom("sess_1", {
+      fellowKey: "mia",
+      title: "新对话",
+      runtimeKind: "cloud-hermes"
+    });
+    assert.equal(result.room.id, "fellow:u_1:sess_1");
+    assert.equal(seen[0].method, "PUT");
+    assert.equal(seen[0].url, "/api/me/fellow-rooms/sess_1");
+    const sentBody = JSON.parse(seen[0].body);
+    assert.equal(sentBody.fellowKey, "mia");
+    assert.equal(sentBody.runtimeKind, "cloud-hermes");
+    assert.match(sentBody.clientOpId, /^op_/);
+  } finally { await teardown(ctx); }
+});
+
 test("listFellows fetches cloud fellow identities", async () => {
   const seen = [];
   const ctx = await spawnFakeCloud((req, res) => {
@@ -150,6 +181,40 @@ test("listFellows fetches cloud fellow identities", async () => {
     const result = await api.listFellows();
     assert.equal(result.fellows[0].avatarImage, "data:mia-cloud");
     assert.deepEqual(seen[0], { method: "GET", url: "/api/me/fellows" });
+  } finally { await teardown(ctx); }
+});
+
+test("saveFellowIdentity upserts a cloud fellow identity", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, body });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ fellow: { id: "alice", name: "Alice" } }));
+    });
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.saveFellowIdentity("alice", {
+      name: "Alice",
+      color: "#2563eb",
+      avatarImage: "data:image/png;base64,x",
+      avatarCrop: { x: 50, y: 50, zoom: 1 },
+      bio: "A cloud Fellow",
+      personaText: "You are Alice."
+    });
+    assert.equal(result.fellow.id, "alice");
+    assert.equal(seen[0].method, "PUT");
+    assert.equal(seen[0].url, "/api/me/fellows/alice");
+    const sent = JSON.parse(seen[0].body);
+    assert.equal(sent.name, "Alice");
+    assert.equal(sent.personaText, "You are Alice.");
+    assert.match(sent.clientOpId, /^op_/);
   } finally { await teardown(ctx); }
 });
 

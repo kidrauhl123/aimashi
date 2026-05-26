@@ -35,46 +35,20 @@
     return fellows.find((item) => item.key === key) || null;
   }
 
-  function normalizeOwnedFellow(input, { cloudOnly = false } = {}) {
-    if (!input || typeof input !== "object") return null;
-    const key = String(input.key || input.id || "").trim();
-    if (!key) return null;
-    const explicitCloudOnly = input.cloudOnly ?? input.cloud_only;
-    const normalizedCloudOnly = explicitCloudOnly === undefined ? Boolean(cloudOnly) : Boolean(explicitCloudOnly);
-    return {
-      ...input,
-      key,
-      id: input.id || key,
-      name: input.name || input.displayName || input.username || key,
-      bio: input.bio || input.description || (normalizedCloudOnly ? "云端伙伴" : ""),
-      color: input.color || input.avatarColor || "#5e5ce6",
-      avatarImage: input.avatarImage || input.avatar_image || "",
-      avatarCrop: input.avatarCrop || input.avatar_crop || null,
-      agentEngine: input.agentEngine || input.agent_engine || input.engine || (normalizedCloudOnly ? "hermes" : undefined),
-      deviceName: input.deviceName || input.device_name || input.sourceDeviceName || input.source_device_name || input.hostname || "",
-      cloudOnly: normalizedCloudOnly
-    };
-  }
-
   function allOwnedFellows() {
     if (!state) return [];
-    const byKey = new Map();
     const socialFellows = window.miaSocial?._internalCtx?.adapterCtx?.()?.fellows
       || window.miaSocial?.moduleState?.fellows
       || [];
-    for (const fellow of socialFellows) {
-      const normalized = normalizeOwnedFellow(fellow, { cloudOnly: true });
-      if (normalized) byKey.set(normalized.key, normalized);
-    }
     const localFellows = [
       ...(Array.isArray(state.runtime?.fellows) ? state.runtime.fellows : []),
       ...(Array.isArray(state.runtime?.personas) ? state.runtime.personas : [])
     ];
-    for (const fellow of localFellows) {
-      const normalized = normalizeOwnedFellow(fellow, { cloudOnly: false });
-      if (normalized) byKey.set(normalized.key, { ...byKey.get(normalized.key), ...normalized, cloudOnly: false });
-    }
-    return [...byKey.values()];
+    return window.miaFellowDirectory.listOwnedFellows({
+      cloudFellows: socialFellows,
+      localFellows,
+      runtime: state.runtime || {}
+    });
   }
 
   function sortFellowsForSidebar(fellows = []) {
@@ -223,16 +197,7 @@
   }
 
   function fellowDeviceLabel(fellow = {}) {
-    const explicit = firstNonEmpty(
-      fellow.deviceName,
-      fellow.device_name,
-      fellow.sourceDeviceName,
-      fellow.source_device_name,
-      fellow.hostname
-    );
-    if (explicit) return explicit;
-    if (fellow.cloudOnly) return "云端伙伴";
-    return firstNonEmpty(state?.runtime?.localDevice?.name, state?.runtime?.cloud?.deviceName, state?.runtime?.relay?.deviceName, "当前设备");
+    return window.miaFellowDirectory.runtimeLabelFor(fellow, state?.runtime || {});
   }
 
   function fellowSubtitle(fellow = {}) {
@@ -374,13 +339,13 @@
     const summary = contactSessionSummary(fellow);
     const engine = fellow.agentEngine || fellow.agent_engine || fellow.engine || "hermes";
     setText(els.contactPageTitle, fellow.name || "联系人");
-    setText(els.contactPageMeta, fellow.cloudOnly ? "云端伙伴" : `${summary.count} 个会话`);
-    const canEditLocalFellow = !fellow.cloudOnly;
-    const canDeleteFellow = fellow.cloudOnly || (canEditLocalFellow && fellow.key !== "mia");
+    setText(els.contactPageMeta, fellowDeviceLabel(fellow));
+    const canEditFellow = fellow.canEditIdentity !== false;
+    const canDeleteFellow = fellow.canDelete !== false;
     els.contactDetail.innerHTML = `
       <article class="contact-profile">
         <header class="contact-profile-head">
-          <button class="contact-profile-avatar" type="button" ${canEditLocalFellow ? 'data-contact-action="edit" title="编辑联系人头像"' : 'title="联系人头像"'} style="${window.miaAvatar.avatarBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
+          <button class="contact-profile-avatar" type="button" ${canEditFellow ? 'data-contact-action="edit" title="编辑联系人头像"' : 'title="联系人头像"'} style="${window.miaAvatar.avatarBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
           <div class="contact-profile-title">
             <h2>${window.miaMarkdown.escapeHtml(fellow.name || "联系人")}</h2>
             <div class="contact-engine-badge" title="Agent 引擎">
@@ -394,7 +359,7 @@
           </div>
           <div class="contact-actions">
             <button class="primary contact-message-action" type="button" data-contact-action="message" title="发消息" aria-label="发消息">${window.miaMarkdown.iconParkIcon("message", "contact-action-icon")}</button>
-            ${canEditLocalFellow ? `<button class="secondary" type="button" data-contact-action="edit">编辑</button>` : ""}
+            ${canEditFellow ? `<button class="secondary" type="button" data-contact-action="edit">编辑</button>` : ""}
             ${canDeleteFellow ? `<button class="secondary danger" type="button" data-contact-action="delete">删除伙伴</button>` : ""}
           </div>
         </header>
@@ -402,7 +367,7 @@
           <strong>最近内容</strong>
           <p>${window.miaMarkdown.escapeHtml(summary.preview)}</p>
         </section>
-        ${canEditLocalFellow ? renderFellowCapabilitiesPanel(fellow) : ""}
+        ${fellow.canConfigureCapabilities !== false ? renderFellowCapabilitiesPanel(fellow) : ""}
       </article>
     `;
     els.contactDetail.querySelector('[data-contact-action="message"]')?.addEventListener("click", () => openFellowChat(fellow.key));
@@ -412,17 +377,37 @@
     els.contactDetail.querySelector('[data-contact-action="delete"]')?.addEventListener("click", async () => {
       await deleteFellow(fellow.key);
     });
-    if (canEditLocalFellow) wireFellowCapabilities(fellow);
+    if (fellow.canConfigureCapabilities !== false) wireFellowCapabilities(fellow);
   }
 
   async function saveFellowCapabilities(fellow, capabilities) {
     if (!fellow?.key || !state) return;
     state.savingFellowCapabilities.add(fellow.key);
     try {
-      state.runtime = await window.mia.saveFellow({
-        ...fellow,
-        capabilities
-      });
+      if (fellow.runtimeKind === "cloud-hermes") {
+        const response = await window.mia.social.saveFellowIdentity(fellow.key, {
+          name: fellow.name || fellow.key,
+          color: fellow.color || "#5e5ce6",
+          avatarImage: fellow.avatarImage || "",
+          avatarCrop: fellow.avatarCrop || null,
+          bio: fellow.bio || fellow.description || "",
+          personaText: fellow.personaText || "",
+          capabilities
+        });
+        if (response && response.ok === false) throw new Error(response.error || "保存云端 Fellow 能力失败");
+        if (window.miaSocial?.moduleState) {
+          const saved = response?.data?.fellow || response?.fellow || { ...fellow, capabilities };
+          window.miaSocial.moduleState.fellows = [
+            { ...saved, key: saved.key || saved.id || fellow.key },
+            ...window.miaSocial.moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== fellow.key)
+          ];
+        }
+      } else {
+        state.runtime = await window.mia.saveFellow({
+          ...fellow,
+          capabilities
+        });
+      }
     } catch (error) {
       window.alert(`保存能力设置失败：${error.message || error}`);
     } finally {
@@ -502,7 +487,7 @@
     menu.classList.toggle("hidden", !open);
     if (!open) return;
     const pet = petStatusForKey(fellow.key);
-    const canDeleteFellow = fellow.cloudOnly || fellow.key !== "mia";
+    const canDeleteFellow = fellow.canDelete !== false;
     const petAction = pet.hasAsset
       ? pet.placed
         ? window.miaMarkdown.menuItemHtml({ icon: "message", label: `收回「${fellow.name}」`, attrs: 'data-fellow-action="recall"' })

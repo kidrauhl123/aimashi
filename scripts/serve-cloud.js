@@ -1609,6 +1609,21 @@ async function handleRequest(req, res, context) {
         if (!fellowId) continue;
         const fellowMember = context.socialStore.getRoomMember(roomId, "fellow", fellowId);
         if (!fellowMember) continue;
+        if (context.cloudAgentDispatcher?.canHandleFellow?.({
+          userId: fellowMember.owner_id,
+          fellowId,
+          runtimeKind: "cloud-hermes"
+        })) {
+          context.cloudAgentDispatcher.invokeFellow({
+            userId: fellowMember.owner_id,
+            roomId,
+            fellowId,
+            message
+          }).catch((error) => {
+            console.warn("[cloud-agent] fellow invocation failed:", error?.message || error);
+          });
+          continue;
+        }
         const recentMessages = context.messagesStore.listMessagesSince(roomId, Math.max(0, message.seq - 6), 6);
         broadcastPersistedEvent(context, fellowMember.owner_id, {
           type: "room.fellow_invocation_requested",
@@ -1741,7 +1756,7 @@ async function handleRequest(req, res, context) {
     // member rows: the owner (kind=user) and the fellow (kind=fellow,
     // ownerId=userId).
     //
-    // Body: { fellowKey, title?, clientOpId? }
+    // Body: { fellowKey, title?, runtimeKind?, clientOpId? }
     //
     // Idempotent on (owner, sessionId): repeated calls return the same
     // room. Updates to name only happen if `title` is provided and
@@ -1754,13 +1769,14 @@ async function handleRequest(req, res, context) {
       const fellowKey = String(body.fellowKey || "").trim();
       if (!fellowKey) return writeError(res, 400, "fellowKey is required");
       const title = String(body.title || "").trim();
+      const requestedRuntimeKind = String(body.runtimeKind || "").trim();
       const roomId = `fellow:${auth.user.id}:${sessionId}`;
       let room = context.socialStore.getRoom(roomId);
       const decorations = {
         ...(room?.decorations || {}),
         fellowKey,
         sessionId,
-        runtimeKind: room?.decorations?.runtimeKind || "desktop-local"
+        runtimeKind: room?.decorations?.runtimeKind || requestedRuntimeKind || "desktop-local"
       };
       const sameJson = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
       if (!room) {
@@ -2020,11 +2036,37 @@ async function handleRequest(req, res, context) {
       const categories = context.skillsStore.listCategories();
       return writeJson(res, 200, { skills, categories });
     }
+    const skillPackageMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/versions\/([A-Za-z0-9._-]+)\/package$/);
+    if (req.method === "GET" && skillPackageMatch) {
+      const version = context.skillsStore.getVersion(skillPackageMatch[1], skillPackageMatch[2]);
+      const absPath = version ? context.skillsStore.packageAbsPath(version) : "";
+      if (!absPath || !fs.existsSync(absPath)) return writeError(res, 404, "Package not found.");
+      const buf = fs.readFileSync(absPath);
+      res.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Length": buf.length,
+        "X-Skill-Checksum": version.checksum
+      });
+      return res.end(buf);
+    }
     const skillInstallMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/install$/);
     if (req.method === "POST" && skillInstallMatch) {
       const skill = context.skillsStore.recordInstall(skillInstallMatch[1], auth.user.id);
       if (!skill) return writeError(res, 404, "Skill not found.");
-      return writeJson(res, 200, { skill });
+      const download = skill.version ? {
+        version: skill.version.version,
+        url: `/api/skills/${encodeURIComponent(skill.id)}/versions/${encodeURIComponent(skill.version.version)}/package`,
+        checksum: skill.version.checksum,
+        entryPath: skill.version.entryPath
+      } : null;
+      return writeJson(res, 200, { skill, download });
+    }
+    const skillReportMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/report$/);
+    if (req.method === "POST" && skillReportMatch) {
+      const reportBody = await readJson(req).catch(() => ({}));
+      const reportId = context.skillsStore.report(skillReportMatch[1], auth.user.id, reportBody?.reason || "");
+      if (!reportId) return writeError(res, 404, "Skill not found.");
+      return writeJson(res, 200, { reportId });
     }
     const skillDetailMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)$/);
     if (req.method === "GET" && skillDetailMatch) {
@@ -2106,8 +2148,12 @@ function createMiaCloudServer(options = {}) {
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
   context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
-  context.skillsStore = createSkillsStore(context.cloudStore.getDb());
-  context.skillsStore.seedSkills(loadSkillsCatalog());
+  context.skillsStore = createSkillsStore(context.cloudStore.getDb(), {
+    uploadDir: context.cloudStore.uploadDir,
+    dataDir: context.cloudStore.dataDir
+  });
+  context.skillsStore.backfillBodyVersions();
+  context.skillsStore.seedFromCatalog(loadSkillsCatalog());
   context.runtimeBindingsStore = createRuntimeBindingsStore(context.cloudStore.getDb());
   context.cloudAgentRunsStore = createCloudAgentRunsStore(context.cloudStore.getDb());
   // Inject fellowsStore so listRoomMembers can enrich fellow members

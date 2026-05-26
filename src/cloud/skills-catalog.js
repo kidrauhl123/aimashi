@@ -58,6 +58,7 @@ function loadSkillsCatalog(dir = defaultCatalogDir()) {
       category: meta.category || "uncategorized",
       description: meta.description || "",
       sourceLabel: meta.source || meta.sourceLabel || "Mia 官方",
+      dir: path.join(dir, entry.name),
       body
     });
   }

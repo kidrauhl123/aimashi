@@ -62,6 +62,8 @@ const els = {
   fellowDialogTitle: document.getElementById("fellowDialogTitle"),
   fellowKey: document.getElementById("fellowKey"),
   fellowName: document.getElementById("fellowName"),
+  fellowRuntimeLocationField: document.getElementById("fellowRuntimeLocationField"),
+  fellowRuntimeLocation: document.getElementById("fellowRuntimeLocation"),
   fellowAgentEngineField: document.getElementById("fellowAgentEngineField"),
   fellowAgentEngine: document.getElementById("fellowAgentEngine"),
   fellowAvatar: document.getElementById("fellowAvatar"),
@@ -242,7 +244,8 @@ const els = {
   tasksPageTitle: document.getElementById("tasksPageTitle"),
   tasksPageMeta: document.getElementById("tasksPageMeta"),
   taskActions: document.getElementById("taskActions"),
-  taskSearch: document.getElementById("taskSearch")
+  taskSearch: document.getElementById("taskSearch"),
+  newTask: document.getElementById("newTask")
 };
 
 function setText(el, value) {
@@ -1308,7 +1311,7 @@ function render() {
     const activeIsGroup = activeCloudRoomType === "group";
     const showPrivateAiControls = activeCloudRoomType === "fellow";
     if (groupInfoBtn) groupInfoBtn.classList.toggle("hidden", !activeIsGroup);
-    if (els.sessionMenuButton) els.sessionMenuButton.classList.add("hidden");
+    if (els.sessionMenuButton) els.sessionMenuButton.classList.remove("hidden");
     if (composerBottom) composerBottom.classList.toggle("hidden", !showPrivateAiControls);
   } else if (cloudSignedIn) {
     if (els.activeChatAvatar) {
@@ -1456,6 +1459,11 @@ function formatRunTime(ms) {
 
 async function openEditFellowDialog(fellowKey) {
   try {
+    const ownedFellow = window.miaFellowManager?.fellowByKey?.(fellowKey);
+    if (ownedFellow?.runtimeKind === "cloud-hermes") {
+      window.miaFellowDialog.openFellowDialog(ownedFellow, ownedFellow.personaText || ownedFellow.bio || "");
+      return;
+    }
     const details = await window.mia.loadFellowDetails(fellowKey);
     window.miaFellowDialog.openFellowDialog(details.fellow, details.personaText || "");
   } catch (error) {
@@ -1486,16 +1494,17 @@ async function setFellowMuted(fellowKey, muted) {
 async function deleteFellow(fellowKey) {
   const fellow = window.miaFellowManager.fellowByKey(fellowKey);
   if (!fellow) return;
-  if (!fellow.cloudOnly && fellow.key === "mia") return;
-  const detail = fellow.cloudOnly
+  if (fellow.canDelete === false) return;
+  const isCloudFellow = fellow.runtimeKind === "cloud-hermes";
+  const detail = isCloudFellow
     ? "这会从云端联系人里移除该伙伴。"
     : "这会移除该伙伴、人设文件和本地会话记录。";
   const ok = window.confirm(`删除「${fellow.name || fellow.key}」？\n\n${detail}`);
   if (!ok) return;
   try {
-    if (fellow.cloudOnly) {
+    if (isCloudFellow) {
       const result = await window.mia.social.deleteFellow(fellow.key);
-      if (result && result.ok === false) throw new Error(result.error || "删除云端伙伴失败");
+      if (result && result.ok === false) throw new Error(result.error || "删除云端 Fellow 失败");
       if (window.miaSocial?.moduleState) {
         window.miaSocial.moduleState.fellows = window.miaSocial.moduleState.fellows
           .filter((item) => String(item?.key || item?.id || "") !== fellow.key);
@@ -1505,7 +1514,7 @@ async function deleteFellow(fellowKey) {
       state.runtime = await window.mia.deleteFellow({ key: fellow.key });
       await loadChatSessions();
     }
-    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    const fellows = window.miaFellowManager?.allOwnedFellows?.() || state.runtime?.fellows || state.runtime?.personas || [];
     const next = fellows[0]?.key || "mia";
     if (!fellows.some((item) => item.key === state.activeKey)) state.activeKey = next;
     if (!fellows.some((item) => item.key === state.activeContactKey)) state.activeContactKey = state.activeKey;
@@ -1601,6 +1610,18 @@ function renderSessionMenu() {
   if (!els.sessionMenu || !els.sessionList) return;
   els.sessionMenu.classList.toggle("hidden", !state.sessionMenuOpen);
   syncTopbarClickCapture();
+  const cloudRoom = activeCloudRoomForSessionMenu();
+  if (cloudRoom) {
+    renderCloudRoomSessionMenu(cloudRoom);
+    return;
+  }
+  if (state.runtime?.cloud?.enabled) {
+    els.newSession?.classList.add("hidden");
+    els.sessionList.innerHTML = "";
+    updateCurrentSessionTitle("新对话");
+    return;
+  }
+  els.newSession?.classList.remove("hidden");
   const sessions = sessionsForPersona();
   const current = activeSession();
   const activeId = current.id;
@@ -1633,6 +1654,108 @@ function renderSessionMenu() {
         state.sessionMenuOpen = false;
         state.forceScrollToBottom = true;
         state.replyDraft = null;
+      }
+      render();
+    });
+    els.sessionList.appendChild(row);
+  }
+}
+
+function activeCloudRoomForSessionMenu() {
+  const social = window.miaSocial;
+  const roomId = social?.getActiveRoomId?.();
+  if (!roomId) return null;
+  return social?.getRoomById?.(roomId) || null;
+}
+
+function cloudRoomSortTime(room) {
+  const cache = window.miaSocial?.moduleState?.messageCache?.get?.(room.id);
+  const last = cache?.messages?.[cache.messages.length - 1];
+  return new Date(last?.created_at || room.updatedAt || room.createdAt || 0).getTime() || 0;
+}
+
+function cloudSessionTitle(room) {
+  if (!room) return "新对话";
+  const type = roomTypeForComposer(room, room.id || "");
+  if (type === "fellow") {
+    if (room.name) return room.name;
+    const fellowKey = fellowKeyForCloudRoom(room);
+    const fellow = [...(state.runtime?.fellows || []), ...(window.miaSocial?.moduleState?.fellows || [])]
+      .find((item) => String(item?.key || item?.id || "") === fellowKey);
+    return fellow?.name || fellowKey || "新对话";
+  }
+  if (type === "group") return room.name || "群聊";
+  return room.name || "私聊";
+}
+
+function cloudSessionRoomsForRoom(room) {
+  const type = roomTypeForComposer(room, room?.id || "");
+  if (type !== "fellow") return room ? [room] : [];
+  const fellowKey = fellowKeyForCloudRoom(room);
+  const rooms = window.miaSocial?.moduleState?.rooms || [];
+  return rooms
+    .filter((candidate) => roomTypeForComposer(candidate, candidate?.id || "") === "fellow")
+    .filter((candidate) => fellowKeyForCloudRoom(candidate) === fellowKey)
+    .sort((a, b) => cloudRoomSortTime(b) - cloudRoomSortTime(a));
+}
+
+async function renameCloudSessionRoom(room) {
+  const title = window.prompt("重命名这个会话", cloudSessionTitle(room));
+  if (!title || !title.trim()) return;
+  const response = await window.mia.social.updateRoom(room.id, { name: title.trim() });
+  if (!response?.ok) {
+    alert(`重命名失败：${response?.error || "未知错误"}`);
+    return;
+  }
+  window.miaSocial?.upsertFellowRoom?.(response.data?.room || response.room || { ...room, name: title.trim() });
+}
+
+async function selectCloudSessionRoom(room) {
+  if (!room?.id) return;
+  window.miaSocial?.setActiveRoomId?.(room.id);
+  window.miaSocial?.markRoomRead?.(room.id);
+  state.sessionMenuOpen = false;
+  state.replyDraft = null;
+  state.forceScrollToBottom = true;
+  const cache = window.miaSocial?.moduleState?.messageCache;
+  if (cache && !cache.has(room.id)) cache.set(room.id, { messages: [], maxSeq: 0 });
+  try {
+    const res = await window.mia.social.listRoomMessages(room.id, 0, 100);
+    const messages = (res?.ok ? res.data?.messages : res?.messages) || [];
+    const ordered = messages.slice().sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+    const maxSeq = ordered.reduce((max, msg) => Math.max(max, Number(msg.seq) || 0), 0);
+    cache?.set(room.id, { messages: ordered, maxSeq });
+  } catch (error) {
+    console.warn("[renderer] cloud session messages load failed:", error?.message || error);
+  }
+  render();
+}
+
+function renderCloudRoomSessionMenu(activeRoom) {
+  const rooms = cloudSessionRoomsForRoom(activeRoom);
+  const activeId = activeRoom.id;
+  const canCreate = roomTypeForComposer(activeRoom, activeRoom.id || "") === "fellow" && Boolean(fellowKeyForCloudRoom(activeRoom));
+  updateCurrentSessionTitle(cloudSessionTitle(activeRoom));
+  els.newSession?.classList.toggle("hidden", !canCreate);
+  els.sessionList.innerHTML = "";
+  for (const room of rooms) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `session-row${room.id === activeId ? " active" : ""}`;
+    row.innerHTML = `
+      <span>
+        <strong>${window.miaMarkdown.escapeHtml(cloudSessionTitle(room))}</strong>
+        <small>${window.miaMarkdown.escapeHtml(new Date(cloudRoomSortTime(room) || Date.now()).toLocaleString())}</small>
+      </span>
+      <em title="重命名" data-cloud-session-edit="${window.miaMarkdown.escapeHtml(room.id)}">${window.miaMarkdown.iconParkIcon("edit", "session-row-edit-icon")}</em>
+    `;
+    row.addEventListener("click", async (event) => {
+      const editTarget = event.target.closest("[data-cloud-session-edit]");
+      if (editTarget) {
+        event.stopPropagation();
+        await renameCloudSessionRoom(room);
+      } else {
+        await selectCloudSessionRoom(room);
       }
       render();
     });
@@ -1924,6 +2047,83 @@ function syncLocalFellowRuntimeBindingsSoon() {
     .catch((error) => console.warn("[renderer] desktop-local runtime sync failed:", error?.message || error));
 }
 
+function slugFromFellowName(name) {
+  return String(name || "fellow")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || "fellow";
+}
+
+function cloudFellowKeyFromName(name, existingKeys = []) {
+  const used = new Set(existingKeys.map((key) => String(key || "").trim()).filter(Boolean));
+  const base = slugFromFellowName(name);
+  let key = base;
+  let index = 2;
+  while (used.has(key)) {
+    key = `${base}_${index}`;
+    index += 1;
+  }
+  return key;
+}
+
+function existingFellowKeys() {
+  const local = [
+    ...(Array.isArray(state.runtime?.fellows) ? state.runtime.fellows : []),
+    ...(Array.isArray(state.runtime?.personas) ? state.runtime.personas : [])
+  ];
+  const cloud = window.miaSocial?.moduleState?.fellows || [];
+  return [...local, ...cloud].map((item) => String(item?.key || item?.id || "").trim()).filter(Boolean);
+}
+
+async function createCloudHermesFellow(fellow, options = {}) {
+  if (!state.runtime?.cloud?.enabled || typeof window.mia?.social?.saveFellowIdentity !== "function") {
+    throw new Error("请先登录 Mia Cloud。");
+  }
+  const key = fellow.key || cloudFellowKeyFromName(fellow.name, existingFellowKeys());
+  const isCreate = options.create !== false && !fellow.key;
+  const identity = {
+    name: String(fellow.name || "").trim(),
+    color: fellow.color || "#2563eb",
+    avatarImage: fellow.avatarImage || "",
+    avatarCrop: fellow.avatarCrop || null,
+    bio: fellow.description || fellow.bio || "",
+    personaText: fellow.personaText || fellow.description || fellow.bio || "",
+    capabilities: Array.isArray(fellow.capabilities) ? fellow.capabilities : ["chat", "files", "terminal", "code"]
+  };
+  const saved = await window.mia.social.saveFellowIdentity(key, identity);
+  if (!saved?.ok) throw new Error(saved?.error || "创建云端 Fellow 失败");
+  if (isCreate) {
+    const runtime = await window.mia.social.saveFellowRuntime(key, {
+      runtimeKind: "cloud-hermes",
+      enabled: true,
+      config: {
+        model: cloudHermesModelEntries()[0]?.id || "mia-default",
+        effortLevel: "medium",
+        permissionMode: "ask"
+      }
+    });
+    if (!runtime?.ok) throw new Error(runtime?.error || "保存云端运行配置失败");
+  }
+  const ensured = await window.mia.social.ensureFellowRoom(key, {
+    title: identity.name || key,
+    runtimeKind: "cloud-hermes"
+  });
+  if (!ensured?.ok) throw new Error(ensured?.error || "创建云端会话失败");
+  const cloudFellow = { ...(saved.data?.fellow || saved.fellow || identity), key, id: key };
+  if (window.miaSocial?.moduleState) {
+    window.miaSocial.moduleState.fellows = [
+      cloudFellow,
+      ...window.miaSocial.moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== key)
+    ];
+  }
+  const room = window.miaSocial?.upsertFellowRoom?.(ensured.data?.room || ensured.room);
+  return { key, fellow: cloudFellow, room };
+}
+
 function setComposerSelectOptions(select, entries, selectedValue) {
   if (!select) return "";
   const normalized = (Array.isArray(entries) ? entries : [])
@@ -2136,6 +2336,11 @@ function appendTransientChat(role, content) {
 
 
 async function createNewSessionForActive() {
+  const cloudRoom = activeCloudRoomForSessionMenu();
+  if (cloudRoom && roomTypeForComposer(cloudRoom, cloudRoom.id || "") === "fellow") {
+    await createNewCloudSessionForActive(cloudRoom);
+    return;
+  }
   pruneEmptyDrafts(state.activeKey);
   state.chatStore = await window.mia.createChatSession({ personaKey: state.activeKey });
   const latest = sessionsForPersona(state.activeKey)[0];
@@ -2144,6 +2349,26 @@ async function createNewSessionForActive() {
   state.replyDraft = null;
   state.forceScrollToBottom = true;
   render();
+}
+
+async function createNewCloudSessionForActive(room) {
+  const fellowKey = fellowKeyForCloudRoom(room);
+  if (!fellowKey || !window.mia?.social?.ensureFellowSessionRoom) return;
+  const sessionId = cryptoRandomId();
+  const runtimeKind = runtimeKindForCloudFellowRoom(room);
+  const response = await window.mia.social.ensureFellowSessionRoom(sessionId, {
+    fellowKey,
+    title: "新对话",
+    runtimeKind
+  });
+  if (!response?.ok) {
+    alert(`新建会话失败：${response?.error || "未知错误"}`);
+    return;
+  }
+  const createdRoom = response.data?.room || response.room;
+  if (!createdRoom?.id) return;
+  window.miaSocial?.upsertFellowRoom?.(createdRoom);
+  await selectCloudSessionRoom(createdRoom);
 }
 
 function fellowByKey(fellowKey) {
@@ -2166,6 +2391,15 @@ async function openFellowConversation(fellowKey) {
   showNarrowContent();
 
   if (state.runtime?.cloud?.enabled && window.miaSocial?.ensureFellowRoom) {
+    const existingRoom = window.miaSocial?.fellowRoomForKey?.(key);
+    if (existingRoom?.id) {
+      state.activeKey = "";
+      window.miaSocial.setActiveRoomId(existingRoom.id);
+      state.forceScrollToBottom = true;
+      render();
+      requestAnimationFrame(() => els.chatInput?.focus());
+      return;
+    }
     const room = await window.miaSocial.ensureFellowRoom(fellow);
     if (room?.id) {
       state.activeKey = "";
@@ -2595,6 +2829,9 @@ els.skillSearch?.addEventListener("input", () => {
 els.taskSearch?.addEventListener("input", (e) => {
   state.taskFilter = e.target.value;
   window.miaTasksPanel?.renderTaskSidebar();
+});
+els.newTask?.addEventListener("click", () => {
+  window.miaTasksPanel?.openTaskCreate();
 });
 document.querySelectorAll("[data-skill-filter]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -3490,6 +3727,10 @@ els.appearanceShowAssistantAvatar?.addEventListener("click", () => {
 
 els.fellowForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const existingFellow = els.fellowKey?.value
+    ? window.miaFellowManager?.fellowByKey?.(els.fellowKey.value)
+    : null;
+  const runtimeKind = existingFellow?.runtimeKind || String(els.fellowRuntimeLocation?.value || "desktop-local");
   const fellow = {
     key: els.fellowKey?.value || "",
     name: els.fellowName.value,
@@ -3499,14 +3740,22 @@ els.fellowForm?.addEventListener("submit", async (event) => {
     description: state.fellowDialogMode === "create" ? els.fellowSeed.value : "",
     personaText: els.fellowSeed.value
   };
-  state.runtime = await window.mia.saveFellow(fellow);
-  const fellows = state.runtime?.fellows || state.runtime?.personas || [];
-  const saved = fellow.key
-    ? fellows.find((item) => item.key === fellow.key)
-    : [...fellows].reverse().find((item) => item.name === fellow.name.trim()) || fellows[0];
-  const savedKey = saved?.key || "";
-  if (savedKey) state.activeKey = savedKey;
-  await loadChatSessions();
+  let savedKey = "";
+  let cloudRoom = null;
+  if (runtimeKind === "cloud-hermes") {
+    const created = await createCloudHermesFellow(fellow, { create: state.fellowDialogMode !== "edit" });
+    savedKey = created.key;
+    cloudRoom = created.room;
+  } else {
+    state.runtime = await window.mia.saveFellow(fellow);
+    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    const saved = fellow.key
+      ? fellows.find((item) => item.key === fellow.key)
+      : [...fellows].reverse().find((item) => item.name === fellow.name.trim()) || fellows[0];
+    savedKey = saved?.key || "";
+    if (savedKey) state.activeKey = savedKey;
+    await loadChatSessions();
+  }
   state.fellowDialogOpen = false;
   // If this was the initial onboarding create-fellow step, mark onboarding done.
   if (state.onboardingStep && state.onboardingStep !== "done") {
@@ -3514,7 +3763,13 @@ els.fellowForm?.addEventListener("submit", async (event) => {
     state.setupGuideDismissed = true;
     localStorage.setItem(SETUP_GUIDE_DISMISSED_KEY, "1");
   }
-  if (savedKey) await openFellowConversation(savedKey);
+  if (cloudRoom?.id) {
+    state.activeKey = "";
+    state.activeContactKey = savedKey;
+    window.miaSocial?.setActiveRoomId(cloudRoom.id);
+    state.forceScrollToBottom = true;
+    render();
+  } else if (savedKey) await openFellowConversation(savedKey);
   else render();
 });
 

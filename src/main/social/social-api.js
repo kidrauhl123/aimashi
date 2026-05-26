@@ -73,6 +73,14 @@ function createSocialApi({ getSettings, normalizeUrl }) {
     async listFellows() {
       return jsonFetch({ ...ctx(), method: "GET", path: "/api/me/fellows" });
     },
+    async saveFellowIdentity(fellowId, body = {}) {
+      return jsonFetch({
+        ...ctx(),
+        method: "PUT",
+        path: `/api/me/fellows/${encodeURIComponent(fellowId)}`,
+        body: withOpId(body)
+      });
+    },
     async deleteFellow(fellowId) {
       return jsonFetch({ ...ctx(), method: "DELETE", path: `/api/me/fellows/${encodeURIComponent(fellowId)}` });
     },
@@ -107,6 +115,9 @@ function createSocialApi({ getSettings, normalizeUrl }) {
     },
     async ensureFellowRoom(fellowId, body = {}) {
       return jsonFetch({ ...ctx(), method: "PUT", path: `/api/me/fellows/${encodeURIComponent(fellowId)}/room`, body: withOpId(body) });
+    },
+    async ensureFellowSessionRoom(sessionId, body = {}) {
+      return jsonFetch({ ...ctx(), method: "PUT", path: `/api/me/fellow-rooms/${encodeURIComponent(sessionId)}`, body: withOpId(body) });
     },
     async getFellowRuntime(fellowId, runtimeKind = "cloud-hermes") {
       return jsonFetch({ ...ctx(), method: "GET", path: `/api/me/fellows/${encodeURIComponent(fellowId)}/runtime?kind=${encodeURIComponent(runtimeKind)}` });

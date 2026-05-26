@@ -102,18 +102,20 @@ test("GET /api/skills?category= filters", async () => {
   } finally { await stopServer(ctx); }
 });
 
-test("GET /api/skills/:id returns full SKILL.md body", async () => {
+test("GET /api/skills/:id returns listing + latest version meta (no raw body)", async () => {
   const ctx = await startServer();
   try {
     const alice = await register(ctx.port, "alice");
     const r = await api(ctx.port, "GET", "/api/skills/commit-craft", { token: alice.token });
     assert.equal(r.status, 200);
     assert.equal(r.body.skill.id, "commit-craft");
-    assert.match(r.body.skill.body, /# Commit Craft/);
+    assert.equal(r.body.skill.latestVersion, "1.0.0");
+    assert.ok(r.body.skill.version && r.body.skill.version.checksum, "carries a packaged version");
+    assert.equal(r.body.skill.body, undefined, "detail no longer ships a raw body");
   } finally { await stopServer(ctx); }
 });
 
-test("POST /api/skills/:id/install bumps count once per user, returns body", async () => {
+test("POST install bumps count once per user, returns download info; package downloads", async () => {
   const ctx = await startServer();
   try {
     const alice = await register(ctx.port, "alice");
@@ -122,7 +124,11 @@ test("POST /api/skills/:id/install bumps count once per user, returns body", asy
     const i1 = await api(ctx.port, "POST", "/api/skills/commit-craft/install", { token: alice.token });
     assert.equal(i1.status, 200);
     assert.equal(i1.body.skill.installCount, 1);
-    assert.match(i1.body.skill.body, /# Commit Craft/, "install returns content to write locally");
+    assert.ok(i1.body.download && i1.body.download.url && i1.body.download.checksum, "install returns package download info");
+
+    // the package itself downloads (zip bytes, 200)
+    const pkg = await api(ctx.port, "GET", i1.body.download.url, { token: alice.token });
+    assert.equal(pkg.status, 200);
 
     // same user re-installs → idempotent, no inflation
     const i2 = await api(ctx.port, "POST", "/api/skills/commit-craft/install", { token: alice.token });

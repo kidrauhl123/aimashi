@@ -1,78 +1,127 @@
-// Cloud skill marketplace registry (sub-project B, slice 1).
+// Cloud skill marketplace store (sub-project B, F1 — community model).
 //
-// The cloud holds the canonical catalog of installable skills: each row
-// carries the FULL SKILL.md body so a desktop client can "添加" by
-// downloading the content into its local skills directory. install_count
-// is a real, denormalized counter bumped once per distinct user via the
-// skill_installs ledger — never seeded with fake numbers (it starts at 0
-// and grows as people actually install).
+// A skill is a LISTING (skills) with one or more versioned zip PACKAGES
+// (skill_versions). Packages live on disk under <dataDir>/uploads/skills/
+// <id>/<version>.zip; skill_versions stores the path relative to dataDir
+// plus a sha256 checksum. install_count is a real per-user counter
+// (skill_installs). Open publish + post-moderation: status defaults to
+// 'published'; reports + setStatus drive takedown.
+
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { packageBody, packageDir } = require("./skill-packages.js");
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-// List/detail responses omit `body` to keep the catalog payload light;
-// only getSkill / recordInstall return the full body the client writes.
 function rowToSkillMeta(row) {
   if (!row) return null;
   return {
     id: row.id,
+    ownerUserId: row.owner_user_id || null,
+    ownerLabel: row.owner_label || "",
     name: row.name,
     category: row.category,
     description: row.description || "",
-    sourceLabel: row.source_label || "",
+    latestVersion: row.latest_version || "",
     installCount: row.install_count,
+    status: row.status || "published",
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
 }
 
-function rowToSkillFull(row) {
-  const meta = rowToSkillMeta(row);
-  if (!meta) return null;
-  return { ...meta, body: row.body || "" };
+function rowToVersion(row) {
+  if (!row) return null;
+  return {
+    version: row.version,
+    packagePath: row.package_path,
+    checksum: row.checksum,
+    sizeBytes: row.size_bytes,
+    entryPath: row.entry_path,
+    manifest: (() => { try { return JSON.parse(row.manifest_json || "{}"); } catch { return {}; } })(),
+    changelog: row.changelog || "",
+    scanStatus: row.scan_status || "unscanned",
+    createdAt: row.created_at
+  };
 }
 
-function createSkillsStore(db) {
-  const upsertStmt = db.prepare(
-    "INSERT INTO skills (id, name, category, description, source_label, body, install_count, created_at, updated_at) " +
-    "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?) " +
+function createSkillsStore(db, options = {}) {
+  const dataDir = options.dataDir || "";
+  const uploadDir = options.uploadDir || path.join(dataDir, "uploads");
+  const pkgRoot = path.join(uploadDir, "skills");
+
+  const upsertSkillStmt = db.prepare(
+    "INSERT INTO skills (id, owner_user_id, owner_label, name, category, description, body, latest_version, install_count, status, created_at, updated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, '', ?, 0, 'published', ?, ?) " +
     "ON CONFLICT (id) DO UPDATE SET " +
-    "  name = excluded.name, category = excluded.category, description = excluded.description, " +
-    "  source_label = excluded.source_label, body = excluded.body, updated_at = excluded.updated_at"
+    "  owner_user_id = excluded.owner_user_id, owner_label = excluded.owner_label, name = excluded.name, " +
+    "  category = excluded.category, description = excluded.description, latest_version = excluded.latest_version, " +
+    "  status = 'published', updated_at = excluded.updated_at"
   );
-  const getStmt = db.prepare(
-    "SELECT id, name, category, description, source_label, body, install_count, created_at, updated_at " +
-    "FROM skills WHERE id = ?"
+  const insertVersionStmt = db.prepare(
+    "INSERT INTO skill_versions (skill_id, version, package_path, checksum, size_bytes, entry_path, manifest_json, changelog, created_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+    "ON CONFLICT (skill_id, version) DO UPDATE SET " +
+    "  package_path = excluded.package_path, checksum = excluded.checksum, size_bytes = excluded.size_bytes, " +
+    "  entry_path = excluded.entry_path, manifest_json = excluded.manifest_json, changelog = excluded.changelog"
   );
+  const getSkillStmt = db.prepare("SELECT * FROM skills WHERE id = ?");
+  const getVersionStmt = db.prepare("SELECT * FROM skill_versions WHERE skill_id = ? AND version = ?");
+  const hasVersionStmt = db.prepare("SELECT 1 FROM skill_versions WHERE skill_id = ? LIMIT 1");
   const categoriesStmt = db.prepare(
-    "SELECT category, COUNT(*) AS count FROM skills GROUP BY category ORDER BY count DESC, category ASC"
+    "SELECT category, COUNT(*) AS count FROM skills WHERE status = 'published' GROUP BY category ORDER BY count DESC, category ASC"
   );
   const insertInstallStmt = db.prepare(
-    "INSERT OR IGNORE INTO skill_installs (skill_id, user_id, created_at) VALUES (?, ?, ?)"
+    "INSERT OR IGNORE INTO skill_installs (skill_id, user_id, installed_version, created_at) VALUES (?, ?, ?, ?)"
+  );
+  const updateInstallVersionStmt = db.prepare(
+    "UPDATE skill_installs SET installed_version = ? WHERE skill_id = ? AND user_id = ?"
   );
   const bumpStmt = db.prepare("UPDATE skills SET install_count = install_count + 1 WHERE id = ?");
+  const setStatusStmt = db.prepare("UPDATE skills SET status = ?, updated_at = ? WHERE id = ?");
   const deleteStmt = db.prepare("DELETE FROM skills WHERE id = ?");
+  const insertReportStmt = db.prepare(
+    "INSERT INTO skill_reports (id, skill_id, reporter_id, reason, created_at) VALUES (?, ?, ?, ?, ?)"
+  );
+  const bodyOrphansStmt = db.prepare(
+    "SELECT id, name, category, description, source_label, body FROM skills " +
+    "WHERE body <> '' AND id NOT IN (SELECT DISTINCT skill_id FROM skill_versions)"
+  );
 
-  function upsertSkill(skill) {
-    if (!skill || !skill.id || !skill.name) throw new Error("upsertSkill: skill.id and skill.name required");
-    if (!skill.body) throw new Error("upsertSkill: skill.body required");
+  function getSkill(id) {
+    const meta = rowToSkillMeta(getSkillStmt.get(String(id)));
+    if (!meta) return null;
+    const ver = meta.latestVersion ? rowToVersion(getVersionStmt.get(String(id), meta.latestVersion)) : null;
+    return { ...meta, version: ver };
+  }
+
+  // Publish a version: package the content (a directory, or a single body),
+  // write the zip under uploads/, upsert the listing, insert the version.
+  function publishVersion(input) {
+    const {
+      id, ownerUserId = null, ownerLabel = "", name,
+      category = "uncategorized", description = "",
+      version = "1.0.0", body = "", srcDir = "", changelog = ""
+    } = input || {};
+    if (!id || !name) throw new Error("publishVersion: id and name required");
+    if (!srcDir && !body) throw new Error("publishVersion: srcDir or body required");
+    const destZip = path.join(pkgRoot, String(id), `${version}.zip`);
+    const pkg = srcDir ? packageDir(srcDir, destZip) : packageBody(body, destZip);
+    const relPath = path.relative(dataDir, destZip);
     const now = nowIso();
-    upsertStmt.run(
-      String(skill.id),
-      String(skill.name),
-      String(skill.category || "uncategorized"),
-      String(skill.description || ""),
-      String(skill.sourceLabel || ""),
-      String(skill.body),
-      now,
-      now
+    upsertSkillStmt.run(String(id), ownerUserId, String(ownerLabel), String(name), String(category), String(description), String(version), now, now);
+    insertVersionStmt.run(
+      String(id), String(version), relPath, pkg.checksum, pkg.sizeBytes, pkg.entryPath,
+      JSON.stringify({ files: pkg.files || [pkg.entryPath], fileCount: pkg.fileCount }),
+      String(changelog), now
     );
-    return getSkill(skill.id);
+    return getSkill(id);
   }
 
   function listSkills({ category = "", q = "", limit = 60 } = {}) {
-    const where = [];
+    const where = ["status = 'published'"];
     const params = [];
     if (category) { where.push("category = ?"); params.push(String(category)); }
     if (q) {
@@ -81,8 +130,7 @@ function createSkillsStore(db) {
       params.push(like, like);
     }
     const sql =
-      "SELECT id, name, category, description, source_label, install_count, created_at, updated_at FROM skills" +
-      (where.length ? " WHERE " + where.join(" AND ") : "") +
+      "SELECT * FROM skills WHERE " + where.join(" AND ") +
       " ORDER BY install_count DESC, updated_at DESC LIMIT ?";
     params.push(Math.min(Math.max(Number(limit) || 60, 1), 200));
     return db.prepare(sql).all(...params).map(rowToSkillMeta);
@@ -92,33 +140,93 @@ function createSkillsStore(db) {
     return categoriesStmt.all().map((row) => ({ category: row.category, count: row.count }));
   }
 
-  function getSkill(id) {
-    return rowToSkillFull(getStmt.get(String(id)));
+  function getVersion(id, version) {
+    return rowToVersion(getVersionStmt.get(String(id), String(version)));
   }
 
-  // Idempotent per user: re-installing the same skill does not inflate the
-  // count. Returns the full skill (with body) so the caller can hand the
-  // content to the desktop client, or null if the skill does not exist.
-  function recordInstall(skillId, userId) {
-    if (!getStmt.get(String(skillId))) return null;
-    const inserted = insertInstallStmt.run(String(skillId), String(userId), nowIso()).changes;
-    if (inserted > 0) bumpStmt.run(String(skillId));
-    return getSkill(skillId);
+  // Absolute on-disk path of a version's zip (for serving downloads).
+  function packageAbsPath(version) {
+    return version ? path.join(dataDir, version.packagePath) : "";
   }
 
-  // Insert seed skills that are not already present; never clobbers an
-  // existing row (so operator/admin edits survive a server restart).
-  function seedSkills(seeds) {
-    for (const seed of Array.isArray(seeds) ? seeds : []) {
-      if (seed && seed.id && !getStmt.get(String(seed.id))) upsertSkill(seed);
-    }
+  // Idempotent per user: first install bumps the count; re-install just
+  // updates the recorded version. Returns the full skill (with latest version).
+  function recordInstall(id, userId, version = "") {
+    const row = getSkillStmt.get(String(id));
+    if (!row) return null;
+    const v = String(version || row.latest_version || "");
+    const inserted = insertInstallStmt.run(String(id), String(userId), v, nowIso()).changes;
+    if (inserted > 0) bumpStmt.run(String(id));
+    else if (v) updateInstallVersionStmt.run(v, String(id), String(userId));
+    return getSkill(id);
+  }
+
+  function report(id, reporterId, reason = "") {
+    if (!getSkillStmt.get(String(id))) return null;
+    const reportId = `rep_${crypto.randomBytes(8).toString("hex")}`;
+    insertReportStmt.run(reportId, String(id), String(reporterId), String(reason).slice(0, 500), nowIso());
+    return reportId;
+  }
+
+  function setStatus(id, status) {
+    return setStatusStmt.run(String(status), nowIso(), String(id)).changes;
   }
 
   function deleteSkill(id) {
     return deleteStmt.run(String(id)).changes;
   }
 
-  return { upsertSkill, listSkills, listCategories, getSkill, recordInstall, seedSkills, deleteSkill };
+  // Seed/refresh first-party catalog from folders (each entry carries a dir).
+  // Only publishes a skill that has no version yet, so it never clobbers a
+  // later-published version on restart.
+  function seedFromCatalog(catalog) {
+    for (const entry of Array.isArray(catalog) ? catalog : []) {
+      if (!entry || !entry.id || hasVersionStmt.get(String(entry.id))) continue;
+      publishVersion({
+        id: entry.id,
+        ownerUserId: null,
+        ownerLabel: entry.sourceLabel || "Mia 官方",
+        name: entry.name || entry.id,
+        category: entry.category || "uncategorized",
+        description: entry.description || "",
+        version: "1.0.0",
+        srcDir: entry.dir || "",
+        body: entry.dir ? "" : (entry.body || "")
+      });
+    }
+  }
+
+  // Migrate any pre-v11 single-body row that has no version into a v1.0.0
+  // single-file package. Idempotent.
+  function backfillBodyVersions() {
+    for (const row of bodyOrphansStmt.all()) {
+      publishVersion({
+        id: row.id,
+        ownerUserId: null,
+        ownerLabel: row.source_label || "Mia 官方",
+        name: row.name || row.id,
+        category: row.category || "uncategorized",
+        description: row.description || "",
+        version: "1.0.0",
+        body: row.body || ""
+      });
+    }
+  }
+
+  return {
+    publishVersion,
+    listSkills,
+    listCategories,
+    getSkill,
+    getVersion,
+    packageAbsPath,
+    recordInstall,
+    report,
+    setStatus,
+    deleteSkill,
+    seedFromCatalog,
+    backfillBodyVersions
+  };
 }
 
 module.exports = { createSkillsStore };

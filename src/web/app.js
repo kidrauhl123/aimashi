@@ -95,23 +95,28 @@ const els = {
   convMenuNewGroup: document.getElementById("convMenuNewGroup"),
   unreadCount: document.getElementById("unreadCount"),
   mobileBack: document.getElementById("mobileBack"),
+  userAvatar: document.getElementById("userAvatar"),
 
   activeAvatar: document.getElementById("activeAvatar"),
   activeTitle: document.getElementById("activeTitle"),
   activeMeta: document.getElementById("activeMeta"),
-  statusText: document.getElementById("statusText"),
+  sessionMenuButton: document.getElementById("sessionMenuButton"),
+  currentSessionTitle: document.getElementById("currentSessionTitle"),
+  sessionMenu: document.getElementById("sessionMenu"),
+  sessionList: document.getElementById("sessionList"),
+  newSession: document.getElementById("newSession"),
   chat: document.getElementById("chat"),
   chatForm: document.getElementById("chatForm"),
   chatInput: document.getElementById("chatInput"),
   sendButton: document.getElementById("sendButton"),
   composerBottom: document.getElementById("composerBottom"),
+  quickModelAvatar: document.getElementById("quickModelAvatar"),
   quickModelSelect: document.getElementById("quickModelSelect"),
   quickModelLabel: document.getElementById("quickModelLabel"),
   effortSelect: document.getElementById("effortSelect"),
   effortLabel: document.getElementById("effortLabel"),
   permissionMode: document.getElementById("permissionMode"),
   permissionLabel: document.getElementById("permissionLabel"),
-  modelSwitchStatus: document.getElementById("modelSwitchStatus"),
 
   settingsView: document.getElementById("settingsView"),
   openSettings: document.getElementById("openSettings"),
@@ -167,6 +172,7 @@ let state = {
   settingsOpen: false,
   activeSettingsTab: "account",
   createMenuOpen: false,
+  sessionMenuOpen: false,
 };
 
 let eventsSocket = null;
@@ -188,6 +194,15 @@ function formatBytes(value) {
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+function initials(value) {
+  const text = String(value || "").trim();
+  return (text[0] || "M").toUpperCase();
+}
+
+function isPublicImageSrc(value) {
+  return /^(https?:|data:|\.?\/assets\/)/i.test(String(value || ""));
+}
+
 function attachmentKind(file = {}) {
   const type = String(file.mimeType || file.mime || file.type || "").toLowerCase();
   const name = String(file.name || "");
@@ -198,6 +213,54 @@ function attachmentKind(file = {}) {
   if (type.includes("pdf") || ext === "pdf") return "pdf";
   if (type.startsWith("text/") || ["txt", "md", "json", "csv", "log", "js", "ts", "tsx", "jsx", "py", "html", "css"].includes(ext)) return "text";
   return "file";
+}
+
+function renderMarkdown(value) {
+  const text = String(value || "");
+  if (!text.trim()) return "";
+  const render = window.miaMarkdown?.renderMarkdown;
+  if (typeof render === "function") {
+    try {
+      return render(text);
+    } catch (err) {
+      console.warn("[web] markdown render failed:", err);
+    }
+  }
+  return escapeHtml(text).replace(/\n/g, "<br>");
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the textarea copy path for browsers that block Clipboard API here.
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+function flashCopiedCode(code) {
+  code.classList.add("copied");
+  clearTimeout(code._copiedTimer);
+  code._copiedTimer = setTimeout(() => {
+    code.classList.remove("copied");
+  }, 900);
 }
 
 function attachmentGlyph(attachment = {}) {
@@ -285,6 +348,78 @@ function avatarBackgroundStyle(image, customCrop, fallbackColor) {
   return `background-color:transparent;background-image:url('${image}');background-size:${size}%;background-position:${x}% ${y}%;background-repeat:no-repeat;`;
 }
 
+function renderUserAvatar() {
+  if (!els.userAvatar) return;
+  const user = state.user || {};
+  const color = user.avatarColor || "#111827";
+  const image = user.avatarImage || "";
+  if (image && isPublicImageSrc(image)) {
+    els.userAvatar.style.cssText = avatarBackgroundStyle(user.avatarImage, user.avatarCrop, color);
+    els.userAvatar.textContent = "";
+  } else {
+    els.userAvatar.style.cssText = "";
+    els.userAvatar.style.backgroundColor = color;
+    els.userAvatar.textContent = initials(user.username || user.email || "Mia");
+  }
+  els.userAvatar.title = user.username ? `账号与同步：${user.username}` : "账号与同步";
+}
+
+function providerIconSrc(provider = "") {
+  const id = String(provider || "").trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-");
+  if (!id || id === "custom") return "";
+  return `./assets/provider-icons/${id}.svg`;
+}
+
+function modelIconSrc(model = {}) {
+  const id = String(model.model || model.id || model.name || model.value || "").toLowerCase();
+  const provider = String(model.provider || "").toLowerCase();
+  const rules = [
+    [/codex|openai-codex/, "chatgpt.jpeg"],
+    [/gpt-5\.1-chat/, "gpt-5.1-chat.png"],
+    [/gpt-5\.1/, "gpt-5.1.png"],
+    [/gpt-5.*mini/, "gpt-5-mini.png"],
+    [/gpt-5.*nano/, "gpt-5-nano.png"],
+    [/gpt-5/, "gpt-5.png"],
+    [/gpt-4/, "gpt_4.png"],
+    [/gpt-3/, "gpt_3.5.png"],
+    [/claude|anthropic/, "claude.png"],
+    [/deepseek/, "deepseek.png"],
+    [/grok|xai/, "grok.png"],
+    [/qwen|qwq|qvq|wan-/, "qwen.png"],
+    [/gemini/, "gemini.png"],
+    [/gemma/, "gemma.png"],
+    [/llama/, "llama.png"],
+    [/mistral|mixtral|codestral|ministral|magistral/, "mixtral.png"],
+    [/kimi|moonshot/, "moonshot.webp"],
+    [/minimax|abab|m2-her/, "minimax.png"],
+    [/mimo/, "mimo.svg"],
+    [/nvidia|nemotron/, "nvidia.png"],
+    [/copilot/, "copilot.png"],
+    [/hermes|nous|mia-default/, "nousresearch.png"],
+    [/hugging/, "huggingface.png"],
+    [/glm|zai|zhipu/, "zhipu.png"],
+    [/step/, "step.png"]
+  ];
+  const haystack = `${id} ${provider}`;
+  const match = rules.find(([regex]) => regex.test(haystack));
+  if (match) return `./assets/model-icons/${match[1]}`;
+  return providerIconSrc(provider);
+}
+
+function setModelAvatar(engine, entry = {}, config = {}) {
+  if (!els.quickModelAvatar) return;
+  const icon = engine === "claude-code"
+    ? modelIconSrc({ provider: "anthropic", model: entry.model || config.model || "claude" })
+    : engine === "codex"
+      ? modelIconSrc({ provider: "openai-codex", model: entry.model || config.model || "codex" })
+      : modelIconSrc({
+        provider: entry.provider || config.provider || (engine === "hermes" ? "nous" : engine),
+        model: entry.model || config.model || entry.value || ""
+      });
+  els.quickModelAvatar.textContent = icon ? "" : "◇";
+  els.quickModelAvatar.style.backgroundImage = icon ? `url("${icon}")` : "";
+}
+
 function showToast(text) {
   els.toast.textContent = text;
   els.toast.classList.remove("hidden");
@@ -363,6 +498,7 @@ async function api(path, options = {}) {
 
 function setAuthView() {
   els.root.dataset.auth = state.token ? "signed-in" : "signed-out";
+  renderUserAvatar();
   // Theme now lives in window.miaAppearance (see web/appearance.js).
   // It applies on script load so the page doesn't flash; don't override here.
 }
@@ -620,6 +756,7 @@ function handleCloudEvent(envelope) {
       renderActiveChat();
     }
     renderConversationList();
+    renderSessionMenu();
     renderRailUnreadBadge();
   } else if (type === "cloud_agent_run_started") {
     const roomId = envelope.roomId;
@@ -689,6 +826,7 @@ function handleCloudEvent(envelope) {
       state.rooms = state.rooms.map((r) => (r.id === envelope.room.id ? { ...r, ...envelope.room } : r));
       renderConversationList();
       if (state.activeConversationId === envelope.room.id) renderActiveChat();
+      renderSessionMenu();
     }
   } else if (type === "room.deleted") {
     // DELETE /api/rooms/:id from any device — purge local state.
@@ -709,6 +847,7 @@ function handleCloudEvent(envelope) {
       state.fellows = [fellow, ...state.fellows.filter((f) => f.id !== fellow.id)];
       renderConversationList();
       renderActiveChat();
+      renderSessionMenu();
     }
   } else if (type === "fellow.runtime_updated") {
     const binding = envelope.binding;
@@ -816,7 +955,8 @@ function normalizePlatformModel(model = {}) {
   return {
     value: id,
     label: String(model.label || model.name || id).trim(),
-    provider: String(model.provider || "").trim()
+    provider: String(model.provider || "").trim(),
+    model: String(model.model || model.upstreamModel || model.upstream_model || id).trim()
   };
 }
 
@@ -853,18 +993,21 @@ function selectEntriesForModel(engine, runtimeKind, config = {}) {
     return config.modelEntries.map((entry) => ({
       value: String(entry.value || entry.id || entry.model || ""),
       model: String(entry.model || entry.value || entry.id || ""),
-      label: String(entry.label || entry.model || entry.value || entry.id || "Default")
+      label: String(entry.label || entry.model || entry.value || entry.id || "Default"),
+      provider: String(entry.provider || ""),
+      providerLabel: String(entry.providerLabel || entry.provider_label || "")
     })).filter((entry) => entry.value || entry.model);
   }
   if (runtimeKind === "desktop-local" && (engine === "claude-code" || engine === "codex")) {
     return externalModelEntries(engine).map((entry) => ({
       value: entry.model || entry.id,
       model: entry.model,
-      label: entry.label || entry.model || entry.id
+      label: entry.label || entry.model || entry.id,
+      provider: entry.provider || (engine === "codex" ? "openai-codex" : "anthropic")
     }));
   }
   if (runtimeKind === "desktop-local" && config.model) {
-    return [{ value: config.model, label: config.model, model: config.model }];
+    return [{ value: config.model, label: config.model, model: config.model, provider: config.provider || "" }];
   }
   if (runtimeKind === "cloud-hermes" || engine === "hermes") {
     return state.platformModels.length
@@ -874,7 +1017,8 @@ function selectEntriesForModel(engine, runtimeKind, config = {}) {
   return externalModelEntries(engine).map((entry) => ({
     value: entry.id,
     model: entry.model,
-    label: entry.label || entry.model || entry.id
+    label: entry.label || entry.model || entry.id,
+    provider: entry.provider || (engine === "codex" ? "openai-codex" : "anthropic")
   }));
 }
 
@@ -920,10 +1064,7 @@ function setSelectOptions(select, entries, selectedValue, fallbackLabel) {
   return select.selectedOptions?.[0]?.textContent || fallbackLabel || "";
 }
 
-function setModelSwitchStatus(text, online = false) {
-  if (!els.modelSwitchStatus) return;
-  els.modelSwitchStatus.textContent = text || "";
-  els.modelSwitchStatus.classList.toggle("online", Boolean(online));
+function setModelSwitchStatus() {
 }
 
 function renderComposerControls(room = null) {
@@ -942,6 +1083,10 @@ function renderComposerControls(room = null) {
   const cloudModelEntries = selectEntriesForModel(engine, runtimeKind, config);
   const modelValue = config.model || (runtimeKind === "desktop-local" && (engine === "claude-code" || engine === "codex") ? "default" : cloudModelEntries[0]?.value || "mia-default");
   const modelLabel = setSelectOptions(els.quickModelSelect, cloudModelEntries, modelValue, config.model || "Default");
+  const selectedModelEntry = cloudModelEntries.find((entry) => String(entry.value) === String(els.quickModelSelect?.value || modelValue))
+    || cloudModelEntries.find((entry) => String(entry.model) === String(config.model || ""))
+    || {};
+  setModelAvatar(engine, selectedModelEntry, config);
   if (els.quickModelLabel) els.quickModelLabel.textContent = modelLabel || "Default";
 
   const effort = config.effortLevel || "medium";
@@ -1019,6 +1164,139 @@ function roomSortKey(room) {
   const cached = state.messageCache.get(room.id);
   const last = cached?.messages?.[cached.messages.length - 1];
   return new Date(last?.created_at || room.updated_at || room.created_at || 0).getTime();
+}
+
+function cryptoRandomId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `session_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function activeSessionRoom() {
+  return state.rooms.find((room) => room.id === state.activeConversationId) || null;
+}
+
+function sessionTitleForRoom(room) {
+  if (!room) return "新对话";
+  const type = roomTypeForControls(room);
+  if (type === "fellow") {
+    return room.name || roomDisplayTitle(room) || "新对话";
+  }
+  if (type === "group") return room.name || "群聊";
+  return roomDisplayTitle(room) || "私聊";
+}
+
+function sessionRoomsForRoom(room) {
+  if (!room) return [];
+  const type = roomTypeForControls(room);
+  if (type !== "fellow") return [room];
+  const fellowKey = fellowKeyForRoom(room);
+  if (!fellowKey) return [room];
+  return state.rooms
+    .filter((candidate) => roomTypeForControls(candidate) === "fellow")
+    .filter((candidate) => fellowKeyForRoom(candidate) === fellowKey)
+    .sort((a, b) => roomSortKey(b) - roomSortKey(a));
+}
+
+function updateCurrentSessionTitle(title) {
+  if (!els.currentSessionTitle) return;
+  const next = title || "新对话";
+  if (els.currentSessionTitle.textContent === next) return;
+  els.currentSessionTitle.textContent = next;
+  els.currentSessionTitle.classList.remove("title-updated");
+  requestAnimationFrame(() => els.currentSessionTitle?.classList.add("title-updated"));
+}
+
+async function renameSessionRoom(room) {
+  if (!room || roomTypeForControls(room) === "dm") return;
+  const title = window.prompt("重命名这个会话", sessionTitleForRoom(room));
+  if (title === null) return;
+  const trimmed = String(title || "").trim();
+  if (!trimmed) return;
+  try {
+    const res = await api(`/api/rooms/${room.id}`, { method: "PATCH", body: { name: trimmed } });
+    const updated = res?.room || { ...room, name: trimmed };
+    state.rooms = state.rooms.map((candidate) => (candidate.id === room.id ? { ...candidate, ...updated } : candidate));
+    renderConversationList();
+    renderActiveChat();
+    renderSessionMenu();
+  } catch (err) {
+    showToast(err.message || "重命名失败");
+  }
+}
+
+function selectSessionRoom(room) {
+  if (!room?.id) return;
+  state.sessionMenuOpen = false;
+  setActiveConversation(room.id);
+}
+
+async function createNewSessionForActive() {
+  const room = activeSessionRoom();
+  if (roomTypeForControls(room) !== "fellow") return;
+  const fellowKey = fellowKeyForRoom(room);
+  if (!fellowKey) return;
+  const runtimeKind = runtimeKindForFellowRoom(room, fellowByKey(fellowKey));
+  const sessionId = cryptoRandomId();
+  try {
+    const res = await api(`/api/me/fellow-rooms/${encodeURIComponent(sessionId)}`, {
+      method: "PUT",
+      body: {
+        fellowKey,
+        title: "新对话",
+        runtimeKind
+      }
+    });
+    const created = res?.room;
+    if (!created?.id) return;
+    state.rooms = [created, ...state.rooms.filter((candidate) => candidate.id !== created.id)];
+    if (Array.isArray(res.members)) state.roomMembersCache.set(created.id, res.members);
+    state.messageCache.set(created.id, { messages: [], maxSeq: 0 });
+    state.sessionMenuOpen = false;
+    setActiveConversation(created.id);
+  } catch (err) {
+    showToast(err.message || "新建会话失败");
+  }
+}
+
+function renderSessionMenu() {
+  if (!els.sessionMenu || !els.sessionList) return;
+  const room = activeSessionRoom();
+  const hasRoom = Boolean(room);
+  els.sessionMenuButton?.classList.toggle("hidden", !hasRoom);
+  els.sessionMenu.classList.toggle("hidden", !hasRoom || !state.sessionMenuOpen);
+  if (!hasRoom) {
+    els.sessionList.innerHTML = "";
+    updateCurrentSessionTitle("新对话");
+    return;
+  }
+
+  const rooms = sessionRoomsForRoom(room);
+  const canCreate = roomTypeForControls(room) === "fellow" && Boolean(fellowKeyForRoom(room));
+  els.newSession?.classList.toggle("hidden", !canCreate);
+  updateCurrentSessionTitle(sessionTitleForRoom(room));
+  els.sessionList.innerHTML = "";
+  for (const item of rooms) {
+    const editable = roomTypeForControls(item) !== "dm";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `session-row${item.id === room.id ? " active" : ""}`;
+    row.innerHTML = `
+      <span>
+        <strong>${escapeHtml(sessionTitleForRoom(item))}</strong>
+        <small>${escapeHtml(new Date(roomSortKey(item) || Date.now()).toLocaleString())}</small>
+      </span>
+      ${editable ? `<em title="重命名" data-session-edit="${escapeHtml(item.id)}">✎</em>` : "<i></i>"}
+    `;
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("[data-session-edit]")) {
+        event.stopPropagation();
+        renameSessionRoom(item);
+        return;
+      }
+      selectSessionRoom(item);
+    });
+    els.sessionList.appendChild(row);
+  }
 }
 
 // (desktopConvLastMessageText / desktopConvSortKey removed in
@@ -1358,8 +1636,7 @@ function buildRoomMessageArticle(msg, room) {
     ? avatarBackgroundStyle(senderAvatar, senderCrop, fallbackColor)
     : `background-color:${fallbackColor}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
   const avatarText = useAvatar ? "" : escapeHtml(initial);
-  const body = (spec.bodyMd || "").replace(/\n/g, "<br>");
-  const bodyHtml = body ? `<div class="bubble">${escapeHtml(body).replace(/&lt;br&gt;/g, "<br>")}</div>` : "";
+  const bodyHtml = spec.bodyMd ? `<div class="bubble">${renderMarkdown(spec.bodyMd)}</div>` : "";
   const attachmentHtml = renderAttachmentChips(spec.attachments || msg.attachments || []);
   return `
     <article class="${cls}">
@@ -1394,7 +1671,7 @@ function buildCloudAgentStreamingArticle(room, run) {
     ? avatarBackgroundStyle(avatar.image, avatar.crop, avatar.color || "#5e5ce6")
     : `background-color:${avatar.color || "#5e5ce6"}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
   const avatarText = avatar.image ? "" : escapeHtml((spec.authorName?.[0] || "?").toUpperCase());
-  const textHtml = run.text ? `<div class="bubble">${escapeHtml(run.text).replace(/\n/g, "<br>")}</div>` : "";
+  const textHtml = run.text ? `<div class="bubble">${renderMarkdown(run.text)}</div>` : "";
   const statusHtml = run.status === "running"
     ? `<div class="bubble"><span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span></div>`
     : "";
@@ -1445,10 +1722,12 @@ function renderActiveChat() {
     els.activeAvatar.style.backgroundColor = "transparent";
     els.activeAvatar.textContent = "";
     els.activeTitle.textContent = "Mia";
-    els.activeMeta.textContent = state.user ? "选择一个会话开始聊天" : "Mia Cloud";
+    els.activeMeta.textContent = "选择一个会话开始聊天";
     els.chat.innerHTML = `<p class="persona-empty">还没有选中的会话。</p>`;
     setComposerEnabled(false, "选择一个会话开始聊天");
     renderComposerControls(null);
+    state.sessionMenuOpen = false;
+    renderSessionMenu();
     return;
   }
 
@@ -1457,6 +1736,8 @@ function renderActiveChat() {
     if (!room) {
       setComposerEnabled(false, "会话不存在");
       renderComposerControls(null);
+      state.sessionMenuOpen = false;
+      renderSessionMenu();
       return;
     }
     const title = roomDisplayTitle(room);
@@ -1496,6 +1777,7 @@ function renderActiveChat() {
     }
     els.activeTitle.textContent = title;
     els.activeMeta.textContent = isDM ? "私聊" : isFellow ? "AI 私聊" : "群聊";
+    renderSessionMenu();
     renderComposerControls(room);
     const cached = state.messageCache.get(room.id);
     const messages = cached?.messages || [];
@@ -1514,29 +1796,36 @@ function renderActiveChat() {
   // Unknown conversation kind — defensively disable.
   setComposerEnabled(false, "不支持的会话类型");
   renderComposerControls(null);
+  state.sessionMenuOpen = false;
+  renderSessionMenu();
   els.chat.innerHTML = `<p class="persona-empty">不支持的会话类型。</p>`;
 }
 
-async function setActiveConversation(id) {
-  state.activeConversationId = id;
-  state.unread.delete(id);
-  if (isRoomId(id)) {
-    await ensureRoomMessages(id);
-    await ensureRoomMembers(id);
-    const room = state.rooms.find((item) => item.id === id);
-    if (roomTypeForControls(room) === "fellow") {
-      await ensureFellowRuntime(fellowKeyForRoom(room), runtimeKindForFellowRoom(room, fellowByKey(fellowKeyForRoom(room))));
-    }
+async function hydrateActiveConversation(id) {
+  if (!id || !isRoomId(id)) return;
+  await ensureRoomMessages(id);
+  await ensureRoomMembers(id);
+  const room = state.rooms.find((item) => item.id === id);
+  if (roomTypeForControls(room) === "fellow") {
+    await ensureFellowRuntime(fellowKeyForRoom(room), runtimeKindForFellowRoom(room, fellowByKey(fellowKeyForRoom(room))));
   }
+  if (state.activeConversationId !== id) return;
   // Phase 3: persist the read mark to cloud so other devices clear their badge.
   // readMarks are message seq cursors, so compute after ensureRoomMessages().
-  if (id) {
-    pushSettings({ readMarks: { [id]: lastSeenSeqForConversation(id) } })
-      .catch((err) => console.warn("[web] mark-read settings PUT failed:", err));
-  }
+  pushSettings({ readMarks: { [id]: lastSeenSeqForConversation(id) } })
+    .catch((err) => console.warn("[web] mark-read settings PUT failed:", err));
   renderConversationList();
   renderActiveChat();
   renderRailUnreadBadge();
+}
+
+function setActiveConversation(id) {
+  state.activeConversationId = id;
+  state.unread.delete(id);
+  renderConversationList();
+  renderActiveChat();
+  renderRailUnreadBadge();
+  hydrateActiveConversation(id);
 }
 
 async function sendInActive() {
@@ -1916,6 +2205,12 @@ els.loginForm.addEventListener("submit", (event) => {
 
 els.conversationSearch.addEventListener("input", renderConversationList);
 
+els.userAvatar?.addEventListener("click", () => {
+  state.activeSettingsTab = "account";
+  state.settingsOpen = true;
+  renderSettings();
+});
+
 els.conversationList.addEventListener("click", (event) => {
   const moreBtn = event.target.closest("[data-conv-more]");
   if (moreBtn) {
@@ -1949,6 +2244,71 @@ document.addEventListener("click", (event) => {
   if (els.conversationCreateMenu?.contains(event.target) || els.newConversation?.contains(event.target)) return;
   state.createMenuOpen = false;
   renderCreateMenu();
+});
+
+els.sessionMenuButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!activeSessionRoom()) return;
+  state.sessionMenuOpen = !state.sessionMenuOpen;
+  renderSessionMenu();
+});
+els.newSession?.addEventListener("click", async (event) => {
+  event.stopPropagation();
+  await createNewSessionForActive();
+});
+document.addEventListener("click", (event) => {
+  if (!state.sessionMenuOpen) return;
+  if (els.sessionMenu?.contains(event.target) || els.sessionMenuButton?.contains(event.target)) return;
+  state.sessionMenuOpen = false;
+  renderSessionMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !state.sessionMenuOpen) return;
+  state.sessionMenuOpen = false;
+  renderSessionMenu();
+});
+
+els.chat.addEventListener("click", async (event) => {
+  const copyButton = event.target.closest("[data-copy-code]");
+  if (copyButton && els.chat.contains(copyButton)) {
+    const code = copyButton.closest(".message-code-block")?.querySelector("code");
+    if (!code) return;
+    if (await copyTextToClipboard(code.textContent)) {
+      copyButton.classList.add("copied");
+      copyButton.disabled = true;
+      setTimeout(() => {
+        copyButton.classList.remove("copied");
+        copyButton.disabled = false;
+      }, 900);
+    }
+    return;
+  }
+
+  const link = event.target.closest("a.message-link[data-external-link]");
+  if (link && els.chat.contains(link)) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.open(link.dataset.externalLink, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  const code = event.target.closest(".bubble code.inline-code");
+  if (!code || !els.chat.contains(code)) return;
+  if (await copyTextToClipboard(code.textContent)) flashCopiedCode(code);
+});
+
+els.chat.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const link = event.target.closest("a.message-link[data-external-link]");
+  if (link && els.chat.contains(link)) {
+    event.preventDefault();
+    window.open(link.dataset.externalLink, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const code = event.target.closest(".bubble code.inline-code");
+  if (!code || !els.chat.contains(code)) return;
+  event.preventDefault();
+  if (await copyTextToClipboard(code.textContent)) flashCopiedCode(code);
 });
 
 els.chatForm.addEventListener("submit", (event) => {

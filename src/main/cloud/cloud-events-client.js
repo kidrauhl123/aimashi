@@ -14,12 +14,7 @@ function createCloudEventsClient({
   broadcastRendererEvent,
   cloudEventChannel,
   appendCloudLog,
-  shouldHandleCloudRoomAi,
-  buildInvocation,
-  listFellows,
-  localFellowResponder,
-  mainGroupConductor,
-  mainFellowRoomResponder,
+  fellowRuntimeDispatcher,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
@@ -83,10 +78,6 @@ function createCloudEventsClient({
     }
   }
 
-  function shouldHandleRoomAi() {
-    return typeof shouldHandleCloudRoomAi === "function" && shouldHandleCloudRoomAi();
-  }
-
   function shouldReplaceStaleSocket(ws) {
     if (!ws) return false;
     if (eventState.connected) return false;
@@ -128,31 +119,14 @@ function createCloudEventsClient({
       return;
     }
     if (message.type === CloudEvent.RoomFellowInvocationRequested) {
-      if (shouldHandleRoomAi()) {
-        const args = buildInvocation(message, listFellows());
-        if (args) {
-          localFellowResponder.respond(args)
-            .catch((error) => log(`Cloud fellow invocation failed: ${error?.message || error}`));
-        }
-      }
+      fellowRuntimeDispatcher?.handleCloudEvent?.(message)
+        ?.catch((error) => log(`Cloud fellow invocation failed: ${error?.message || error}`));
       emitToRenderer({ type: message.type, payload: message });
       return;
     }
     if (message.type === CloudEvent.RoomMessageAppended) {
-      if (shouldHandleRoomAi()) {
-        const args = {
-          roomId: message.roomId || message.room_id,
-          message: message.message
-        };
-        mainGroupConductor.handleRoomMessageAppended({
-          roomId: args.roomId,
-          message: args.message
-        }).catch((error) => log(`Cloud group conductor failed: ${error?.message || error}`));
-        if (mainFellowRoomResponder && typeof mainFellowRoomResponder.handleRoomMessageAppended === "function") {
-          mainFellowRoomResponder.handleRoomMessageAppended(args)
-            .catch((error) => log(`Cloud fellow room responder failed: ${error?.message || error}`));
-        }
-      }
+      fellowRuntimeDispatcher?.handleCloudEvent?.(message)
+        ?.catch((error) => log(`Cloud room AI dispatch failed: ${error?.message || error}`));
       emitToRenderer({ type: message.type, payload: message });
       return;
     }

@@ -234,6 +234,32 @@ test("ensureFellowRoom upserts the ensured room into the sidebar cache", async (
   });
 });
 
+test("upsertFellowRoom caches a cloud-hermes fellow room", async () => {
+  const s = loadSocial();
+  const room = {
+    id: "fellow:u_1:alice",
+    type: "fellow",
+    name: "Alice",
+    decorations: { fellowKey: "alice", runtimeKind: "cloud-hermes" }
+  };
+  const saved = s.upsertFellowRoom(room);
+  assert.equal(saved.id, room.id);
+  assert.equal(s.getRoomById(room.id).decorations.runtimeKind, "cloud-hermes");
+});
+
+test("fellowRoomForKey returns an existing cloud-hermes fellow room", async () => {
+  const s = loadSocial();
+  s.upsertFellowRoom({
+    id: "fellow:u_1:alice",
+    type: "fellow",
+    name: "Alice",
+    decorations: { fellowKey: "alice", runtimeKind: "cloud-hermes" }
+  });
+  const room = s.fellowRoomForKey("alice");
+  assert.equal(room.id, "fellow:u_1:alice");
+  assert.equal(room.decorations.runtimeKind, "cloud-hermes");
+});
+
 test("bootstrapAfterLogin warns when fellow room ensure returns ok false", async () => {
   const s = loadSocial();
   const calls = [];

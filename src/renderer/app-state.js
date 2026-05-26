@@ -119,6 +119,7 @@
       codexModels: [],
       tasks: [],
       taskFilter: "",
+      creatingTask: false,
       selectedTaskId: "",
       selectedRunId: "",
       historyExpanded: false,

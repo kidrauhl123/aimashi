@@ -35,18 +35,31 @@ function createCloudAgentDispatcher(deps = {}) {
     }));
   }
 
-  async function runUserMessage(args = {}) {
+  function canHandleFellow(args = {}) {
+    const userId = String(args.userId || "").trim();
+    const fellowId = String(args.fellowId || "").trim();
+    if (!userId || !fellowId) return false;
+    return Boolean(runtimeBindingsStore.getEnabledBinding(userId, fellowId, "cloud-hermes"));
+  }
+
+  async function runInvocation(args = {}) {
     const userId = String(args.userId || "").trim();
     const roomId = String(args.roomId || "").trim();
+    const requestedFellowId = String(args.fellowId || "").trim();
     const message = args.message || {};
     if (!userId || !roomId || !message.id) return null;
     if (message.sender_kind && message.sender_kind !== "user") return null;
 
     const room = socialStore.getRoom(roomId);
-    if (!room || room.type !== "fellow") return null;
-    if (room.decorations?.runtimeKind !== "cloud-hermes") return null;
+    if (!room) return null;
+    if (room.type === "fellow" && room.decorations?.runtimeKind !== "cloud-hermes") return null;
+    if (room.type !== "fellow" && !requestedFellowId) return null;
     const fellowMember = socialStore.listRoomMembers(roomId)
-      .find((member) => member.member_kind === "fellow" && member.owner_id === userId);
+      .find((member) =>
+        member.member_kind === "fellow"
+        && member.owner_id === userId
+        && (!requestedFellowId || member.member_ref === requestedFellowId)
+      );
     if (!fellowMember) return null;
 
     const fellowId = fellowMember.member_ref;
@@ -136,8 +149,19 @@ function createCloudAgentDispatcher(deps = {}) {
     }
   }
 
+  async function runUserMessage(args = {}) {
+    return runInvocation(args);
+  }
+
   function handleUserMessage(args = {}) {
     const promise = runUserMessage(args);
+    pending.add(promise);
+    promise.finally(() => pending.delete(promise));
+    return promise;
+  }
+
+  function invokeFellow(args = {}) {
+    const promise = runInvocation(args);
     pending.add(promise);
     promise.finally(() => pending.delete(promise));
     return promise;
@@ -149,7 +173,7 @@ function createCloudAgentDispatcher(deps = {}) {
     }
   }
 
-  return { handleUserMessage, idle };
+  return { canHandleFellow, handleUserMessage, invokeFellow, idle };
 }
 
 module.exports = { createCloudAgentDispatcher };

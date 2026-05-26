@@ -57,11 +57,15 @@
 
   function localFellow(ref) {
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
-    const fellows = _ctx?.adapterCtx?.()?.fellows || [
-      ...(Array.isArray(_ctx?.moduleState?.fellows) ? _ctx.moduleState.fellows.map((fellow) => ({ ...fellow, cloudOnly: true })) : []),
+    const cloudFellows = Array.isArray(_ctx?.moduleState?.fellows) ? _ctx.moduleState.fellows : [];
+    const localFellows = [
       ...(Array.isArray(runtime.fellows) ? runtime.fellows : []),
       ...(Array.isArray(runtime.personas) ? runtime.personas : [])
     ];
+    const fellows = _ctx?.adapterCtx?.()?.fellows
+      || (global.miaFellowDirectory
+        ? global.miaFellowDirectory.listOwnedFellows({ cloudFellows, localFellows, runtime })
+        : [...cloudFellows, ...localFellows]);
     const target = String(ref || "");
     return fellows.find((f) => String(f.key || "") === target || String(f.id || "") === target) || null;
   }
@@ -134,53 +138,38 @@
       return card;
     }
 
-    if (local.cloudOnly) {
-      card.innerHTML = `
-        <div class="contact-card-head">
-          <span class="avatar contact-card-avatar" style="${avatarStyleFor(avatar)}"></span>
-          <div class="contact-card-head-text">
-            <strong class="contact-card-name">${escapeHtml(name)}</strong>
-            <span class="contact-card-kind">云端伙伴</span>
-          </div>
-        </div>
-        <p class="contact-card-empty">这位 AI 属于你的云端 Fellow，已经在联系人列表里。</p>
-        <div class="contact-card-actions">
-          <button type="button" data-card-action="message" class="button-soft">发消息</button>
-          <button type="button" data-card-action="close" class="button-primary">关闭</button>
-        </div>
-      `;
-      card.addEventListener("click", (event) => {
-        const btn = event.target.closest("[data-card-action]");
-        if (!btn) return;
-        event.stopPropagation();
-        if (btn.dataset.cardAction === "message") {
-          closeCard();
-          global.miaOpenFellowConversation?.(ref);
-          return;
-        }
-        closeCard();
-      });
-      return card;
-    }
-
     const engineOptions = global.miaEngineOptions;
     const modelHelpers = global.miaModelHelpers;
     const modelSettings = global.miaModelSettings;
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
+    const runtimeKind = local.runtimeKind || (local.cloudOnly ? "cloud-hermes" : "desktop-local");
     const engine = local.agentEngine || local.agent_engine || "hermes";
     const config = local.engineConfig || local.engine_config || {};
     const isExternal = engine === "claude-code" || engine === "codex";
+    const isCloudHermes = runtimeKind === "cloud-hermes";
 
     // Reuse the same entry sources the topbar composer-bottom uses so the
     // dropdown contents (and labels / logos) match private chat exactly.
-    const modelEntries = isExternal
+    const modelEntries = isCloudHermes
+      ? [{ id: "mia-default", model: "mia-default", label: "Mia Default", provider: "mia-cloud" }]
+      : isExternal
       ? (engineOptions?.externalModelEntries?.(engine) || [])
       : (modelSettings?.connectedModelEntries?.(runtime) || []);
     const effortEntries = engineOptions?.effortOptions?.(engine) || [];
-    const permissionEntries = engineOptions?.externalPermissionOptions?.(engine) || [];
+    const permissionEntries = isCloudHermes
+      ? [
+        { value: "ask", label: "Ask" },
+        { value: "auto", label: "Auto" },
+        { value: "readOnly", label: "Read" }
+      ]
+      : (engineOptions?.externalPermissionOptions?.(engine) || []);
 
     // Current selections.
     const currentModelEntry = (() => {
+      if (isCloudHermes) {
+        const cur = config.model || "mia-default";
+        return modelEntries.find((m) => m.model === cur || m.id === cur) || modelEntries[0] || null;
+      }
       if (isExternal) {
         const cur = config.model || "";
         if (!cur) return modelEntries.find((m) => m.id === "default") || modelEntries[0] || null;
@@ -209,7 +198,7 @@
     const currentEffortLabel = effortEntries.find((e) => e.value === currentEffort)?.label || "Medium";
 
     const currentPermission = config.permissionMode
-      || permissionEntries.find((p) => p.value === "default")?.value
+      || permissionEntries.find((p) => p.value === (isCloudHermes ? "ask" : "default"))?.value
       || permissionEntries[0]?.value
       || "";
     const currentPermissionLabel = permissionEntries.find((p) => p.value === currentPermission)?.label || "Ask";
@@ -231,7 +220,7 @@
         <span class="avatar contact-card-avatar" style="${avatarStyleFor(avatar)}"></span>
         <div class="contact-card-head-text">
           <strong class="contact-card-name">${escapeHtml(name)}</strong>
-          <span class="contact-card-kind">${escapeHtml(engine)}</span>
+          <span class="contact-card-kind">${escapeHtml(local.runtimeLabel || engine)}</span>
         </div>
       </div>
       <dl class="contact-card-controls">
@@ -278,6 +267,21 @@
 
     async function persistField(field, value) {
       try {
+        if (isCloudHermes) {
+          const update = {};
+          if (field === "model") {
+            const entry = modelEntries.find((m) => m.id === value || m.model === value);
+            update.model = entry?.model || value;
+          } else {
+            update[field] = value;
+          }
+          await global.mia?.social?.saveFellowRuntime?.(local.key, {
+            runtimeKind: "cloud-hermes",
+            enabled: true,
+            config: { ...config, ...update },
+          });
+          return;
+        }
         if (field === "model" && !isExternal) {
           // Hermes: model is runtime-global. saveModel mirrors the topbar
           // path so we keep one truth.

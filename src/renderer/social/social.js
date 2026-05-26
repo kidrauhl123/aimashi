@@ -231,6 +231,21 @@
     return moduleState.rooms.find((r) => r.id === room.id) || room;
   }
 
+  function upsertFellowRoom(room) {
+    return upsertRoom(room);
+  }
+
+  function fellowRoomForKey(fellowKey) {
+    const key = String(fellowKey || "").trim();
+    if (!key) return null;
+    return moduleState.rooms.find((room) => {
+      const roomId = String(room?.id || "");
+      const decorated = String(room?.decorations?.fellowKey || room?.fellowKey || "").trim();
+      return (room?.type === "fellow" || roomId.startsWith("fellow:"))
+        && (decorated === key || roomId.split(":").slice(2).join(":") === key);
+    }) || null;
+  }
+
   function ensuredRoomFromResult(result) {
     if (!result || result.ok === false) return null;
     const payload = result.data || result;
@@ -440,16 +455,14 @@
     const runtime = runtimeState.runtime || {};
     const cloudUser = runtime.cloud?.user || {};
     const localUser = runtime.user || {};
-    const fellowsByKey = new Map();
-    for (const fellow of moduleState.fellows || []) {
-      const key = String(fellow?.key || fellow?.id || "").trim();
-      if (key) fellowsByKey.set(key, { ...fellow, key, cloudOnly: true });
-    }
-    for (const fellow of runtime.fellows || runtime.personas || []) {
-      const key = String(fellow?.key || fellow?.id || "").trim();
-      if (key) fellowsByKey.set(key, { ...fellowsByKey.get(key), ...fellow, key, cloudOnly: false });
-    }
-    const fellows = [...fellowsByKey.values()];
+    const cloudFellows = Array.isArray(moduleState.fellows) ? moduleState.fellows : [];
+    const localFellows = [
+      ...(Array.isArray(runtime.fellows) ? runtime.fellows : []),
+      ...(Array.isArray(runtime.personas) ? runtime.personas : [])
+    ];
+    const fellows = window.miaFellowDirectory
+      ? window.miaFellowDirectory.listOwnedFellows({ cloudFellows, localFellows, runtime })
+      : [...cloudFellows, ...localFellows];
     return {
       self: {
         id: moduleState.myUserId || cloudUser.id || localUser.id || "",
@@ -1880,6 +1893,7 @@
     describeMessageForMenu,
     getActiveRoomId,
     getRoomById,
+    fellowRoomForKey,
     setActiveRoomId,
     markRoomRead,
     isRoomPinned,
@@ -1890,6 +1904,7 @@
     setRoomManuallyUnread,
     applyCloudSettings,
     ensureFellowRoom,
+    upsertFellowRoom,
     renameRoom,
     deleteCloudRoom,
     getUnreadForRoom,

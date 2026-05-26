@@ -139,3 +139,72 @@ test("POST /api/rooms/:id/messages appends cloud fellow reply through existing r
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test("POST group mention invokes cloud-hermes fellow without desktop-local event fallback", async () => {
+  const dataDir = tempDir("mia-cloud-agent-group-");
+  const hermesCalls = [];
+  const server = createMiaCloudServer({
+    dataDir,
+    cloudAgentWorkerManager: {
+      async ensureWorker(userId) {
+        return {
+          userId,
+          baseUrl: "http://worker",
+          apiKey: "k",
+          paths: { attachments: path.join(dataDir, "agent-users", userId, "attachments") }
+        };
+      }
+    },
+    cloudAgentHermesClient: {
+      async runChat(args) {
+        hermesCalls.push(args);
+        args.onRunCreated?.("hr_group_1");
+        return { runId: "hr_group_1", content: "group cloud reply", events: [] };
+      }
+    }
+  });
+  const baseUrl = await listen(server);
+  let eventsWs = null;
+  try {
+    const account = await jsonFetch(baseUrl, "/api/auth/register", {
+      method: "POST",
+      body: { username: "alice", password: "123456" }
+    });
+    const authHeaders = { authorization: `Bearer ${account.token}` };
+    const group = await jsonFetch(baseUrl, "/api/rooms", {
+      method: "POST",
+      headers: authHeaders,
+      body: { name: "Cloud Group", memberFellows: [{ fellowId: "mia" }] }
+    });
+    const roomId = group.room.id;
+    eventsWs = new WebSocket(eventsWsUrl(baseUrl), wsTokenProtocol(account.token));
+    await waitForMessage(eventsWs, (message) => message.type === "events_ready");
+    const runStarted = waitForMessage(eventsWs, (message) => message.type === "cloud_agent_run_started" && message.roomId === roomId);
+
+    await jsonFetch(baseUrl, `/api/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: authHeaders,
+      body: {
+        bodyMd: "@mia 看看这个",
+        mentions: [{ kind: "fellow", fellowId: "mia" }],
+        clientOpId: "op_cloud_group_1"
+      }
+    });
+
+    await server.mia.cloudAgentDispatcher.idle();
+    const started = await runStarted;
+    assert.equal(started.fellowId, "mia");
+    const listed = await jsonFetch(baseUrl, `/api/rooms/${roomId}/messages`, {
+      headers: authHeaders
+    });
+    assert.deepEqual(listed.messages.map((m) => m.sender_kind), ["user", "fellow"]);
+    assert.equal(listed.messages[1].sender_ref, "mia");
+    assert.equal(listed.messages[1].body_md, "group cloud reply");
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].roomId, roomId);
+  } finally {
+    closeWs(eventsWs);
+    await close(server);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});

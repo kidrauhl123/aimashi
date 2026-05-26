@@ -31,6 +31,14 @@ function safePath(requestPath) {
     candidates.push({ filePath: path.normalize(path.join(sourceRoot, target)), base: sourceRoot });
   } else if (target.startsWith("message-sources/")) {
     candidates.push({ filePath: path.normalize(path.join(sourceRoot, "renderer", target)), base: sourceRoot });
+  } else if (target === "helpers/markdown-helpers.js") {
+    candidates.push({ filePath: path.normalize(path.join(sourceRoot, "renderer", target)), base: sourceRoot });
+  } else if (target.startsWith("assets/model-icons/")) {
+    candidates.push({ filePath: path.normalize(path.join(sourceRoot, "renderer", target)), base: sourceRoot });
+  } else if (target.startsWith("assets/provider-icons/")) {
+    candidates.push({ filePath: path.normalize(path.join(sourceRoot, "renderer", target)), base: sourceRoot });
+  } else if (target.startsWith("assets/engine-icons/")) {
+    candidates.push({ filePath: path.normalize(path.join(sourceRoot, "renderer", target)), base: sourceRoot });
   }
   for (const { filePath, base } of candidates) {
     if (filePath !== base && !filePath.startsWith(`${base}${path.sep}`)) continue;

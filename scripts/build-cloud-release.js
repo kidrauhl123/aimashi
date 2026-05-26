@@ -515,6 +515,9 @@ function main() {
   copyDir("src/cloud-agent", path.join(apiDir, "src", "cloud-agent"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
   copyDir("src/web", webDir);
+  copyDir("src/renderer/assets/model-icons", path.join(webDir, "assets", "model-icons"));
+  copyDir("src/renderer/assets/provider-icons", path.join(webDir, "assets", "provider-icons"));
+  copyDir("src/renderer/assets/engine-icons", path.join(webDir, "assets", "engine-icons"));
   copyFile("src/shared/time-format.js", path.join(webDir, "shared", "time-format.js"));
   copyFile("src/shared/message-spec.js", path.join(webDir, "shared", "message-spec.js"));
   copyFile("src/shared/contact.js", path.join(webDir, "shared", "contact.js"));
@@ -523,6 +526,7 @@ function main() {
   copyFile("src/shared/unread.js", path.join(webDir, "shared", "unread.js"));
   copyFile("src/shared/group-tiles.js", path.join(webDir, "shared", "group-tiles.js"));
   copyFile("src/shared/send-pipeline.js", path.join(webDir, "shared", "send-pipeline.js"));
+  copyFile("src/renderer/helpers/markdown-helpers.js", path.join(webDir, "helpers", "markdown-helpers.js"));
   copyFile("src/renderer/message-sources/cloud-room-source.js", path.join(webDir, "message-sources", "cloud-room-source.js"));
   writeIcoFromPng(path.join(webDir, "icon-192.png"), path.join(webDir, "favicon.ico"));
   copyFile("scripts/smoke-cloud.js", path.join(distDir, "smoke-cloud.js"));
@@ -544,6 +548,7 @@ function main() {
       start: "node server.js"
     },
     dependencies: {
+      "adm-zip": rootPackage.dependencies?.["adm-zip"] || "^0.5.17",
       ws: rootPackage.dependencies?.ws || "^8.20.1"
     }
   });

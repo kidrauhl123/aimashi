@@ -17,21 +17,25 @@ test("main owns cloud room fellow invocation and group conductor execution", () 
   assert.match(main, /createCloudEventsClient/, "main must instantiate the cloud events client Module");
   assert.match(main, /createMainGroupConductor/, "main must instantiate the main-process group conductor Module");
   assert.match(main, /createMainFellowRoomResponder/, "main must instantiate the main-process fellow room responder Module");
+  assert.match(main, /createMainFellowRuntimeDispatcher/, "main must instantiate the unified fellow runtime dispatcher Module");
   assert.match(main, /shouldHandleLocalCloudRoomAi/, "main must gate AI execution so foreground and daemon do not both answer");
   assert.match(
     cloudEventsClient,
-    /message\.type === CloudEvent\.RoomFellowInvocationRequested[\s\S]*localFellowResponder\.respond/,
-    "explicit @ cloud events must be answered from the main cloud events Module"
+    /message\.type === CloudEvent\.RoomFellowInvocationRequested[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/,
+    "explicit @ cloud events must enter the unified fellow runtime dispatcher"
   );
   assert.match(
     cloudEventsClient,
-    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainGroupConductor\.handleRoomMessageAppended/,
-    "non-@ group conductor path must be driven from the main cloud events Module"
+    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/,
+    "room message events must enter the unified fellow runtime dispatcher"
   );
+  const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
+  assert.match(dispatcher, /localFellowResponder\.respond/, "dispatcher must own explicit desktop-local invocation execution");
+  assert.match(dispatcher, /mainGroupConductor\.handleRoomMessageAppended/, "dispatcher must own group conductor fan-out");
   assert.match(
-    cloudEventsClient,
-    /message\.type === CloudEvent\.RoomMessageAppended[\s\S]*mainFellowRoomResponder\.handleRoomMessageAppended/,
-    "fellow private room replies must be driven from the main cloud events Module"
+    dispatcher,
+    /mainFellowRoomResponder\.handleRoomMessageAppended/,
+    "dispatcher must own fellow private room fan-out"
   );
   assert.doesNotMatch(
     cloudEventsClient,

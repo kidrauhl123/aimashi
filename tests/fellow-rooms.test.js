@@ -182,6 +182,21 @@ test("PUT /api/me/fellow-rooms/:sessionId creates a fellow-type room owned by th
   } finally { await stopServer(ctx); }
 });
 
+test("PUT /api/me/fellow-rooms/:sessionId preserves requested runtimeKind for new history rooms", async () => {
+  const ctx = await startServer();
+  try {
+    const A = await register(ctx.port, "rho-cloud");
+    const r = await api(ctx.port, "PUT", "/api/me/fellow-rooms/sess_cloud", {
+      token: A.token,
+      body: { fellowKey: "mia", title: "新对话", runtimeKind: "cloud-hermes" }
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.room.decorations.fellowKey, "mia");
+    assert.equal(r.body.room.decorations.sessionId, "sess_cloud");
+    assert.equal(r.body.room.decorations.runtimeKind, "cloud-hermes");
+  } finally { await stopServer(ctx); }
+});
+
 test("PUT /api/me/fellow-rooms is idempotent (same sessionId returns same room)", async () => {
   const ctx = await startServer();
   try {
