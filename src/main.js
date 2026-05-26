@@ -903,6 +903,24 @@ async function runRemoteChatRequest(body, eventSink = null) {
   }
   saveChatStore(fresh);
   notifyChatSessionsChanged();
+  // When signed into Mia Cloud, the conversation the user sees IS a per-fellow
+  // cloud room keyed by FELLOW (`fellow:<userId>:<fellowKey>`), not by session. A
+  // scheduled task runs locally, so post its reply into that room AS the fellow —
+  // the same path web/cloud fellow replies use — so it shows up and notifies in
+  // the message list (and syncs to web / other devices). Only for background
+  // (task) runs; foreground and web chats already reach the room themselves.
+  // (The earlier session-keyed mirror wrote to a phantom room and never showed.)
+  if (body?.background && assistantText.trim()) {
+    const cloud = settingsStore.cloudSettings();
+    if (cloud.enabled && cloud.token && cloud.user?.id) {
+      const roomId = `fellow:${cloud.user.id}:${fellow.key}`;
+      Promise.resolve(socialApi.postRoomMessageAsFellow(roomId, {
+        fellowId: fellow.key,
+        bodyMd: assistantText,
+        clientOpId: `op_task_${target.id}_${assistantMessageId}`
+      })).catch((error) => appendDaemonLog(`Task reply room post failed: ${error?.message || error}`));
+    }
+  }
   return { fellow, session: target, response, userMessageId, assistantMessageId };
 }
 
@@ -1334,6 +1352,7 @@ function createActiveHermesChatAdapter() {
   return createHermesChatAdapter({
     apiKey,
     baseUrl: () => engineState.baseUrl,
+    buildEnabledSkillsContext: skillsLoader.buildEnabledSkillsContext,
     buildGroupHeader: _noopGroupHeader,
     buildRunPayload: hermesRunService.buildRunPayload,
     normalizeError: hermesRunService.normalizeError,
@@ -1351,6 +1370,7 @@ function createActiveClaudeCodeChatAdapter() {
     claudeAgentSdk,
     ensureClaudeBridgePlugin: () => claudeBridgePluginService.ensureInstalled(),
     expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
+    buildEnabledSkillsContext: skillsLoader.buildEnabledSkillsContext,
     getAgentSessionEntry: agentSessionStore.getEntry,
     getSchedulerMcpSpec: schedulerMcpBridge.getSpec,
     injectGroupContextForSdk: _passthroughGroupContext,
@@ -1366,6 +1386,7 @@ function createActiveClaudeCodeChatAdapter() {
 
 function createActiveCodexChatAdapter() {
   return createCodexChatAdapter({
+    buildEnabledSkillsContext: skillsLoader.buildEnabledSkillsContext,
     chatCompletionResponse,
     codexSdk,
     ensureCodexHome: schedulerMcpBridge.ensureCodexHome,
