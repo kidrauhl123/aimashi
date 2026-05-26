@@ -95,6 +95,8 @@
     SocialListFriends: "social:list-friends",
     SocialRemoveFriend: "social:remove-friend",
     SocialListRooms: "social:list-rooms",
+    SocialListFellows: "social:list-fellows",
+    SocialListPlatformModels: "social:list-platform-models",
     SocialGetRoom: "social:get-room",
     SocialListRoomMessages: "social:list-room-messages",
     SocialPostRoomMessage: "social:post-room-message",

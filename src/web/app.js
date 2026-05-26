@@ -158,6 +158,7 @@ let state = {
   bridgeBusy: false,
   cloudAgentRunsByRoom: new Map(),
   fellowRuntimeCache: new Map(),
+  platformModels: [],
   activeConversationId: "",
   // Per-conversation unread counters. Incremented when a WS message arrives
   // for a non-active conversation, cleared when the user opens it. In-memory
@@ -421,6 +422,7 @@ async function bootstrap() {
     // Bridge devices: lets Phase B decide whether the owner's desktop is
     // online and we can route the message through it. Empty array if none.
     api("/api/bridge/devices").then((d) => { state.bridgeDevices = Array.isArray(d.devices) ? d.devices : []; }).catch(() => {}),
+    loadPlatformModels(),
   ]);
   if (!state.activeConversationId) {
     const first = combinedConversationItems()[0];
@@ -802,6 +804,28 @@ function runtimeBindingFor(fellowKey, runtimeKind) {
   return state.fellowRuntimeCache.get(runtimeCacheKey(fellowKey, runtimeKind)) || null;
 }
 
+function normalizePlatformModel(model = {}) {
+  const id = String(model.id || model.model_name || model.model || "").trim();
+  if (!id) return null;
+  return {
+    value: id,
+    label: String(model.label || model.name || id).trim(),
+    provider: String(model.provider || "").trim()
+  };
+}
+
+async function loadPlatformModels() {
+  try {
+    const data = await api("/api/me/model-catalog");
+    state.platformModels = (Array.isArray(data.models) ? data.models : [])
+      .map(normalizePlatformModel)
+      .filter(Boolean);
+  } catch (err) {
+    console.warn("[web] platform model catalog failed:", err);
+    state.platformModels = [];
+  }
+}
+
 async function ensureFellowRuntime(fellowKey, runtimeKind = "cloud-hermes") {
   if (!fellowKey || runtimeKind === "desktop-local") return null;
   const key = runtimeCacheKey(fellowKey, runtimeKind);
@@ -823,7 +847,9 @@ function selectEntriesForModel(engine, runtimeKind) {
     return [{ value: "desktop-local", label: "Desktop Local" }];
   }
   if (runtimeKind === "cloud-hermes" || engine === "hermes") {
-    return [{ value: "hermes-agent", label: "Hermes Agent" }];
+    return state.platformModels.length
+      ? state.platformModels
+      : [{ value: "mia-default", label: "Mia Default" }];
   }
   return externalModelEntries(engine).map((entry) => ({
     value: entry.id,
@@ -886,8 +912,9 @@ function renderComposerControls(room = null) {
   const config = binding?.config || {};
   const editable = Boolean(fellowKey && runtimeKind !== "desktop-local");
 
-  const modelValue = config.model || (runtimeKind === "desktop-local" ? "desktop-local" : "hermes-agent");
-  const modelLabel = setSelectOptions(els.quickModelSelect, selectEntriesForModel(engine, runtimeKind), modelValue, "Default");
+  const cloudModelEntries = selectEntriesForModel(engine, runtimeKind);
+  const modelValue = config.model || (runtimeKind === "desktop-local" ? "desktop-local" : cloudModelEntries[0]?.value || "mia-default");
+  const modelLabel = setSelectOptions(els.quickModelSelect, cloudModelEntries, modelValue, "Default");
   if (els.quickModelLabel) els.quickModelLabel.textContent = modelLabel || "Default";
 
   const effort = config.effortLevel || "medium";

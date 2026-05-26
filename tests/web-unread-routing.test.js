@@ -87,6 +87,15 @@ test("src/web/app.js only shows private AI controls in fellow rooms", () => {
   assert.match(source, /saveWebAiControl\("permission"/);
 });
 
+test("src/web/app.js uses platform model catalog for cloud fellow controls", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(source, /platformModels/);
+  assert.match(source, /loadPlatformModels/);
+  assert.match(source, /\/api\/me\/model-catalog/);
+  assert.match(source, /selectEntriesForModel\(engine, runtimeKind\)[\s\S]*state\.platformModels/);
+  assert.doesNotMatch(source, /return \[\{ value: "hermes-agent", label: "Hermes Agent" \}\];/);
+});
+
 test("src/web/app.js treats legacy fellow rooms as desktop-local runtime", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.match(source, /function runtimeKindForFellowRoom\(room, fellow\)[\s\S]*return runtimeKind \|\| "desktop-local";/);

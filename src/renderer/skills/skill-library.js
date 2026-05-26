@@ -85,14 +85,12 @@
     const initials = window.miaSkillHelpers.skillInitials(skill.name);
     return `
       <article class="skill-card${skill.id === state.selectedSkillId ? " featured" : ""}" data-skill-select="${escapeHtml(skill.id)}">
-        <header>
-          <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
-          <div class="skill-card-head">
-            <strong>${escapeHtml(window.miaSkillHelpers.skillDisplayName(skill))}</strong>
-            <small>${escapeHtml(skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill))}</small>
-          </div>
-        </header>
-        <p>${escapeHtml(window.miaSkillHelpers.skillSummaryZh(skill))}</p>
+        <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
+        <div class="skill-card-head">
+          <strong>${escapeHtml(window.miaSkillHelpers.skillDisplayName(skill))}</strong>
+          <p>${escapeHtml(window.miaSkillHelpers.skillSummaryZh(skill))}</p>
+        </div>
+        <span class="skill-card-source">${escapeHtml(skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill))}</span>
       </article>
     `;
   }

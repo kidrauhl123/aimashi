@@ -3594,6 +3594,10 @@ body.topbar-click-capture .topbar {
   padding: 0;
 }
 
+.settings-panel[data-settings-panel="model"] .engine-detail-panel {
+  gap: 0;
+}
+
 .settings-panel[data-settings-panel="model"] .primary,
 .settings-panel[data-settings-panel="account"] .primary,
 .settings-panel[data-settings-panel="account"] .secondary {
@@ -4052,72 +4056,114 @@ textarea:focus {
 
 .connected-providers,
 .add-provider-panel,
-.settings-runtime-block,
 .engine-detection {
   grid-column: 1 / -1;
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
 }
 
 .engine-detection {
-  margin-bottom: 14px;
+  overflow: hidden;
+  margin-bottom: 0;
 }
 
 .engine-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) 14px;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
-  min-height: 44px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  min-height: 66px;
+  padding: 11px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   text-align: left;
   cursor: pointer;
   font: inherit;
   color: inherit;
 }
 
+.engine-row[aria-expanded="true"] {
+  border-bottom: 0;
+}
+
+.engine-row:last-child {
+  border-bottom: 0;
+}
+
 .engine-row.static {
   cursor: default;
 }
 
-.engine-row:not(.static):hover {
-  background: var(--hover, rgba(0,0,0,0.03));
+.engine-row-logo {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
 }
 
-.engine-row-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--faint);
+.engine-row-logo::before {
+  content: "";
+  display: block;
+  width: 30px;
+  height: 30px;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
 }
 
-.engine-row-dot.hermes  { background: #5e5ce6; }
-.engine-row-dot.claude  { background: #d97706; }
-.engine-row-dot.codex   { background: #10a37f; }
-.engine-row-dot.unavailable { background: var(--faint); opacity: 0.4; }
+.engine-row-logo.hermes {
+  color: #5e5ce6;
+}
+
+.engine-row-logo.hermes::before {
+  -webkit-mask-image: url("./assets/engine-icons/hermesagent.svg");
+  mask-image: url("./assets/engine-icons/hermesagent.svg");
+}
+
+.engine-row-logo.claude {
+  color: #d97757;
+}
+
+.engine-row-logo.claude::before {
+  width: 31px;
+  height: 31px;
+  -webkit-mask-image: url("./assets/engine-icons/claudecode.svg");
+  mask-image: url("./assets/engine-icons/claudecode.svg");
+}
+
+.engine-row-logo.codex::before {
+  display: none;
+}
+
+.engine-row-logo img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
 
 .engine-row-body {
   display: grid;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
 }
 
 .engine-row-body strong {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text);
 }
 
 .engine-row-body small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4134,6 +4180,39 @@ textarea:focus {
 .engine-row[aria-expanded="true"] .engine-row-chev {
   transform: rotate(90deg);
   color: var(--text);
+}
+
+.engine-detail-panel {
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.engine-detail-panel .connected-providers,
+.engine-detail-panel .add-provider-panel,
+.engine-detail-panel .api-key-field.wide,
+.engine-detail-panel .inline-auth {
+  margin: 0;
+  padding: 12px 42px 8px 68px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.engine-detail-panel > :first-child {
+  padding-top: 30px;
+}
+
+.engine-detail-panel .model-section-title strong {
+  font-size: 13px;
+}
+
+.engine-detail-panel .connected-providers + .add-provider-panel,
+.engine-detail-panel .add-provider-panel + .api-key-field.wide,
+.engine-detail-panel .add-provider-panel + .inline-auth {
+  padding-top: 0;
 }
 
 .model-section-title {
@@ -4164,6 +4243,32 @@ textarea:focus {
 
 .api-key-field.wide {
   padding: 14px;
+}
+
+.api-key-field.wide input {
+  width: 100%;
+}
+
+.api-key-input-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.api-key-input-wrap input {
+  padding-right: 80px;
+}
+
+.api-key-input-wrap .inline-connect-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  min-width: 58px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
 }
 
 .connected-provider-list {
@@ -4245,6 +4350,10 @@ textarea:focus {
   margin: 0;
 }
 
+.engine-detail-panel .model-auth-state {
+  font-size: 12px;
+}
+
 .inline-actions {
   display: flex;
   align-items: center;
@@ -4260,6 +4369,10 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
+}
+
+.engine-detail-panel .inline-auth .inline-actions {
+  margin-top: 0;
 }
 
 .auth-line {

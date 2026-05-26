@@ -57,8 +57,13 @@
 
   function localFellow(ref) {
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
-    const fellows = runtime.fellows || runtime.personas || [];
-    return fellows.find((f) => (f.id || f.key) === ref) || null;
+    const fellows = _ctx?.adapterCtx?.()?.fellows || [
+      ...(Array.isArray(_ctx?.moduleState?.fellows) ? _ctx.moduleState.fellows.map((fellow) => ({ ...fellow, cloudOnly: true })) : []),
+      ...(Array.isArray(runtime.fellows) ? runtime.fellows : []),
+      ...(Array.isArray(runtime.personas) ? runtime.personas : [])
+    ];
+    const target = String(ref || "");
+    return fellows.find((f) => String(f.key || "") === target || String(f.id || "") === target) || null;
   }
 
   function findFellowRoomMember(roomId, ref) {
@@ -73,7 +78,13 @@
 
   function selfUser() {
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
-    return runtime.cloud?.user || runtime.user || {};
+    const local = runtime.user || {};
+    const cloud = runtime.cloud?.user || {};
+    return {
+      ...local,
+      ...cloud,
+      id: _ctx?.moduleState?.myUserId || cloud.id || local.id || ""
+    };
   }
 
   // Fellow card with live engineConfig selectors (model / effort / permission)
@@ -119,6 +130,35 @@
       `;
       card.addEventListener("click", (event) => {
         if (event.target.closest("[data-card-action]")) closeCard();
+      });
+      return card;
+    }
+
+    if (local.cloudOnly) {
+      card.innerHTML = `
+        <div class="contact-card-head">
+          <span class="avatar contact-card-avatar" style="${avatarStyleFor(avatar)}"></span>
+          <div class="contact-card-head-text">
+            <strong class="contact-card-name">${escapeHtml(name)}</strong>
+            <span class="contact-card-kind">云端伙伴</span>
+          </div>
+        </div>
+        <p class="contact-card-empty">这位 AI 属于你的云端 Fellow，已经在联系人列表里。</p>
+        <div class="contact-card-actions">
+          <button type="button" data-card-action="message" class="button-soft">发消息</button>
+          <button type="button" data-card-action="close" class="button-primary">关闭</button>
+        </div>
+      `;
+      card.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-card-action]");
+        if (!btn) return;
+        event.stopPropagation();
+        if (btn.dataset.cardAction === "message") {
+          closeCard();
+          global.miaOpenFellowConversation?.(ref);
+          return;
+        }
+        closeCard();
       });
       return card;
     }

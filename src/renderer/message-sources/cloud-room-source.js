@@ -13,6 +13,11 @@
     const selfId = ctx.self?.id || "";
     const memberArr = Array.isArray(members) ? members : [];
 
+    function fallbackFellowAvatar(fellowId, color = "#5e5ce6") {
+      const image = typeof ctx.avatarAssetForKey === "function" ? ctx.avatarAssetForKey(fellowId) : "";
+      return { image, crop: null, color };
+    }
+
     function authorForMessage(m) {
       if (m.sender_kind === SenderKind.User) {
         if (m.sender_ref === selfId) return resolveContact({ kind: ContactKind.Self }, ctx);
@@ -31,10 +36,12 @@
         // contact card, not the message label.
         const localFellow = resolveContact({ kind: ContactKind.Fellow, ref: m.sender_ref }, ctx);
         let displayName = "";
-        let avatar = { image: "", crop: null, color: "#5e5ce6" };
+        let avatar = fallbackFellowAvatar(m.sender_ref);
         if (localFellow.displayName && localFellow.displayName !== m.sender_ref) {
           displayName = localFellow.displayName;
-          if (localFellow.avatar?.image) avatar = localFellow.avatar;
+          avatar = localFellow.avatar?.image
+            ? localFellow.avatar
+            : fallbackFellowAvatar(m.sender_ref, localFellow.avatar?.color || avatar.color);
         } else if (member && member.fellow_name) {
           displayName = member.fellow_name;
           if (member.fellow_avatar_image) {
@@ -43,9 +50,12 @@
               crop: member.fellow_avatar_crop || null,
               color: member.fellow_color || "#5e5ce6"
             };
+          } else {
+            avatar = fallbackFellowAvatar(m.sender_ref, member.fellow_color || avatar.color);
           }
         } else {
-          displayName = m.sender_ref;
+          const roomFellowKey = room.decorations?.fellowKey || (String(room.id || "").startsWith("fellow:") ? String(room.id || "").split(":").slice(2).join(":") : "");
+          displayName = roomFellowKey === m.sender_ref && room.name ? room.name : m.sender_ref;
         }
         return {
           kind: ContactKind.Fellow,

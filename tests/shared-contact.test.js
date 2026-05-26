@@ -15,6 +15,20 @@ test("resolveContact self", () => {
   assert.equal(c.avatar.image, "data:me");
 });
 
+test("resolveContact self display prefers local profile displayName", () => {
+  const c = resolveContact({ kind: "user", ref: "user_me" }, {
+    self: {
+      id: "user_me",
+      username: "7",
+      displayName: "Boss",
+      avatarText: "B"
+    },
+    friends: []
+  });
+  assert.equal(c.kind, ContactKind.Self);
+  assert.equal(c.displayName, "Boss");
+});
+
 test("resolveContact fellow by key", () => {
   const c = resolveContact({ kind: "fellow", ref: "codex" }, ctx);
   assert.equal(c.kind, ContactKind.Fellow);

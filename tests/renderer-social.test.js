@@ -69,6 +69,19 @@ function loadSocial() {
   return mockWindow.miaSocial;
 }
 
+function installCloudRoomSource(mockWindow) {
+  const root = path.join(__dirname, "..");
+  const sharedSpec = fs.readFileSync(path.join(root, "src", "shared", "message-spec.js"), "utf8");
+  const sharedContact = fs.readFileSync(path.join(root, "src", "shared", "contact.js"), "utf8");
+  const sharedKinds = fs.readFileSync(path.join(root, "src", "shared", "conversation-kinds.js"), "utf8");
+  const source = fs.readFileSync(path.join(root, "src", "renderer", "message-sources", "cloud-room-source.js"), "utf8");
+  const context = vm.createContext({ window: mockWindow, globalThis: mockWindow, console });
+  vm.runInContext("globalThis.miaMessageSpec = (function(){ const module = { exports: {} }; " + sharedSpec + "; return module.exports; })();", context);
+  vm.runInContext("globalThis.miaContact = (function(){ const module = { exports: {} }; " + sharedContact + "; return module.exports; })();", context);
+  vm.runInContext(sharedKinds, context);
+  vm.runInContext(source, context);
+}
+
 async function withMutedConsoleWarn(fn) {
   const original = console.warn;
   console.warn = () => {};
@@ -119,6 +132,26 @@ test("bootstrapAfterLogin ensures local fellow rooms before listing rooms", asyn
   assert.deepEqual(calls.map((call) => call.kind), ["ensure", "listRooms"]);
   assert.equal(calls[0].fellowId, "alice");
   assert.deepEqual(JSON.parse(JSON.stringify(calls[0].body)), { title: "爱丽丝", runtimeKind: "desktop-local" });
+});
+
+test("ensureFellowRoom upserts the ensured room into the sidebar cache", async () => {
+  const s = loadSocial();
+  const calls = [];
+  s.__mockWindow.mia.social = {
+    ensureFellowRoom: async (fellowId, body) => {
+      calls.push({ fellowId, body });
+      return { ok: true, data: { ok: true, room: { id: "fellow:u_1:alice", type: "fellow", name: "爱丽丝" } } };
+    }
+  };
+
+  const room = await s.ensureFellowRoom({ key: "alice", name: "爱丽丝" });
+
+  assert.equal(room.id, "fellow:u_1:alice");
+  assert.equal(s.moduleState.rooms.some((item) => item.id === "fellow:u_1:alice"), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0])), {
+    fellowId: "alice",
+    body: { title: "爱丽丝", runtimeKind: "desktop-local" }
+  });
 });
 
 test("bootstrapAfterLogin warns when fellow room ensure returns ok false", async () => {
@@ -388,6 +421,158 @@ test("renderRoomChat marks failed outgoing cloud messages", async () => {
   assert.match(chat.children[0].innerHTML, /message-send-status is-error/);
   assert.match(chat.children[0].innerHTML, /发送失败/);
   assert.match(chat.children[0].innerHTML, /title="network down"/);
+});
+
+test("renderRoomChat resolves self and fellow avatars from one contact context", () => {
+  const s = loadSocial();
+  installCloudRoomSource(s.__mockWindow);
+  s.__mockWindow.miaAvatar = {
+    avatarThumbBackgroundStyle: (image, _crop, color) => image
+      ? `background-color:transparent;background-image:url('${image}');`
+      : `background-color:${color || "#5e5ce6"};`
+  };
+  s.initSocialModule({
+    getState: () => ({
+      runtime: {
+        cloud: {
+          user: {
+            id: "u_me",
+            username: "boss_cloud",
+            avatarImage: "data:cloud-avatar",
+            avatarColor: "#ff0000"
+          }
+        },
+        user: {
+          displayName: "Boss",
+          avatarImage: "data:self-avatar",
+          avatarCrop: { x: 50, y: 50, zoom: 1 },
+          avatarColor: "#111827"
+        },
+        fellows: [{
+          key: "mia",
+          name: "Mia",
+          avatarImage: "data:mia-avatar",
+          avatarCrop: { x: 57, y: 8, zoom: 1.5 },
+          color: "#5e5ce6"
+        }]
+      }
+    }),
+    render: () => {},
+    els: {},
+    appendTransientChat: () => {}
+  });
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.myUsername = "boss";
+  s.moduleState.activeRoomId = "fellow:u_me:mia";
+  s.moduleState.rooms = [{ id: "fellow:u_me:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } }];
+  s.moduleState.messageCache.set("fellow:u_me:mia", {
+    maxSeq: 2,
+    messages: [
+      { id: "m_user", seq: 1, sender_kind: "user", sender_ref: "u_me", body_md: "hi", created_at: "" },
+      { id: "m_fellow", seq: 2, sender_kind: "fellow", sender_ref: "mia", body_md: "hello", created_at: "" }
+    ]
+  });
+  const chat = {
+    children: [],
+    appendChild(child) { this.children.push(child); return child; },
+    set innerHTML(value) { this.children = []; this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
+
+  s.renderRoomChat(chat);
+
+  assert.equal(chat.children.length, 2);
+  assert.match(chat.children[0].innerHTML, /data:self-avatar/);
+  assert.match(chat.children[1].innerHTML, /data:mia-avatar/);
+  assert.doesNotMatch(chat.children[0].innerHTML, /data:cloud-avatar/);
+});
+
+test("renderRoomChat uses cloud fellow avatar when no local fellow exists", () => {
+  const s = loadSocial();
+  installCloudRoomSource(s.__mockWindow);
+  s.__mockWindow.miaAvatar = {
+    avatarThumbBackgroundStyle: (image, _crop, color) => image
+      ? `background-color:transparent;background-image:url('${image}');`
+      : `background-color:${color || "#5e5ce6"};`,
+    avatarAssetForKey: (key) => `asset:${key}`
+  };
+  s.initSocialModule({
+    getState: () => ({ runtime: { user: { avatarImage: "data:self-avatar" } } }),
+    render: () => {},
+    els: {},
+    appendTransientChat: () => {}
+  });
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.myUsername = "boss";
+  s.moduleState.fellows = [{ id: "mia", name: "Mia", avatarImage: "data:cloud-mia-avatar", color: "#2563eb" }];
+  s.moduleState.activeRoomId = "fellow:u_me:mia";
+  s.moduleState.rooms = [{ id: "fellow:u_me:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } }];
+  s.moduleState.messageCache.set("fellow:u_me:mia", {
+    maxSeq: 1,
+    messages: [{ id: "m_fellow", seq: 1, sender_kind: "fellow", sender_ref: "mia", body_md: "hello", created_at: "" }]
+  });
+  const chat = {
+    children: [],
+    appendChild(child) { this.children.push(child); return child; },
+    set innerHTML(value) { this.children = []; this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
+
+  s.renderRoomChat(chat);
+
+  assert.equal(chat.children.length, 1);
+  assert.match(chat.children[0].innerHTML, /data:cloud-mia-avatar/);
+  assert.doesNotMatch(chat.children[0].innerHTML, /asset:mia/);
+});
+
+test("renderRoomChat self letter falls back to local profile, not cloud username", () => {
+  const s = loadSocial();
+  installCloudRoomSource(s.__mockWindow);
+  s.__mockWindow.miaAvatar = {
+    avatarThumbBackgroundStyle: (image, _crop, color) => image
+      ? `background-color:transparent;background-image:url('${image}');`
+      : `background-color:${color || "#5e5ce6"};`
+  };
+  s.initSocialModule({
+    getState: () => ({
+      runtime: {
+        cloud: { user: { id: "u_me", username: "7" } },
+        user: { displayName: "Boss", avatarText: "B", avatarColor: "#111827", avatarImage: "" }
+      }
+    }),
+    render: () => {},
+    els: {},
+    appendTransientChat: () => {}
+  });
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.myUsername = "7";
+  s.moduleState.activeRoomId = "fellow:u_me:mia";
+  s.moduleState.rooms = [{ id: "fellow:u_me:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } }];
+  s.moduleState.messageCache.set("fellow:u_me:mia", {
+    maxSeq: 1,
+    messages: [{ id: "m_user", seq: 1, sender_kind: "user", sender_ref: "u_me", body_md: "hi", created_at: "" }]
+  });
+  const chat = {
+    children: [],
+    appendChild(child) { this.children.push(child); return child; },
+    set innerHTML(value) { this.children = []; this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
+
+  s.renderRoomChat(chat);
+
+  assert.equal(chat.children.length, 1);
+  assert.match(chat.children[0].innerHTML, />B<\/div>/);
+  assert.doesNotMatch(chat.children[0].innerHTML, />7<\/div>/);
 });
 
 test("sendInActiveRoom posts group mentions in cloud fellow format", async () => {

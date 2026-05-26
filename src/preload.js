@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld("mia", {
     listFriends: () => ipcRenderer.invoke(IpcChannel.SocialListFriends),
     removeFriend: (userId) => ipcRenderer.invoke(IpcChannel.SocialRemoveFriend, userId),
     listRooms: () => ipcRenderer.invoke(IpcChannel.SocialListRooms),
+    listFellows: () => ipcRenderer.invoke(IpcChannel.SocialListFellows),
+    listPlatformModels: () => ipcRenderer.invoke(IpcChannel.SocialListPlatformModels),
     getRoom: (roomId) => ipcRenderer.invoke(IpcChannel.SocialGetRoom, roomId),
     listRoomMessages: (roomId, sinceSeq, limit) => ipcRenderer.invoke(IpcChannel.SocialListRoomMessages, roomId, sinceSeq, limit),
     postRoomMessage: (roomId, body) => ipcRenderer.invoke(IpcChannel.SocialPostRoomMessage, roomId, body),

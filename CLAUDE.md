@@ -196,5 +196,6 @@ mia 是 Electron app，主进程、渲染进程、preload、cloud / relay / mobi
 - **流式 + tool 管道** → Cherry Studio、ClaudeCodeUI
 - **UI 打磨与微交互** → Telegram、微信、Claude、Codex 桌面端
 - **同赛道竞品体验（自然语言任务、扫码远控、skill 模板）** → WorkBuddy
+- **AI 供应商 / 模型 / Agent 图标** → LobeHub Icons（`https://lobehub.com/icons` / `lobehub/lobe-icons`）。静态 SVG 优先落到 `src/renderer/assets/engine-icons/`、`provider-icons/` 或 `model-icons/`，不要临时手画品牌图标。
 
 发现值得跨 session 记住的点，就在这里加一行指针（文件路径 + 一句"用来干嘛"）。

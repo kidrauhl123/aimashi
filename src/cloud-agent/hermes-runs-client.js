@@ -89,7 +89,7 @@ function createHermesRunsClient(deps = {}) {
     if (!roomId) throw new Error("roomId required");
     const sessionId = `cloud:${userId}:${key}:${roomId}`;
     const body = {
-      model: args.model || "hermes-agent",
+      model: args.model || "mia-default",
       input: String(args.input || ""),
       session_id: sessionId,
       conversation_history: Array.isArray(args.conversationHistory) ? args.conversationHistory : [],

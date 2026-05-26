@@ -84,6 +84,22 @@ test("CloudRoomSource hydrates own fellow avatar from ctx.fellows", () => {
   assert.equal(spec.avatar.image, "data:codex-pic");
 });
 
+test("CloudRoomSource falls back to stable fellow avatar asset", () => {
+  const src = loadSource();
+  const room = { id: "fellow:user_me:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } };
+  const messages = [{ id: "msg5", sender_kind: "fellow", sender_ref: "mia", body_md: "yo", created_at: "", seq: 1 }];
+  const ctx = {
+    self: { id: "user_me", username: "me" },
+    fellows: [],
+    friends: [],
+    avatarAssetForKey: (key) => `asset:${key}`
+  };
+  const source = src.createCloudRoomSource({ room, messages, members: [], ctx });
+  const spec = source.listMessages()[0];
+  assert.equal(spec.authorName, "Mia");
+  assert.equal(spec.avatar.image, "asset:mia");
+});
+
 test("CloudRoomSource system message gets role=system", () => {
   const src = loadSource();
   const room = { id: "g_room3" };

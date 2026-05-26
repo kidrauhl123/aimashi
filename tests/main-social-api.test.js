@@ -135,6 +135,42 @@ test("ensureFellowRoom sends PUT to the stable fellow room route", async () => {
   } finally { await teardown(ctx); }
 });
 
+test("listFellows fetches cloud fellow identities", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud((req, res) => {
+    seen.push({ method: req.method, url: req.url });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ fellows: [{ id: "mia", name: "Mia", avatarImage: "data:mia-cloud" }] }));
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.listFellows();
+    assert.equal(result.fellows[0].avatarImage, "data:mia-cloud");
+    assert.deepEqual(seen[0], { method: "GET", url: "/api/me/fellows" });
+  } finally { await teardown(ctx); }
+});
+
+test("listPlatformModels fetches platform model catalog", async () => {
+  const seen = [];
+  const ctx = await spawnFakeCloud((req, res) => {
+    seen.push({ method: req.method, url: req.url });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ models: [{ id: "mia-pro", label: "Mia Pro" }] }));
+  });
+  try {
+    const api = createSocialApi({
+      getSettings: () => ({ enabled: true, token: "t", url: ctx.baseUrl }),
+      normalizeUrl: (u) => u
+    });
+    const result = await api.listPlatformModels();
+    assert.equal(result.models[0].id, "mia-pro");
+    assert.deepEqual(seen[0], { method: "GET", url: "/api/me/model-catalog" });
+  } finally { await teardown(ctx); }
+});
+
 test("saveFellowRuntime sends PUT with an idempotency key", async () => {
   const seen = [];
   const ctx = await spawnFakeCloud(async (req, res) => {

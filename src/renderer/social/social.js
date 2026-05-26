@@ -47,6 +47,7 @@
   const moduleState = {
     rooms: [],
     friends: [],
+    fellows: [],
     incomingRequests: [],
     outgoingRequests: [],
     messageCache: new Map(),
@@ -230,6 +231,12 @@
     return moduleState.rooms.find((r) => r.id === room.id) || room;
   }
 
+  function ensuredRoomFromResult(result) {
+    if (!result || result.ok === false) return null;
+    const payload = result.data || result;
+    return payload.room || payload.data?.room || null;
+  }
+
   function localRuntimeFellows() {
     const state = (deps && typeof deps.getState === "function" && deps.getState()) || {};
     const runtime = state.runtime || {};
@@ -264,6 +271,26 @@
       } catch (error) {
         console.warn("[social] ensure fellow room failed", fellow.key, error);
       }
+    }
+  }
+
+  async function ensureFellowRoom(fellow) {
+    const fellowKey = String(fellow?.key || fellow?.id || "").trim();
+    if (!fellowKey || !window.mia?.social?.ensureFellowRoom) return null;
+    try {
+      const result = await window.mia.social.ensureFellowRoom(fellowKey, {
+        title: fellow.name || fellow.displayName || fellowKey,
+        runtimeKind: "desktop-local"
+      });
+      if (result && result.ok === false) {
+        throw new Error(result.error || result.message || result.data?.error || "unknown ensure failure");
+      }
+      const room = upsertRoom(ensuredRoomFromResult(result));
+      if (room) _schedulePersistSnapshot();
+      return room;
+    } catch (error) {
+      console.warn("[social] ensure fellow room failed", fellowKey, error);
+      return null;
     }
   }
 
@@ -309,7 +336,7 @@
     const { resolveContact, ContactKind } = helper;
     const contact = resolveContact(
       { kind: ContactKind.User, ref: msg && msg.sender_ref },
-      { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends }
+      adapterCtx()
     );
     return contact && contact.kind === ContactKind.Self;
   }
@@ -321,10 +348,41 @@
     const factory = (typeof window !== "undefined" && window.miaCloudRoomSource) || null;
     if (!factory || typeof factory.createCloudRoomSource !== "function") return false;
     const room = moduleState.rooms.find((r) => r.id === moduleState.activeRoomId) || { id: moduleState.activeRoomId || "" };
-    const ctx = { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends, fellows: [] };
-    const source = factory.createCloudRoomSource({ room, messages: [msg], members: [], ctx });
+    const source = factory.createCloudRoomSource({ room, messages: [msg], members: [], ctx: adapterCtx() });
     const spec = source.listMessages()[0];
     return !!spec && spec.role === "user";
+  }
+
+  function adapterCtx() {
+    const runtimeState = deps && typeof deps.getState === "function" ? deps.getState() : {};
+    const runtime = runtimeState.runtime || {};
+    const cloudUser = runtime.cloud?.user || {};
+    const localUser = runtime.user || {};
+    const fellowsByKey = new Map();
+    for (const fellow of moduleState.fellows || []) {
+      const key = String(fellow?.key || fellow?.id || "").trim();
+      if (key) fellowsByKey.set(key, { ...fellow, key, cloudOnly: true });
+    }
+    for (const fellow of runtime.fellows || runtime.personas || []) {
+      const key = String(fellow?.key || fellow?.id || "").trim();
+      if (key) fellowsByKey.set(key, { ...fellowsByKey.get(key), ...fellow, key, cloudOnly: false });
+    }
+    const fellows = [...fellowsByKey.values()];
+    return {
+      self: {
+        id: moduleState.myUserId || cloudUser.id || localUser.id || "",
+        displayName: localUser.displayName || cloudUser.displayName || "",
+        avatarText: localUser.avatarText || "",
+        username: localUser.displayName || moduleState.myUsername || cloudUser.username || cloudUser.account || localUser.account || "",
+        account: cloudUser.account || localUser.account || "",
+        avatarImage: localUser.avatarImage || cloudUser.avatarImage || "",
+        avatarCrop: localUser.avatarCrop || cloudUser.avatarCrop || null,
+        avatarColor: localUser.avatarColor || cloudUser.avatarColor || "#5e5ce6"
+      },
+      fellows,
+      friends: moduleState.friends || [],
+      avatarAssetForKey: window.miaAvatar?.avatarAssetForKey
+    };
   }
 
   // ── initSocialModule ──────────────────────────────────────────────────────
@@ -362,6 +420,7 @@
         userId: moduleState.myUserId,
         rooms: moduleState.rooms,
         friends: moduleState.friends,
+        fellows: moduleState.fellows,
         previews,
         members,
         unread: Object.fromEntries(moduleState.unreadByRoom),
@@ -385,6 +444,7 @@
       if (!snap || !Array.isArray(snap.rooms)) return false;
       moduleState.rooms = snap.rooms;
       moduleState.friends = Array.isArray(snap.friends) ? snap.friends : [];
+      moduleState.fellows = Array.isArray(snap.fellows) ? snap.fellows : [];
       moduleState.myUserId = snap.userId || "";
       for (const [roomId, last] of Object.entries(snap.previews || {})) {
         moduleState.messageCache.set(roomId, { messages: [last], maxSeq: last.seq || 0 });
@@ -411,11 +471,12 @@
     }
     const api = window.mia.social;
     try {
-      const [meRes, friendsRes, incomingRes, outgoingRes] = await Promise.all([
+      const [meRes, friendsRes, incomingRes, outgoingRes, fellowsRes] = await Promise.all([
         api.myUsername(),
         api.listFriends(),
         api.listFriendRequests("incoming"),
         api.listFriendRequests("outgoing"),
+        typeof api.listFellows === "function" ? api.listFellows() : Promise.resolve({ ok: true, data: { fellows: [] } }),
       ]);
       if (meRes.ok) {
         const freshUserId = meRes.data.id || "";
@@ -430,6 +491,7 @@
         moduleState.myUserId = freshUserId;
       }
       if (friendsRes.ok) moduleState.friends = friendsRes.data?.friends || [];
+      if (fellowsRes.ok) moduleState.fellows = fellowsRes.data?.fellows || [];
       if (incomingRes.ok) moduleState.incomingRequests = incomingRes.data?.requests || [];
       if (outgoingRes.ok) moduleState.outgoingRequests = outgoingRes.data?.requests || [];
 
@@ -527,6 +589,28 @@
     if (type === "user_settings.updated") {
       const settings = payload && payload.settings ? payload.settings : null;
       if (settings) applyCloudSettings(settings);
+      return;
+    }
+
+    if (type === "fellow.upserted") {
+      const fellow = payload?.fellow;
+      const key = String(fellow?.key || fellow?.id || "").trim();
+      if (!key) return;
+      moduleState.fellows = [
+        { ...fellow, key },
+        ...moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== key)
+      ];
+      _schedulePersistSnapshot();
+      if (deps && typeof deps.render === "function") deps.render();
+      return;
+    }
+
+    if (type === "fellow.deleted") {
+      const fellowId = String(payload?.fellowId || payload?.id || "").trim();
+      if (!fellowId) return;
+      moduleState.fellows = moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== fellowId);
+      _schedulePersistSnapshot();
+      if (deps && typeof deps.render === "function") deps.render();
       return;
     }
 
@@ -821,8 +905,7 @@
     const factory = (typeof window !== "undefined" && window.miaCloudRoomSource) || null;
     if (!factory || typeof factory.createCloudRoomSource !== "function") return null;
     const room = moduleState.rooms.find((r) => r.id === moduleState.activeRoomId) || { id: moduleState.activeRoomId || "" };
-    const ctx = { self: { id: moduleState.myUserId, username: moduleState.myUsername }, friends: moduleState.friends, fellows: [] };
-    const source = factory.createCloudRoomSource({ room, messages: [msg], members, ctx });
+    const source = factory.createCloudRoomSource({ room, messages: [msg], members, ctx: adapterCtx() });
     return source.listMessages()[0] || null;
   }
 
@@ -1693,7 +1776,8 @@
     renderMsgBody: _renderMsgBody,
     renderAttachmentChips,
     renderSendStatus,
-    appendMessageToActiveChat: _appendMessageToActiveChat
+    appendMessageToActiveChat: _appendMessageToActiveChat,
+    adapterCtx
   };
 
   global.miaSocial = {
@@ -1722,6 +1806,7 @@
     isRoomManuallyUnread,
     setRoomManuallyUnread,
     applyCloudSettings,
+    ensureFellowRoom,
     renameRoom,
     deleteCloudRoom,
     getUnreadForRoom,

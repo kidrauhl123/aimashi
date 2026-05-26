@@ -148,6 +148,44 @@ test("dispatcher only runs enabled cloud-hermes fellow rooms and appends fellow 
   }
 });
 
+test("dispatcher defaults cloud-hermes runs to the platform model alias", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_default", content: "ok", events: [] };
+        }
+      },
+      broadcastPersistedEvent() {},
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: ctx.room.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "hello"
+    });
+    await dispatcher.handleUserMessage({ userId: ctx.user.id, roomId: ctx.room.id, message });
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].model, "mia-default");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("dispatcher skips fellow rooms without enabled cloud-hermes binding", async () => {
   const ctx = setup();
   try {

@@ -840,6 +840,27 @@ function migrate(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_cloud_agent_runs_room
       ON cloud_agent_runs(room_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS skills (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      category      TEXT NOT NULL DEFAULT 'uncategorized',
+      description   TEXT NOT NULL DEFAULT '',
+      source_label  TEXT NOT NULL DEFAULT '',
+      body          TEXT NOT NULL,
+      install_count INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_skills_category ON skills(category);
+    CREATE INDEX IF NOT EXISTS idx_skills_popularity ON skills(install_count DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_installs (
+      skill_id   TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (skill_id, user_id)
+    );
   `);
   if (!hasColumn(db, "bridge_runs", "request_attachments_json")) {
     db.exec("ALTER TABLE bridge_runs ADD COLUMN request_attachments_json TEXT NOT NULL DEFAULT '[]'");
@@ -891,6 +912,9 @@ function migrate(db) {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (8, ?)")
     .run(nowIso());
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (9, ?)")
+    .run(nowIso());
+  // v10: skill marketplace registry (skills + per-user install ledger).
+  db.prepare("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (10, ?)")
     .run(nowIso());
 }
 

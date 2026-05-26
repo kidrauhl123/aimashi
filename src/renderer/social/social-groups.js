@@ -18,6 +18,7 @@
   // (sender kind / member kind / refs) are off-limits to this file —
   // consume MessageSpec from cloud-room-source.js instead.
   function _adapterCtx() {
+    if (ctx && typeof ctx.adapterCtx === "function") return ctx.adapterCtx();
     const { moduleState, deps } = ctx;
     const runtimeState = deps && typeof deps.getState === "function" ? deps.getState() : {};
     const fellows = runtimeState.runtime?.fellows || runtimeState.runtime?.personas || [];

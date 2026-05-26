@@ -27,7 +27,10 @@ function validateInput(input) {
   if (!input || typeof input !== "object") throw new Error("task input must be an object");
   if (!input.fellowId) throw new Error("fellowId is required");
   if (!input.sessionId) throw new Error("sessionId is required");
-  if (!input.originMessageId) throw new Error("originMessageId is required");
+  // originMessageId is optional provenance metadata (which user message
+  // prompted the task). It is stored but never consumed for delivery or
+  // orphaning, so a missing message id must not block task creation — engines
+  // legitimately pass "" when the originating message has no id.
   if (!input.prompt) throw new Error("prompt is required");
   if (!input.trigger || !input.trigger.type) throw new Error("trigger.type is required");
   if (input.trigger.type === "event") {
@@ -85,7 +88,7 @@ function createTasksStore(filePath) {
       title: String(input.title || "未命名任务"),
       fellowId: String(input.fellowId),
       sessionId: String(input.sessionId),
-      originMessageId: String(input.originMessageId),
+      originMessageId: String(input.originMessageId || ""),
       trigger: { ...input.trigger },
       timezone: String(input.timezone || "UTC"),
       prompt: String(input.prompt),

@@ -70,6 +70,12 @@ function createSocialApi({ getSettings, normalizeUrl }) {
     async listRooms() {
       return jsonFetch({ ...ctx(), method: "GET", path: "/api/rooms" });
     },
+    async listFellows() {
+      return jsonFetch({ ...ctx(), method: "GET", path: "/api/me/fellows" });
+    },
+    async listPlatformModels() {
+      return jsonFetch({ ...ctx(), method: "GET", path: "/api/me/model-catalog" });
+    },
     // Room ids are `dm:<a>:<b>` or `g_<hex>` — both match the cloud route
     // regex /api/rooms/([A-Za-z0-9_:-]+) literally. encodeURIComponent would
     // turn `:` into `%3A` which doesn't match and silently 404s, which is

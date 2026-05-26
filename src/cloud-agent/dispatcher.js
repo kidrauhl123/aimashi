@@ -79,7 +79,7 @@ function createCloudAgentDispatcher(deps = {}) {
         userId,
         fellow,
         roomId,
-        model: runtimeConfig.model || "hermes-agent",
+        model: runtimeConfig.model || "mia-default",
         effortLevel: runtimeConfig.effortLevel || "medium",
         permissionMode: runtimeConfig.permissionMode || "ask",
         input: materialized.input || message.body_md || "",

@@ -2,6 +2,7 @@ const els = {
   summary: document.getElementById("adminSummary"),
   badge: document.getElementById("adminStatusBadge"),
   form: document.getElementById("modelAdminForm"),
+  publicModel: document.getElementById("publicModelInput"),
   provider: document.getElementById("providerSelect"),
   upstream: document.getElementById("upstreamModelInput"),
   apiKey: document.getElementById("apiKeyInput"),
@@ -55,11 +56,13 @@ function renderStatus(data) {
   }
   if (!model) {
     els.badge.textContent = "未设置";
-    els.summary.textContent = "还没有配置 mia-default。";
+    els.summary.textContent = "还没有配置平台模型。";
     return;
   }
   els.badge.textContent = "已设置";
-  els.summary.textContent = `${model.model_name} -> ${model.litellm_params?.model || "未知模型"}`;
+  const models = Array.isArray(data.models) ? data.models : [];
+  els.summary.textContent = `${models.length} 个模型：${models.map((item) => item.model_name).join("、")}`;
+  if (!els.publicModel.value && model.model_name) els.publicModel.value = model.model_name;
   if (!els.upstream.value && model.litellm_params?.model) els.upstream.value = model.litellm_params.model;
   if (model.litellm_params?.api_base) els.apiBase.value = model.litellm_params.api_base;
   if (model.litellm_params?.api_version) els.apiVersion.value = model.litellm_params.api_version;
@@ -87,6 +90,7 @@ els.form.addEventListener("submit", async (event) => {
     const data = await requestJson("/api/admin/model-gateway", {
       method: "POST",
       body: JSON.stringify({
+        modelName: els.publicModel.value,
         provider: els.provider.value,
         upstreamModel: els.upstream.value,
         apiKey: els.apiKey.value,

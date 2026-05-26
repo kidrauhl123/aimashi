@@ -8,6 +8,7 @@ const SIDEBAR_WIDTH_DEFAULT = 280;
 let skillPickerHoverCloseTimer = 0;
 const qrSvgCache = new Map();
 const cloudFellowRuntimeCache = new Map();
+const platformModelCatalog = { loaded: false, loading: false, entries: [] };
 const ICON_PARK_PIN_SVG = '<svg class="icon-park-pin" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M10.6963 17.5042C13.3347 14.8657 16.4701 14.9387 19.8781 16.8076L32.62 9.74509L31.8989 4.78683L43.2126 16.1005L38.2656 15.3907L31.1918 28.1214C32.9752 31.7589 33.1337 34.6647 30.4953 37.3032C30.4953 37.3032 26.235 33.0429 22.7171 29.525L6.44305 41.5564L18.4382 25.2461C14.9202 21.7281 10.6963 17.5042 10.6963 17.5042Z"/></svg>';
 
 function clampSidebarWidth(value) {
@@ -1089,16 +1090,17 @@ function updateModelFieldVisibility(runtime = state.runtime) {
   els.modelApiKeyField?.classList.toggle("hidden", !needsApiKey);
   els.codexInlineAuth.classList.toggle("hidden", !needsOauth);
   els.modelConnectButton?.classList.toggle("hidden", !(needsApiKey || canConnectWithoutKey));
-  if (entry) {
-    window.miaModelSettings.applyModelEntryToFields(entry);
-    const copy = window.miaModelSettings.modelAuthCopy(entry, runtime);
-    setText(els.modelAuthState, isConnected ? "已连接" : copy.state);
-    els.modelAuthState?.classList.remove("hidden");
-    setText(els.modelApiKeyLabel, entry.apiKeyEnv || "API Key");
-    els.modelApiKey.placeholder = "保存在 Mia 私有 runtime";
-    if (els.modelConnectButton) {
-      els.modelConnectButton.textContent = `连接 ${providerEntry?.providerLabel || entry.providerLabel || entry.provider}`;
-    }
+	  if (entry) {
+	    window.miaModelSettings.applyModelEntryToFields(entry);
+	    const copy = window.miaModelSettings.modelAuthCopy(entry, runtime);
+	  const showAuthState = !needsApiKey && !needsOauth;
+	  setText(els.modelAuthState, isConnected ? "已连接" : copy.state);
+	  els.modelAuthState?.classList.toggle("hidden", !showAuthState);
+	    els.modelApiKey.placeholder = entry.apiKeyEnv || "API Key";
+	    if (els.modelConnectButton) {
+	      els.modelConnectButton.textContent = "连接";
+	      els.modelConnectButton.title = `连接 ${providerEntry?.providerLabel || entry.providerLabel || entry.provider}`;
+	    }
   } else {
     els.modelAuthState?.classList.add("hidden");
   }
@@ -1141,26 +1143,30 @@ function render() {
     window.miaFellowDialog.setProfileAvatarDraft(user.avatarImage || "", user.avatarCrop);
   }
 
-  els.engineStatus.textContent = runtime.engineRunning
-    ? `Running ${runtime.engineManagedBy ? `via ${runtime.engineManagedBy} ` : ""}at ${runtime.engineBaseUrl}`
-    : runtime.engineStarting
-      ? "Starting Hermes API..."
-      : runtime.engineInstalled
-        ? "Hermes engine installed"
-        : "Runtime home initialized; engine package not installed";
+  if (els.engineStatus) {
+    els.engineStatus.textContent = runtime.engineRunning
+      ? `Running ${runtime.engineManagedBy ? `via ${runtime.engineManagedBy} ` : ""}at ${runtime.engineBaseUrl}`
+      : runtime.engineStarting
+        ? "Starting Hermes API..."
+        : runtime.engineInstalled
+          ? "Hermes engine installed"
+          : "Runtime home initialized; engine package not installed";
+  }
   renderEngineDetection(runtime);
-  els.hermesHome.textContent = runtime.hermesHome;
-  els.manifestPath.textContent = runtime.manifestPath;
-  els.engineWarning.classList.toggle("hidden", runtime.engineInstalled);
+  if (els.hermesHome) els.hermesHome.textContent = runtime.hermesHome;
+  if (els.manifestPath) els.manifestPath.textContent = runtime.manifestPath;
+  els.engineWarning?.classList.toggle("hidden", runtime.engineInstalled);
   const source = runtime.engineSource;
   const managedVenvExists = Boolean(runtime.managedVenvExists);
   // Hide "Install Engine" when the runtime is already bundled in the .app.
   if (els.installEngine) els.installEngine.classList.toggle("hidden", source === "bundled");
   if (els.uninstallEngine) els.uninstallEngine.classList.toggle("hidden", !managedVenvExists);
-  els.engineLogs.textContent = [
-    runtime.engineLastError ? `ERROR: ${runtime.engineLastError}` : "",
-    ...(runtime.engineLogs || [])
-  ].filter(Boolean).join("\n");
+  if (els.engineLogs) {
+    els.engineLogs.textContent = [
+      runtime.engineLastError ? `ERROR: ${runtime.engineLastError}` : "",
+      ...(runtime.engineLogs || [])
+    ].filter(Boolean).join("\n");
+  }
   window.miaSettingsRemote.renderMobilePairing(runtime.daemon || {});
   window.miaSettingsRemote.renderRelayPairing(runtime.relay || {});
   window.miaSettingsRemote.renderCloudAccount(runtime.cloud || {});
@@ -1173,24 +1179,34 @@ function render() {
   const selectedProvider = selectedEntry?.provider || auth.oauthProvider || "openai-codex";
   const selectedProviderLabel = window.miaModelHelpers.providerLabel(selectedProvider);
   const selectedConnected = window.miaModelSettings.providerIsConnected(selectedProvider, runtime);
-  els.codexStatus.textContent = auth.codexStarting
-    ? `等待 ${auth.oauthProviderLabel || selectedProviderLabel} 授权`
-    : selectedConnected
-      ? `已授权 ${selectedProviderLabel}`
-      : `需要登录 ${selectedProviderLabel}`;
-  els.codexCheck.classList.toggle("authorized", Boolean(selectedConnected));
-  els.codexCode.textContent = auth.codexUserCode
+  if (els.codexStatus) {
+    els.codexStatus.textContent = auth.codexStarting
+      ? `等待 ${auth.oauthProviderLabel || selectedProviderLabel} 授权`
+      : selectedConnected
+        ? `已授权 ${selectedProviderLabel}`
+        : `需要登录 ${selectedProviderLabel}`;
+  }
+  els.codexCheck?.classList.toggle("authorized", Boolean(selectedConnected));
+  const codexCodeText = auth.codexUserCode
     ? `在浏览器页面输入：${auth.codexUserCode}`
     : auth.codexStarting
       ? (auth.codexVerificationUrl ? `打开：${auth.codexVerificationUrl}` : "正在请求设备码...")
       : "";
-  els.codexLogs.textContent = [
+  if (els.codexCode) {
+    els.codexCode.textContent = codexCodeText;
+    els.codexCode.classList.toggle("hidden", !codexCodeText);
+  }
+  const codexLogsText = [
     auth.codexLastError ? `ERROR: ${auth.codexLastError}` : "",
     ...(auth.codexLogs || [])
   ].filter(Boolean).join("\n");
-  els.codexLogs.classList.toggle("hidden", Boolean(selectedConnected) && !auth.codexLastError);
+  if (els.codexLogs) {
+    els.codexLogs.textContent = codexLogsText;
+    els.codexLogs.classList.toggle("hidden", !codexLogsText || (Boolean(selectedConnected) && !auth.codexLastError));
+  }
   els.codexLogin.disabled = Boolean(auth.codexStarting);
   els.codexLogin.textContent = `登录 ${selectedProviderLabel}`;
+  els.codexCancel?.classList.toggle("hidden", !auth.codexStarting);
   els.codexLogin.classList.toggle("hidden", Boolean(selectedConnected));
   els.codexCancel.disabled = !auth.codexStarting;
   els.codexCancel.classList.toggle("hidden", !auth.codexStarting);
@@ -1258,8 +1274,18 @@ function render() {
   } else if (!personas.some((persona) => persona.key === state.activeKey) && personas.length && !activeCloudRoomId) {
     state.activeKey = personas[0].key;
   }
-  if (!personas.some((persona) => persona.key === state.activeContactKey) && personas.length) {
-    state.activeContactKey = personas.find((persona) => persona.key === state.activeKey)?.key || personas[0].key;
+  const cloudFellowKeys = new Set((social?.moduleState?.fellows || [])
+    .map((fellow) => String(fellow?.key || fellow?.id || "").trim())
+    .filter(Boolean));
+  const contactKeys = new Set([
+    ...personas.map((persona) => String(persona.key || persona.id || "")),
+    ...cloudFellowKeys
+  ].filter(Boolean));
+  if (!contactKeys.has(state.activeContactKey) && contactKeys.size) {
+    state.activeContactKey = personas.find((persona) => persona.key === state.activeKey)?.key
+      || personas[0]?.key
+      || [...cloudFellowKeys][0]
+      || "";
   }
   window.miaSessionReadState.initializeReadStateForPersonas(personas);
   // Passive render-time read mark: advance the read pointer but never clear an
@@ -1833,8 +1859,40 @@ function cloudFellowRuntimeCacheKey(fellowKey, runtimeKind = "cloud-hermes") {
   return `${fellowKey}:${runtimeKind}`;
 }
 
+function normalizePlatformModelEntry(entry = {}) {
+  const id = String(entry.id || entry.model_name || entry.model || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    label: String(entry.label || entry.name || entry.displayName || id).trim(),
+    provider: String(entry.provider || "").trim(),
+    upstreamModel: String(entry.upstreamModel || entry.upstream_model || entry.model || "").trim()
+  };
+}
+
+async function loadPlatformModelCatalog() {
+  if (platformModelCatalog.loaded || platformModelCatalog.loading) return platformModelCatalog.entries;
+  if (!state.runtime?.cloud?.enabled || typeof window.mia?.social?.listPlatformModels !== "function") return platformModelCatalog.entries;
+  platformModelCatalog.loading = true;
+  try {
+    const response = await window.mia.social.listPlatformModels();
+    const models = response?.ok ? response.data?.models : response?.models;
+    platformModelCatalog.entries = (Array.isArray(models) ? models : [])
+      .map(normalizePlatformModelEntry)
+      .filter(Boolean);
+    platformModelCatalog.loaded = true;
+  } catch (error) {
+    console.warn("[renderer] platform model catalog load failed:", error?.message || error);
+  } finally {
+    platformModelCatalog.loading = false;
+  }
+  return platformModelCatalog.entries;
+}
+
 function cloudHermesModelEntries() {
-  return [{ id: "hermes-agent", label: "Hermes Agent" }];
+  return platformModelCatalog.entries.length
+    ? platformModelCatalog.entries
+    : [{ id: "mia-default", label: "Mia Default" }];
 }
 
 function cloudHermesPermissionEntries() {
@@ -1880,8 +1938,9 @@ function syncCloudFellowRuntimeControls() {
   if (!context || context.runtimeKind !== "cloud-hermes") return false;
   const binding = cloudFellowRuntimeCache.get(cloudFellowRuntimeCacheKey(context.fellowKey, context.runtimeKind));
   const config = binding?.config || {};
-  const modelLabel = setComposerSelectOptions(els.quickModelSelect, cloudHermesModelEntries(), config.model || "hermes-agent");
-  setText(els.quickModelLabel, modelLabel || "Hermes Agent");
+  const modelEntries = cloudHermesModelEntries();
+  const modelLabel = setComposerSelectOptions(els.quickModelSelect, modelEntries, config.model || modelEntries[0]?.id || "mia-default");
+  setText(els.quickModelLabel, modelLabel || "Mia Default");
   const effortLabel = setComposerSelectOptions(
     els.effortSelect,
     window.miaEngineOptions.effortOptions("hermes"),
@@ -1897,6 +1956,12 @@ function syncCloudFellowRuntimeControls() {
   if (els.effortSelect) els.effortSelect.disabled = false;
   if (els.permissionMode) els.permissionMode.disabled = false;
   setText(els.modelSwitchStatus, "Cloud Hermes");
+  if (!platformModelCatalog.loaded && !platformModelCatalog.loading) {
+    loadPlatformModelCatalog().then(() => {
+      const latest = activeCloudFellowContext();
+      if (latest?.roomId === context.roomId) render();
+    });
+  }
   if (!binding) {
     ensureCloudFellowRuntime(context.fellowKey, context.runtimeKind)
       .then(() => {
@@ -2059,6 +2124,52 @@ async function createNewSessionForActive() {
   state.forceScrollToBottom = true;
   render();
 }
+
+function fellowByKey(fellowKey) {
+  const key = String(fellowKey || "");
+  const fellows = [
+    ...(Array.isArray(state.runtime?.fellows) ? state.runtime.fellows : []),
+    ...(Array.isArray(state.runtime?.personas) ? state.runtime.personas : [])
+  ];
+  return fellows.find((item) => String(item?.key || item?.id || "") === key) || { key };
+}
+
+async function openFellowConversation(fellowKey) {
+  const key = String(fellowKey || "").trim();
+  if (!key) return;
+  const fellow = fellowByKey(key);
+  state.activeContactKey = key;
+  state.activeView = "chat";
+  state.sessionMenuOpen = false;
+  state.replyDraft = null;
+  showNarrowContent();
+
+  if (state.runtime?.cloud?.enabled && window.miaSocial?.ensureFellowRoom) {
+    const room = await window.miaSocial.ensureFellowRoom(fellow);
+    if (room?.id) {
+      state.activeKey = "";
+      window.miaSocial.setActiveRoomId(room.id);
+      state.forceScrollToBottom = true;
+      render();
+      requestAnimationFrame(() => els.chatInput?.focus());
+      return;
+    }
+  }
+
+  state.activeKey = key;
+  if (window.miaSocial) window.miaSocial.setActiveRoomId(null);
+  if (!Array.isArray(state.chatStore.sessions[key]) || !state.chatStore.sessions[key].length) {
+    state.chatStore = await window.mia.createChatSession({ personaKey: key });
+  }
+  const latest = sessionsForPersona(key)[0];
+  state.activeSessionIdByPersona[key] = latest?.id;
+  window.miaSessionReadState.markPersonaRead(key);
+  state.forceScrollToBottom = true;
+  render();
+  requestAnimationFrame(() => els.chatInput?.focus());
+}
+
+window.miaOpenFellowConversation = openFellowConversation;
 
 async function refreshRuntime() {
   const previousDaemon = state.runtime?.daemon || {};
@@ -2447,7 +2558,7 @@ els.newSession.addEventListener("click", async (event) => {
   event.stopPropagation();
   await createNewSessionForActive();
 });
-els.initialize.addEventListener("click", initializeRuntime);
+els.initialize?.addEventListener("click", initializeRuntime);
 els.personaSearch.addEventListener("input", () => {
   state.personaFilter = els.personaSearch.value;
   render();
@@ -2790,7 +2901,7 @@ if (window.mia.onCloudEvent) {
   });
 }
 
-els.installEngine.addEventListener("click", async () => {
+els.installEngine?.addEventListener("click", async () => {
   els.installEngine.disabled = true;
   els.installEngine.textContent = "Installing...";
   try {
@@ -2804,7 +2915,7 @@ els.installEngine.addEventListener("click", async () => {
     els.installEngine.textContent = "Install Engine";
   }
 });
-els.startEngine.addEventListener("click", async () => {
+els.startEngine?.addEventListener("click", async () => {
   els.startEngine.disabled = true;
   els.startEngine.textContent = "Starting...";
   try {
@@ -2818,7 +2929,7 @@ els.startEngine.addEventListener("click", async () => {
     els.startEngine.textContent = "Start";
   }
 });
-els.stopEngine.addEventListener("click", async () => {
+els.stopEngine?.addEventListener("click", async () => {
   state.runtime = await window.mia.stopEngine();
   render();
 });
@@ -2879,7 +2990,7 @@ els.authMethod.addEventListener("change", () => {
 els.quickModelSelect?.addEventListener("change", async () => {
   window.miaModelSettings.syncQuickModelLabel();
   if (await saveActiveCloudFellowRuntimeConfig(
-    { model: els.quickModelSelect.value || "hermes-agent" },
+    { model: els.quickModelSelect.value || cloudHermesModelEntries()[0]?.id || "mia-default" },
     "保存模型...",
     "模型已更新",
     "Cloud model switch failed"
@@ -3366,7 +3477,8 @@ els.fellowForm?.addEventListener("submit", async (event) => {
   const saved = fellow.key
     ? fellows.find((item) => item.key === fellow.key)
     : [...fellows].reverse().find((item) => item.name === fellow.name.trim()) || fellows[0];
-  if (saved?.key) state.activeKey = saved.key;
+  const savedKey = saved?.key || "";
+  if (savedKey) state.activeKey = savedKey;
   await loadChatSessions();
   state.fellowDialogOpen = false;
   // If this was the initial onboarding create-fellow step, mark onboarding done.
@@ -3375,7 +3487,8 @@ els.fellowForm?.addEventListener("submit", async (event) => {
     state.setupGuideDismissed = true;
     localStorage.setItem(SETUP_GUIDE_DISMISSED_KEY, "1");
   }
-  render();
+  if (savedKey) await openFellowConversation(savedKey);
+  else render();
 });
 
 els.modelForm.addEventListener("submit", async (event) => {

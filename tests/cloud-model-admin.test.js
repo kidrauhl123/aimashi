@@ -7,11 +7,12 @@ const http = require("node:http");
 const { spawn } = require("node:child_process");
 const { freePort } = require("./helpers/free-port");
 
-function request(port, method, pathStr, { body, auth } = {}) {
+function request(port, method, pathStr, { body, auth, token } = {}) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const headers = { "content-type": "application/json" };
     if (auth) headers.authorization = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`;
+    if (token) headers.authorization = `Bearer ${token}`;
     const req = http.request({ host: "127.0.0.1", port, path: pathStr, method, headers }, (res) => {
       let chunks = "";
       res.on("data", (chunk) => { chunks += chunk; });
@@ -27,10 +28,10 @@ function request(port, method, pathStr, { body, auth } = {}) {
   });
 }
 
-async function startLiteLLMFake() {
+async function startLiteLLMFake(initialModels = null) {
   const port = await freePort();
   const calls = [];
-  let models = [{
+  let models = initialModels || [{
     model_name: "mia-default",
     litellm_params: { model: "openai/old", api_key: "hidden" },
     model_info: { id: "old-model-id" }
@@ -76,6 +77,14 @@ async function startLiteLLMFake() {
   });
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   return { port, calls, server, get models() { return models; } };
+}
+
+async function register(port, account) {
+  const response = await request(port, "POST", "/api/auth/register", {
+    body: { account, password: "passworD1!", username: `u-${account}` }
+  });
+  assert.ok(response.status === 200 || response.status === 201);
+  return response.body;
 }
 
 async function startCloud(litellmPort) {
@@ -155,6 +164,67 @@ test("admin model gateway replaces mia-default without leaking provider key", as
     const tested = await request(cloud.port, "POST", "/api/admin/model-gateway/test", { auth, body: {} });
     assert.equal(tested.status, 200);
     assert.equal(tested.body.reply, "mia-ok");
+  } finally {
+    await stopCloud(cloud);
+    await new Promise((resolve) => lite.server.close(resolve));
+  }
+});
+
+test("admin model gateway can add a second platform alias without deleting mia-default", async () => {
+  const lite = await startLiteLLMFake();
+  const cloud = await startCloud(lite.port);
+  const auth = { username: "admin", password: "secret" };
+  try {
+    const saved = await request(cloud.port, "POST", "/api/admin/model-gateway", {
+      auth,
+      body: {
+        modelName: "mia-pro",
+        provider: "anthropic",
+        upstreamModel: "anthropic/claude-sonnet-4",
+        apiKey: "sk-pro-secret"
+      }
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.model.model_name, "mia-pro");
+    assert.deepEqual(lite.models.map((model) => model.model_name), ["mia-default", "mia-pro"]);
+  } finally {
+    await stopCloud(cloud);
+    await new Promise((resolve) => lite.server.close(resolve));
+  }
+});
+
+test("admin model page lets operators edit the public model alias", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "src/web/admin-model.html"), "utf8");
+  const js = fs.readFileSync(path.join(__dirname, "..", "src/web/admin-model.js"), "utf8");
+  assert.match(html, /id="publicModelInput"/);
+  assert.doesNotMatch(html, /id="publicModelInput"[^>]*readonly/);
+  assert.match(js, /publicModel/);
+  assert.match(js, /modelName:\s*els\.publicModel\.value/);
+});
+
+test("authenticated users can list platform model aliases without provider secrets", async () => {
+  const lite = await startLiteLLMFake([
+    {
+      model_name: "mia-default",
+      litellm_params: { model: "deepseek/deepseek-chat", api_key: "sk-default-secret" },
+      model_info: { id: "mia-default", base_model: "deepseek/deepseek-chat", provider: "deepseek", label: "Mia Default" }
+    },
+    {
+      model_name: "mia-pro",
+      litellm_params: { model: "anthropic/claude-sonnet-4", api_key: "sk-pro-secret" },
+      model_info: { id: "mia-pro", base_model: "anthropic/claude-sonnet-4", provider: "anthropic", label: "Mia Pro" }
+    }
+  ]);
+  const cloud = await startCloud(lite.port);
+  try {
+    const user = await register(cloud.port, "sigma");
+    const catalog = await request(cloud.port, "GET", "/api/me/model-catalog", { token: user.token });
+    assert.equal(catalog.status, 200);
+    assert.deepEqual(catalog.body.models.map((model) => model.id), ["mia-default", "mia-pro"]);
+    assert.equal(catalog.body.models[0].label, "Mia Default");
+    assert.equal(catalog.body.models[1].provider, "anthropic");
+    const serialized = JSON.stringify(catalog.body);
+    assert.doesNotMatch(serialized, /sk-default-secret|sk-pro-secret|api_key/);
   } finally {
     await stopCloud(cloud);
     await new Promise((resolve) => lite.server.close(resolve));

@@ -260,12 +260,10 @@
   function renderConnectedProviders(runtime = state?.runtime) {
     if (!els || !els.connectedProviderList) return;
     const providers = runtime?.connectedProviders || [];
+    const section = els.connectedProviderList.closest(".connected-providers");
+    section?.classList.toggle("hidden", !providers.length);
     els.connectedProviderList.innerHTML = "";
     if (!providers.length) {
-      const empty = document.createElement("div");
-      empty.className = "connected-provider-empty";
-      empty.textContent = "还没有连接模型提供商";
-      els.connectedProviderList.appendChild(empty);
       return;
     }
     for (const provider of providers) {

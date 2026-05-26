@@ -57,6 +57,19 @@ test("desktop cloud-Hermes fellow controls save through cloud runtime binding", 
   assert.match(appSource, /const cloudPersona = personas\.find[\s\S]*if \(cloudPersona\) return cloudPersona;\s*return null;/);
 });
 
+test("desktop cloud-Hermes model picker uses platform model catalog", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
+  const socialApiSource = fs.readFileSync(path.join(root, "src/main/social/social-api.js"), "utf8");
+
+  assert.match(appSource, /platformModelCatalog/);
+  assert.match(appSource, /loadPlatformModelCatalog/);
+  assert.match(appSource, /cloudHermesModelEntries\(\)/);
+  assert.doesNotMatch(appSource, /return \[\{ id: "hermes-agent", label: "Hermes Agent" \}\];/);
+  assert.match(preloadSource, /listPlatformModels/);
+  assert.match(socialApiSource, /\/api\/me\/model-catalog/);
+});
+
 test("private chat async replies are anchored to the submit session", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
 
@@ -86,6 +99,32 @@ test("fellow cloud rooms are not hidden from the sidebar", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
 
   assert.doesNotMatch(appSource, /if\s*\(\s*isFellow\s*\)\s*return\s+null/);
+});
+
+test("creating or messaging a fellow opens its conversation through the unified fellow route", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");
+
+  assert.match(appSource, /async function openFellowConversation\(fellowKey\)/);
+  assert.match(appSource, /window\.miaSocial\.ensureFellowRoom\(fellow\)/);
+  assert.match(appSource, /window\.miaSocial\.setActiveRoomId\(room\.id\)/);
+  assert.match(appSource, /if \(savedKey\) await openFellowConversation\(savedKey\);/);
+  assert.match(fellowManagerSource, /window\.miaOpenFellowConversation\(fellowKey\)/);
+});
+
+test("contacts merge local fellows with owned cloud fellows", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");
+  const socialSource = fs.readFileSync(path.join(root, "src/renderer/social/social.js"), "utf8");
+
+  assert.match(socialSource, /cloudOnly:\s*true/);
+  assert.match(socialSource, /cloudOnly:\s*false/);
+  assert.match(fellowManagerSource, /function allOwnedFellows\(\)/);
+  assert.match(fellowManagerSource, /window\.miaSocial\?\._internalCtx\?\.adapterCtx\?\.\(\)\?\.fellows/);
+  assert.match(fellowManagerSource, /const fellows = allOwnedFellows\(\);/);
+  assert.match(fellowManagerSource, /云端伙伴/);
+  assert.match(appSource, /const cloudFellowKeys = new Set/);
+  assert.match(appSource, /const contactKeys = new Set/);
 });
 
 test("renderer app state factory owns default mutable state", () => {

@@ -31,8 +31,49 @@
 
   function fellowByKey(key) {
     if (!state) return null;
-    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    const fellows = allOwnedFellows();
     return fellows.find((item) => item.key === key) || null;
+  }
+
+  function normalizeOwnedFellow(input, { cloudOnly = false } = {}) {
+    if (!input || typeof input !== "object") return null;
+    const key = String(input.key || input.id || "").trim();
+    if (!key) return null;
+    const explicitCloudOnly = input.cloudOnly ?? input.cloud_only;
+    const normalizedCloudOnly = explicitCloudOnly === undefined ? Boolean(cloudOnly) : Boolean(explicitCloudOnly);
+    return {
+      ...input,
+      key,
+      id: input.id || key,
+      name: input.name || input.displayName || input.username || key,
+      bio: input.bio || input.description || (normalizedCloudOnly ? "云端伙伴" : ""),
+      color: input.color || input.avatarColor || "#5e5ce6",
+      avatarImage: input.avatarImage || input.avatar_image || "",
+      avatarCrop: input.avatarCrop || input.avatar_crop || null,
+      agentEngine: input.agentEngine || input.agent_engine || input.engine || (normalizedCloudOnly ? "hermes" : undefined),
+      cloudOnly: normalizedCloudOnly
+    };
+  }
+
+  function allOwnedFellows() {
+    if (!state) return [];
+    const byKey = new Map();
+    const socialFellows = window.miaSocial?._internalCtx?.adapterCtx?.()?.fellows
+      || window.miaSocial?.moduleState?.fellows
+      || [];
+    for (const fellow of socialFellows) {
+      const normalized = normalizeOwnedFellow(fellow, { cloudOnly: true });
+      if (normalized) byKey.set(normalized.key, normalized);
+    }
+    const localFellows = [
+      ...(Array.isArray(state.runtime?.fellows) ? state.runtime.fellows : []),
+      ...(Array.isArray(state.runtime?.personas) ? state.runtime.personas : [])
+    ];
+    for (const fellow of localFellows) {
+      const normalized = normalizeOwnedFellow(fellow, { cloudOnly: false });
+      if (normalized) byKey.set(normalized.key, { ...byKey.get(normalized.key), ...normalized, cloudOnly: false });
+    }
+    return [...byKey.values()];
   }
 
   function sortFellowsForSidebar(fellows = []) {
@@ -84,7 +125,7 @@
     const last = [...messages].reverse().find((message) => String(message.content || "").trim() && !message.transient);
     const preview = last
       ? String(last.content || "")
-      : (fellow.bio || "本地伙伴 · 暂无对话");
+      : (fellow.bio || (fellow.cloudOnly ? "云端伙伴 · 暂无对话" : "本地伙伴 · 暂无对话"));
     return {
       count: meaningful.length || sessions.length,
       preview,
@@ -98,8 +139,12 @@
     return "";
   }
 
-  function openFellowChat(fellowKey) {
+  async function openFellowChat(fellowKey) {
     if (!fellowKey || !state || !els) return;
+    if (typeof window.miaOpenFellowConversation === "function") {
+      await window.miaOpenFellowConversation(fellowKey);
+      return;
+    }
     state.activeKey = fellowKey;
     state.activeContactKey = fellowKey;
     const latest = sessionsForPersona(fellowKey)[0];
@@ -243,7 +288,7 @@
     if (!state.skillsLoading && !(state.skillLibrary.extensions || []).length && !(state.skillLibrary.skills || []).length) {
       loadSkills().catch(() => {});
     }
-    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    const fellows = allOwnedFellows();
     if (!fellows.length) {
       els.contactList.innerHTML = `<div class="contact-empty">还没有联系人</div>`;
       els.contactDetail.innerHTML = `<div class="contact-empty detail-empty">添加一个伙伴后会显示在这里</div>`;
@@ -266,7 +311,7 @@
         <span class="avatar fellow-photo" style="${window.miaAvatar.avatarThumbBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></span>
         <span class="contact-row-main">
           <strong>${window.miaMarkdown.escapeHtml(fellow.name)}</strong>
-          <small>${window.miaMarkdown.escapeHtml(fellow.bio || "本地伙伴")}</small>
+          <small>${window.miaMarkdown.escapeHtml(fellow.bio || (fellow.cloudOnly ? "云端伙伴" : "本地伙伴"))}</small>
         </span>
         <span class="contact-row-side">${window.miaMarkdown.escapeHtml(summary.time || "")}</span>
       `;
@@ -289,30 +334,31 @@
     const summary = contactSessionSummary(fellow);
     const engine = fellow.agentEngine || fellow.agent_engine || fellow.engine || "hermes";
     setText(els.contactPageTitle, fellow.name || "联系人");
-    setText(els.contactPageMeta, `${summary.count} 个会话`);
+    setText(els.contactPageMeta, fellow.cloudOnly ? "云端伙伴" : `${summary.count} 个会话`);
+    const canEditLocalFellow = !fellow.cloudOnly;
     els.contactDetail.innerHTML = `
       <article class="contact-profile">
         <header class="contact-profile-head">
-          <button class="contact-profile-avatar" type="button" data-contact-action="edit" title="编辑联系人头像" style="${window.miaAvatar.avatarBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
+          <button class="contact-profile-avatar" type="button" ${canEditLocalFellow ? 'data-contact-action="edit" title="编辑联系人头像"' : 'title="联系人头像"'} style="${window.miaAvatar.avatarBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
           <div class="contact-profile-title">
             <h2>${window.miaMarkdown.escapeHtml(fellow.name || "联系人")}</h2>
             <div class="contact-engine-badge" title="Agent 引擎">
               <span>Agent</span>
               <strong>${window.miaMarkdown.escapeHtml(engineLabel(engine))}</strong>
             </div>
-            <p>${window.miaMarkdown.escapeHtml(fellow.bio || "本地伙伴")}</p>
+            <p>${window.miaMarkdown.escapeHtml(fellow.bio || (fellow.cloudOnly ? "云端伙伴" : "本地伙伴"))}</p>
           </div>
           <div class="contact-actions">
             <button class="primary contact-message-action" type="button" data-contact-action="message" title="发消息" aria-label="发消息">${window.miaMarkdown.iconParkIcon("message", "contact-action-icon")}</button>
-            <button class="secondary" type="button" data-contact-action="edit">编辑</button>
-            ${fellow.key === "mia" ? "" : `<button class="secondary danger" type="button" data-contact-action="delete">删除伙伴</button>`}
+            ${canEditLocalFellow ? `<button class="secondary" type="button" data-contact-action="edit">编辑</button>` : ""}
+            ${canEditLocalFellow && fellow.key !== "mia" ? `<button class="secondary danger" type="button" data-contact-action="delete">删除伙伴</button>` : ""}
           </div>
         </header>
         <section class="contact-note">
           <strong>最近内容</strong>
           <p>${window.miaMarkdown.escapeHtml(summary.preview)}</p>
         </section>
-        ${renderFellowCapabilitiesPanel(fellow)}
+        ${canEditLocalFellow ? renderFellowCapabilitiesPanel(fellow) : ""}
       </article>
     `;
     els.contactDetail.querySelector('[data-contact-action="message"]')?.addEventListener("click", () => openFellowChat(fellow.key));
@@ -322,7 +368,7 @@
     els.contactDetail.querySelector('[data-contact-action="delete"]')?.addEventListener("click", async () => {
       await deleteFellow(fellow.key);
     });
-    wireFellowCapabilities(fellow);
+    if (canEditLocalFellow) wireFellowCapabilities(fellow);
   }
 
   async function saveFellowCapabilities(fellow, capabilities) {
@@ -460,6 +506,7 @@
     sortFellowsForSidebar,
     sortableConversationTime,
     sortMessageCardsForSidebar,
+    allOwnedFellows,
     contactSessionSummary,
     contactPetLabel,
     openFellowChat,

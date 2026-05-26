@@ -35,6 +35,18 @@ try {
 } catch {
   ({ createFellowsStore } = require("./src/cloud/fellows-store.js"));
 }
+let createSkillsStore = null;
+try {
+  ({ createSkillsStore } = require("../src/cloud/skills-store.js"));
+} catch {
+  ({ createSkillsStore } = require("./src/cloud/skills-store.js"));
+}
+let SKILLS_SEED = [];
+try {
+  ({ SKILLS_SEED } = require("../src/cloud/skills-seed.js"));
+} catch {
+  ({ SKILLS_SEED } = require("./src/cloud/skills-seed.js"));
+}
 let createUserSettingsStore = null;
 try {
   ({ createUserSettingsStore } = require("../src/cloud/user-settings-store.js"));
@@ -446,6 +458,23 @@ function redactModelInfo(row = {}) {
   };
 }
 
+function publicPlatformModel(row = {}) {
+  const id = String(row.model_name || row.model_info?.id || "").trim();
+  if (!id) return null;
+  const info = row.model_info || {};
+  const params = row.litellm_params || {};
+  return {
+    id,
+    label: String(info.label || info.display_name || info.name || id).trim(),
+    provider: String(info.provider || "").trim(),
+    upstreamModel: String(info.base_model || params.model || "").trim()
+  };
+}
+
+function fallbackPlatformModels() {
+  return [{ id: "mia-default", label: "Mia Default", provider: "mia-litellm", upstreamModel: "" }];
+}
+
 async function litellmRequest(context, pathname, { method = "GET", key = "", body = null } = {}) {
   const token = key || litellmAdminKey(context);
   if (!token) {
@@ -482,8 +511,12 @@ function normalizeAdminModelInput(input = {}) {
   const apiKey = String(input.apiKey || "").trim();
   const apiBase = String(input.apiBase || "").trim();
   const apiVersion = String(input.apiVersion || "").trim();
+  const modelName = String(input.modelName || "mia-default").trim() || "mia-default";
   if (!upstreamModel) throw new Error("请填写真实模型。");
   if (!apiKey) throw new Error("请填写供应商 API Key。");
+  if (!/^[A-Za-z0-9_.-]{2,80}$/.test(modelName)) {
+    throw new Error("Mia 模型名只能包含字母、数字、点、下划线和横线。");
+  }
   if (!/^[a-z0-9_.-]+\/[A-Za-z0-9_.:/@-]+$/i.test(upstreamModel)) {
     throw new Error("真实模型格式不对，例如 deepseek/deepseek-chat。");
   }
@@ -497,7 +530,7 @@ function normalizeAdminModelInput(input = {}) {
   }
   return {
     provider: String(input.provider || "").trim(),
-    modelName: "mia-default",
+    modelName,
     upstreamModel,
     apiKey,
     apiBase,
@@ -505,16 +538,32 @@ function normalizeAdminModelInput(input = {}) {
   };
 }
 
-async function listMiaLiteLLMModels(context) {
+async function listLiteLLMModels(context) {
   const info = await litellmRequest(context, "/model/info");
   const rows = Array.isArray(info?.data) ? info.data : [];
-  return rows.filter((row) => row?.model_name === "mia-default");
+  return rows;
+}
+
+async function listMiaLiteLLMModels(context) {
+  return (await listLiteLLMModels(context)).filter((row) => row?.model_name === "mia-default");
+}
+
+async function listPlatformModelCatalog(context) {
+  try {
+    const info = await litellmRequest(context, "/model/info", { key: litellmAdminKey(context) || litellmServiceKey(context) });
+    const rows = Array.isArray(info?.data) ? info.data : [];
+    const models = rows.map(publicPlatformModel).filter(Boolean);
+    return models.length ? models : fallbackPlatformModels();
+  } catch (error) {
+    if (error.status === 503) return fallbackPlatformModels();
+    throw error;
+  }
 }
 
 async function handleAdminModelGateway(req, res, context, url) {
   if (!requireAdmin(req, res, context)) return;
   if (req.method === "GET" && url.pathname === "/api/admin/model-gateway") {
-    const models = await listMiaLiteLLMModels(context);
+    const models = await listLiteLLMModels(context);
     return writeJson(res, 200, {
       ok: true,
       gateway: {
@@ -528,8 +577,8 @@ async function handleAdminModelGateway(req, res, context, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/model-gateway") {
     const input = normalizeAdminModelInput(await readJson(req));
-    const existing = await listMiaLiteLLMModels(context);
-    for (const row of existing) {
+    const existing = await listLiteLLMModels(context);
+    for (const row of existing.filter((item) => item?.model_name === input.modelName)) {
       const id = String(row?.model_info?.id || row?.model_id || "").trim();
       if (id) {
         await litellmRequest(context, "/model/delete", { method: "POST", body: { id } });
@@ -549,6 +598,7 @@ async function handleAdminModelGateway(req, res, context, url) {
         model_info: {
           id: input.modelName,
           base_model: input.upstreamModel,
+          label: input.modelName,
           provider: input.provider || undefined
         }
       }
@@ -1105,6 +1155,11 @@ async function handleRequest(req, res, context) {
     const auth = cloudStore.authenticateToken(tokenFromRequest(req));
     if (req.method === "GET" && serveAuthorizedFile(req, res, cloudStore, auth, url.pathname)) return;
     if (!auth) return writeError(res, 401, "请先登录。");
+
+    if (req.method === "GET" && url.pathname === "/api/me/model-catalog") {
+      const models = await listPlatformModelCatalog(context);
+      return writeJson(res, 200, { ok: true, models });
+    }
 
     // POST /api/social/friend-requests
     if (req.method === "POST" && url.pathname === "/api/social/friend-requests") {
@@ -1926,6 +1981,28 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 201, { file: clientFile(file) });
     }
 
+    // ---- Skill marketplace registry (sub-project B) ----
+    if (req.method === "GET" && url.pathname === "/api/skills") {
+      const category = url.searchParams.get("category") || "";
+      const q = url.searchParams.get("q") || "";
+      const limit = Number(url.searchParams.get("limit") || 60);
+      const skills = context.skillsStore.listSkills({ category, q, limit });
+      const categories = context.skillsStore.listCategories();
+      return writeJson(res, 200, { skills, categories });
+    }
+    const skillInstallMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/install$/);
+    if (req.method === "POST" && skillInstallMatch) {
+      const skill = context.skillsStore.recordInstall(skillInstallMatch[1], auth.user.id);
+      if (!skill) return writeError(res, 404, "Skill not found.");
+      return writeJson(res, 200, { skill });
+    }
+    const skillDetailMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)$/);
+    if (req.method === "GET" && skillDetailMatch) {
+      const skill = context.skillsStore.getSkill(skillDetailMatch[1]);
+      if (!skill) return writeError(res, 404, "Skill not found.");
+      return writeJson(res, 200, { skill });
+    }
+
     writeError(res, 404, "Not found.");
   } catch (error) {
     const message = error.message || "Internal error.";
@@ -1999,6 +2076,8 @@ function createMiaCloudServer(options = {}) {
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
   context.eventLog = createEventLogStore(context.cloudStore.getDb());
   context.fellowsStore = createFellowsStore(context.cloudStore.getDb());
+  context.skillsStore = createSkillsStore(context.cloudStore.getDb());
+  context.skillsStore.seedSkills(SKILLS_SEED);
   context.runtimeBindingsStore = createRuntimeBindingsStore(context.cloudStore.getDb());
   context.cloudAgentRunsStore = createCloudAgentRunsStore(context.cloudStore.getDb());
   // Inject fellowsStore so listRoomMembers can enrich fellow members

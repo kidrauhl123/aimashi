@@ -31,7 +31,7 @@ function resolveContact(query, ctx = {}) {
     return {
       kind: ContactKind.Self,
       id: u.id || "",
-      displayName: u.username || u.account || "",
+      displayName: u.displayName || u.username || u.account || u.avatarText || "",
       avatar: avatarFromUser(u)
     };
   }

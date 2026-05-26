@@ -423,98 +423,70 @@
           </section>
 
           <section class="settings-panel hidden" data-settings-panel="model">
+            <div class="settings-section-label">本机引擎</div>
             <section class="engine-detection wide" id="engineDetection">
-              <div class="model-section-title">
-                <strong>本机引擎</strong>
-                <span>初次启动会自动探测；点击 Hermes 行展开模型配置</span>
-              </div>
               <button class="engine-row" type="button" data-engine-row="hermes" aria-expanded="false">
-                <span class="engine-row-dot hermes"></span>
+                <span class="engine-row-logo hermes" aria-hidden="true"></span>
                 <span class="engine-row-body">
                   <strong>Hermes</strong>
                   <small id="engineRowHermes">检测中…</small>
                 </span>
                 <span class="engine-row-chev" aria-hidden="true">›</span>
               </button>
+              <form id="modelForm" class="form-grid engine-detail-panel hidden">
+                <section class="connected-providers wide">
+                  <div class="model-section-title">
+                    <strong>已连接的模型提供商</strong>
+                  </div>
+                  <div id="connectedProviderList" class="connected-provider-list"></div>
+                </section>
+                <section class="add-provider-panel wide">
+                  <label class="model-select-field">
+                    <select id="modelSelect">
+                      <option value="">选择要连接的提供商</option>
+                    </select>
+                  </label>
+                  <p id="modelAuthState" class="model-auth-state hidden">未配置</p>
+                </section>
+                <label id="modelApiKeyField" class="api-key-field wide">
+                  <span class="api-key-input-wrap">
+                    <input id="modelApiKey" type="password" autocomplete="off" placeholder="API Key">
+                    <button id="modelConnectButton" class="primary inline-connect-button hidden" type="submit">连接</button>
+                  </span>
+                </label>
+                <input id="authMethod" type="hidden" value="api-key">
+                <input id="modelPreset" type="hidden" value="">
+                <input id="modelProvider" type="hidden">
+                <input id="modelName" type="hidden">
+                <input id="modelKeyEnv" type="hidden">
+                <input id="modelBaseUrl" type="hidden">
+                <input id="modelApiMode" type="hidden">
+                <section id="codexInlineAuth" class="inline-auth hidden">
+                  <div class="inline-actions">
+                    <button id="codexLogin" class="primary" type="button">用 OpenAI 登录</button>
+                    <button id="codexCancel" class="secondary" type="button">取消</button>
+                  </div>
+                  <div class="auth-code hidden" id="codexCode"></div>
+                  <pre id="codexLogs" class="hidden"></pre>
+                </section>
+              </form>
               <div class="engine-row static" data-engine-row="claude-code">
-                <span class="engine-row-dot claude"></span>
+                <span class="engine-row-logo claude" aria-hidden="true"></span>
                 <span class="engine-row-body">
                   <strong>Claude Code</strong>
                   <small id="engineRowClaude">检测中…</small>
                 </span>
               </div>
               <div class="engine-row static" data-engine-row="codex">
-                <span class="engine-row-dot codex"></span>
+                <span class="engine-row-logo codex" aria-hidden="true">
+                  <img src="./assets/engine-icons/codex-color.svg" alt="">
+                </span>
                 <span class="engine-row-body">
                   <strong>Codex</strong>
                   <small id="engineRowCodex">检测中…</small>
                 </span>
               </div>
             </section>
-            <form id="modelForm" class="form-grid hidden">
-              <section class="connected-providers wide">
-                <div class="model-section-title">
-                  <strong>已连接的模型提供商</strong>
-                </div>
-                <div id="connectedProviderList" class="connected-provider-list"></div>
-              </section>
-              <section class="add-provider-panel wide">
-                <div class="model-section-title">
-                  <strong>添加模型提供商</strong>
-                </div>
-                <label class="model-select-field">
-                  提供商
-                  <select id="modelSelect">
-                    <option value="">选择要连接的提供商</option>
-                  </select>
-                </label>
-                <p id="modelAuthState" class="model-auth-state hidden">未配置</p>
-              </section>
-              <label id="modelApiKeyField" class="api-key-field wide">
-                <span id="modelApiKeyLabel">API Key</span>
-                <input id="modelApiKey" type="password" autocomplete="off" placeholder="保存在 Mia 私有 runtime">
-              </label>
-              <input id="authMethod" type="hidden" value="api-key">
-              <input id="modelPreset" type="hidden" value="">
-              <input id="modelProvider" type="hidden">
-              <input id="modelName" type="hidden">
-              <input id="modelKeyEnv" type="hidden">
-              <input id="modelBaseUrl" type="hidden">
-              <input id="modelApiMode" type="hidden">
-              <section id="codexInlineAuth" class="inline-auth hidden">
-                <div class="auth-line">
-                  <span id="codexCheck" class="check-dot">✓</span>
-                  <strong id="codexStatus">Checking...</strong>
-                </div>
-                <div class="auth-code" id="codexCode"></div>
-                <div class="inline-actions">
-                  <button id="codexLogin" class="primary" type="button">用 OpenAI 登录</button>
-                  <button id="codexCancel" class="secondary" type="button">取消</button>
-                </div>
-                <pre id="codexLogs"></pre>
-              </section>
-              <button id="modelConnectButton" class="primary hidden" type="submit">连接提供商</button>
-              <section class="settings-runtime-block wide">
-                <div class="model-section-title">
-                  <strong>Hermes 本地运行时</strong>
-                  <span>Mia 自己管理的 Hermes 后端</span>
-                </div>
-                <dl class="runtime-list">
-                  <div><dt>Status</dt><dd id="engineStatus">Checking...</dd></div>
-                  <div><dt>Hermes Home</dt><dd id="hermesHome"></dd></div>
-                  <div><dt>Manifest</dt><dd id="manifestPath"></dd></div>
-                </dl>
-                <div class="inline-actions">
-                  <button id="initialize" class="secondary" type="button">Initialize</button>
-                  <button id="installEngine" class="secondary" type="button">Install Engine</button>
-                  <button id="startEngine" class="secondary" type="button">Start</button>
-                  <button id="stopEngine" class="secondary" type="button">Stop</button>
-                  <button id="uninstallEngine" class="secondary" type="button">卸载独立副本</button>
-                </div>
-                <article id="engineWarning" class="notice hidden">Engine 尚未安装到 Mia 私有 runtime。</article>
-                <pre id="engineLogs"></pre>
-              </section>
-            </form>
           </section>
 
           <section class="settings-panel" data-settings-panel="account">
