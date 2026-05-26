@@ -68,6 +68,38 @@
       .sort((a, b) => roomSortTime(b, options.messageCache) - roomSortTime(a, options.messageCache));
   }
 
+  function preferredFellowSidebarRoom(current, candidate, options = {}) {
+    if (!current) return candidate;
+    const activeRoomId = String(options.activeRoomId || "");
+    if (candidate?.id && candidate.id === activeRoomId) return candidate;
+    if (current?.id && current.id === activeRoomId) return current;
+    return roomSortTime(candidate, options.messageCache) > roomSortTime(current, options.messageCache)
+      ? candidate
+      : current;
+  }
+
+  function sidebarRooms(rooms = [], options = {}) {
+    const allRooms = Array.isArray(rooms) ? rooms : [];
+    const regularRooms = [];
+    const fellowRoomsByKey = new Map();
+    for (const room of allRooms) {
+      if (roomType(room, room?.id || "") !== "fellow") {
+        regularRooms.push(room);
+        continue;
+      }
+      const key = fellowKey(room) || String(room?.id || "");
+      if (!key) continue;
+      fellowRoomsByKey.set(key, preferredFellowSidebarRoom(fellowRoomsByKey.get(key), room, options));
+    }
+    return [...regularRooms, ...fellowRoomsByKey.values()];
+  }
+
+  function fellowDisplayTitle(room, fellows = [], fallback = "对话") {
+    const key = fellowKey(room);
+    const fellow = findFellow(key, fellows);
+    return fellow?.name || room?.decorations?.fellowName || key || fallback;
+  }
+
   function canCreateSession(room) {
     return roomType(room, room?.id || "") === "fellow" && Boolean(fellowKey(room));
   }
@@ -88,6 +120,8 @@
     roomSortTime,
     sessionTitle,
     sessionRoomsForRoom,
+    sidebarRooms,
+    fellowDisplayTitle,
     canCreateSession,
     createFellowSessionPayload
   };

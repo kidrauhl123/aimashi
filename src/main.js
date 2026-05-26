@@ -825,7 +825,8 @@ async function runRemoteChatRequest(body, eventSink = null) {
     fellowKey: fellow.key,
     sessionId: session.id,
     messages: runMessages,
-    webContents: tracedEventSink
+    webContents: tracedEventSink,
+    background: Boolean(body?.background)
   });
   const responseMessage = response?.choices?.[0]?.message || {};
   const assistantText = responseMessageContent(response);
@@ -1386,12 +1387,15 @@ function fellowWithRuntimeConfig(fellow, runtimeConfig = {}) {
   };
 }
 
-async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false, allowSlashCommands = true, runtimeConfig = null }) {
+async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false, background = false, allowSlashCommands = true, runtimeConfig = null }) {
   utility = Boolean(utility);
   let abortController;
-  if (group || utility) {
+  if (group || utility || background) {
     // Group dispatches run in parallel; each gets its own controller.
     // Utility calls also skip the 1v1 "single active chat" semantics.
+    // Background runs (scheduled tasks) must not share the interactive
+    // single-flight controller — otherwise any foreground/web chat (or an
+    // overlapping task) aborts the task mid-generation ("生成已停止").
     abortController = new AbortController();
   } else {
     if (activeChatAbortController) {
@@ -1869,9 +1873,12 @@ ipcMain.handle(IpcChannel.SkillsMarketInstall, async (_event, skillId) => {
   const sync = cloudDesktopSync();
   const { skill, download } = await sync.installMarketSkill(skillId);
   if (!skill || !download || !download.url) throw new Error("技能不存在或安装失败。");
+  if (!/^[a-f0-9]{64}$/.test(String(download.checksum || ""))) {
+    throw new Error("技能包缺少有效校验值，已中止安装。");
+  }
   const zipBuffer = await sync.downloadSkillPackage(download.url);
   const checksum = crypto.createHash("sha256").update(zipBuffer).digest("hex");
-  if (download.checksum && checksum !== download.checksum) {
+  if (checksum !== download.checksum) {
     throw new Error("技能包校验失败（checksum 不匹配），已中止安装。");
   }
   const library = await skillsLoader.installMarketplaceSkill({ id: skill.id, zipBuffer });

@@ -135,11 +135,22 @@ function createFellowManifest(deps = {}) {
       if (!Number.isFinite(next)) return fallback;
       return Math.max(min, Math.min(max, next));
     };
-    return {
+    const normalized = {
       x: num(value.x, 50, 0, 100),
       y: num(value.y, 50, 0, 100),
       zoom: num(value.zoom, 1, 1, 2.4)
     };
+    if (
+      Object.prototype.hasOwnProperty.call(value, "start")
+      || Object.prototype.hasOwnProperty.call(value, "duration")
+      || Object.prototype.hasOwnProperty.call(value, "trimStart")
+      || Object.prototype.hasOwnProperty.call(value, "trimDuration")
+    ) {
+      normalized.start = Math.round(Math.max(0, Number(value.start ?? value.trimStart ?? 0) || 0) * 100) / 100;
+      const duration = Number(value.duration ?? value.trimDuration ?? 3);
+      normalized.duration = Math.round(Math.max(1, Math.min(5, Number.isFinite(duration) ? duration : 3)) * 100) / 100;
+    }
+    return normalized;
   }
 
   function normalizeFellowManifest(input) {

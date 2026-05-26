@@ -75,6 +75,71 @@ test("session history contract is shared by desktop and web clients", () => {
   assert.equal(browserContract.canCreateSession({ type: "fellow", decorations: { fellowKey: "mia" } }), true);
 });
 
+test("fellow runtime control contract saves model, effort, and permission patches", async () => {
+  const contract = require("../src/shared/fellow-runtime-control");
+  const calls = [];
+  const cache = new Map();
+  const api = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) {
+      return {
+        binding: {
+          fellowId: "mia",
+          runtimeKind: "cloud-hermes",
+          enabled: true,
+          config: { model: "old-model", effortLevel: "low" }
+        }
+      };
+    }
+    return {
+      binding: {
+        fellowId: "mia",
+        runtimeKind: options.body.runtimeKind,
+        enabled: options.body.enabled,
+        config: options.body.config
+      }
+    };
+  };
+
+  await contract.saveFellowRuntimeControl({
+    api,
+    cache,
+    fellowKey: "mia",
+    runtimeKind: "cloud-hermes",
+    field: "model",
+    value: "mia-default",
+    modelEntries: [{ value: "mia-default", model: "gpt-5.3", label: "GPT" }]
+  });
+  await contract.saveFellowRuntimeControl({
+    api,
+    cache,
+    fellowKey: "mia",
+    runtimeKind: "cloud-hermes",
+    field: "effort",
+    value: "high"
+  });
+  await contract.saveFellowRuntimeControl({
+    api,
+    cache,
+    fellowKey: "mia",
+    runtimeKind: "cloud-hermes",
+    field: "permission",
+    value: "auto"
+  });
+
+  const putCalls = calls.filter((call) => call.options.method === "PUT");
+  assert.equal(calls[0].url, "/api/me/fellows/mia/runtime?kind=cloud-hermes");
+  assert.equal(putCalls.length, 3);
+  assert.deepEqual(putCalls[0].options.body.config, { model: "gpt-5.3", effortLevel: "low" });
+  assert.deepEqual(putCalls[1].options.body.config, { model: "gpt-5.3", effortLevel: "high" });
+  assert.deepEqual(putCalls[2].options.body.config, { model: "gpt-5.3", effortLevel: "high", permissionMode: "auto" });
+  assert.deepEqual(cache.get("mia:cloud-hermes")?.config, {
+    model: "gpt-5.3",
+    effortLevel: "high",
+    permissionMode: "auto"
+  });
+});
+
 test("main chat engine registry reuses the shared engine contract", () => {
   const shared = require("../src/shared/engine-contracts");
   const registry = require("../src/main/chat-engine-registry");

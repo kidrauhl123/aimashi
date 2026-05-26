@@ -49,6 +49,7 @@ test("desktop cloud fellow rooms keep private AI composer controls visible", () 
 
 test("desktop cloud fellow rooms expose the restored chat history menu", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const socialSource = fs.readFileSync(path.join(root, "src/renderer/social/social.js"), "utf8");
   const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
   const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
   const socialApiSource = fs.readFileSync(path.join(root, "src/main/social/social-api.js"), "utf8");
@@ -59,33 +60,71 @@ test("desktop cloud fellow rooms expose the restored chat history menu", () => {
   assert.match(appSource, /function renderCloudRoomSessionMenu\(activeRoom\)/);
   assert.match(appSource, /sessionHistory\.sessionRoomsForRoom/);
   assert.match(appSource, /sessionHistory\.createFellowSessionPayload/);
+  assert.match(appSource, /sessionHistory\.fellowDisplayTitle/);
   assert.match(appSource, /function createNewCloudSessionForActive\(room\)/);
+  assert.match(socialSource, /sessionHistoryShared\(\)\.sidebarRooms\(moduleState\.rooms/);
   assert.match(appSource, /window\.mia\.social\.ensureFellowSessionRoom/);
   assert.match(preloadSource, /ensureFellowSessionRoom: \(sessionId, body\) => ipcRenderer\.invoke\(IpcChannel\.SocialEnsureFellowSessionRoom, sessionId, body\)/);
   assert.match(socialApiSource, /async ensureFellowSessionRoom\(sessionId, body = \{\}\)/);
 });
 
-test("desktop cloud-Hermes fellow controls save through cloud runtime binding", () => {
+test("desktop fellow controls save through fellow runtime control adapter", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const commandsSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-commands.js"), "utf8");
+  const quickControlSource = appSource.slice(
+    appSource.indexOf("els.quickModelSelect?.addEventListener"),
+    appSource.indexOf("els.modelSelect?.addEventListener")
+  );
 
-  assert.match(appSource, /function runtimeKindForCloudFellowRoom\(room\)\s*\{[\s\S]*return sessionHistory\.runtimeKind\(room, "desktop-local"\);/);
-  assert.match(appSource, /async function saveActiveCloudFellowRuntimeConfig/);
-  assert.match(appSource, /window\.mia\.social\.saveFellowRuntime\(context\.fellowKey/);
-  assert.match(appSource, /if\s*\(await saveActiveCloudFellowRuntimeConfig\([\s\S]*\)\)\s*return;/);
-  assert.match(appSource, /const cloudPersona = personas\.find[\s\S]*if \(cloudPersona\) return cloudPersona;\s*return null;/);
+  assert.match(appSource, /function runtimeKindForFellowRoom\(room\)\s*\{[\s\S]*return sessionHistory\.runtimeKind\(room, "desktop-local"\);/);
+  assert.match(appSource, /async function saveActiveFellowRuntimeControl/);
+  assert.match(appSource, /window\.miaFellowCommands\.saveFellowRuntimeControl\(\{/);
+  assert.match(appSource, /window\.miaFellowCommands\.getFellowRuntimeBinding\(\{/);
+  assert.doesNotMatch(appSource, /window\.mia\.social\.saveFellowRuntime\(context\.fellowKey/);
+  assert.doesNotMatch(appSource, /async function saveActiveCloudFellowRuntimeConfig/);
+  assert.match(commandsSource, /async function saveFellowRuntimeControl/);
+  assert.match(commandsSource, /async function saveDesktopLocalFellowRuntimeControl/);
+  assert.match(quickControlSource, /saveActiveFellowRuntimeControl\(\s*"model"/);
+  assert.match(quickControlSource, /saveActiveFellowRuntimeControl\(\s*"effortLevel"/);
+  assert.match(quickControlSource, /saveActiveFellowRuntimeControl\(\s*"permissionMode"/);
+  assert.doesNotMatch(quickControlSource, /window\.mia\.saveFellowEngine\(/);
+  assert.doesNotMatch(quickControlSource, /window\.mia\.saveModel\(/);
+  assert.doesNotMatch(quickControlSource, /window\.mia\.saveEffort\(/);
+  assert.doesNotMatch(quickControlSource, /window\.mia\.savePermissions\(/);
+  assert.match(appSource, /const roomPersona = personas\.find[\s\S]*if \(roomPersona\) return roomPersona;\s*return null;/);
 });
 
-test("desktop cloud-Hermes model picker uses platform model catalog", () => {
+test("desktop Hermes room model picker uses platform model catalog", () => {
   const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
   const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
   const socialApiSource = fs.readFileSync(path.join(root, "src/main/social/social-api.js"), "utf8");
 
   assert.match(appSource, /platformModelCatalog/);
   assert.match(appSource, /loadPlatformModelCatalog/);
-  assert.match(appSource, /cloudHermesModelEntries\(\)/);
+  assert.match(appSource, /platformHermesModelEntries\(\)/);
   assert.doesNotMatch(appSource, /return \[\{ id: "hermes-agent", label: "Hermes Agent" \}\];/);
   assert.match(preloadSource, /listPlatformModels/);
   assert.match(socialApiSource, /\/api\/me\/model-catalog/);
+});
+
+test("desktop avatar picker supports video avatars with one trim row", () => {
+  const html = fs.readFileSync(path.join(root, "src/renderer/index.html"), "utf8");
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const dialogSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-dialog.js"), "utf8");
+  const avatarSource = fs.readFileSync(path.join(root, "src/renderer/helpers/avatar-helpers.js"), "utf8");
+
+  assert.match(html, /shared\/avatar-media\.js/);
+  assert.match(html, /id="profileAvatarFile"[^>]+accept="image\/\*,video\/\*"/);
+  assert.match(html, /id="fellowAvatarFile"[^>]+accept="image\/\*,video\/\*"/);
+  assert.match(html, /id="avatarTrimControls"/);
+  assert.match(html, /id="avatarTrimStart"/);
+  assert.match(html, /id="avatarTrimDuration"/);
+  assert.match(appSource, /avatarTrimControls: document\.getElementById\("avatarTrimControls"\)/);
+  assert.match(appSource, /avatarTrimStart\.addEventListener\("input"/);
+  assert.match(dialogSource, /file\.type\?\.startsWith\("video\/"\)/);
+  assert.match(dialogSource, /updateAvatarTrimControls/);
+  assert.match(avatarSource, /applyAvatarMedia/);
+  assert.match(avatarSource, /createAvatarVideoElement/);
 });
 
 test("private chat async replies are anchored to the submit session", () => {
@@ -145,7 +184,7 @@ test("contacts merge local fellows with owned cloud fellows", () => {
   assert.match(fellowManagerSource, /const fellows = allOwnedFellows\(\);/);
   assert.doesNotMatch(fellowManagerSource, /cloudOnly/);
   assert.doesNotMatch(socialSource, /cloudOnly:\s*(true|false)/);
-  assert.match(appSource, /const cloudFellowKeys = new Set/);
+  assert.match(appSource, /const syncedFellowKeys = new Set/);
   assert.match(appSource, /const contactKeys = new Set/);
 });
 
@@ -175,7 +214,7 @@ test("contact detail deletes fellows through runtime-backed ownership rules", ()
 
   assert.doesNotMatch(appSource, /if \(!fellow \|\| fellow\.key === "mia"\) return;/);
   assert.match(appSource, /if \(fellow\.canDelete === false\) return;/);
-  assert.match(appSource, /const isCloudFellow = fellow\.runtimeKind === "cloud-hermes"/);
+  assert.match(appSource, /这会删除该 Fellow，并清理当前账号可管理的配置和会话。/);
   assert.match(appSource, /window\.miaFellowCommands\.deleteFellow\(\{/);
   assert.doesNotMatch(appSource, /window\.mia\.social\.deleteFellow\(fellow\.key\)/);
   assert.match(commandsSource, /async function deleteCloudHermesFellow/);
@@ -187,6 +226,38 @@ test("contact detail deletes fellows through runtime-backed ownership rules", ()
   assert.match(preloadSource, /deleteFellow: \(fellowId\) => ipcRenderer\.invoke\(IpcChannel\.SocialDeleteFellow, fellowId\)/);
   assert.match(socialApiSource, /async deleteFellow\(fellowId\)/);
   assert.match(socialIpcSource, /SocialDeleteFellow/);
+});
+
+test("fellow management copy avoids cloud/local split in user-facing language", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const contactCardSource = fs.readFileSync(path.join(root, "src/renderer/social/contact-card.js"), "utf8");
+
+  assert.doesNotMatch(appSource, /云端联系人|本地会话记录/);
+  assert.doesNotMatch(contactCardSource, /不在你的本地 fellow 列表里/);
+  assert.match(contactCardSource, /不属于你/);
+});
+
+test("contact capability saves go through fellow command adapters", () => {
+  const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");
+  const commandsSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-commands.js"), "utf8");
+
+  assert.match(fellowManagerSource, /window\.miaFellowCommands\.saveFellowCapabilities\(\{/);
+  assert.doesNotMatch(fellowManagerSource, /window\.mia\.social\.saveFellowIdentity/);
+  assert.doesNotMatch(fellowManagerSource, /window\.mia\.saveFellow\(\{/);
+  assert.match(commandsSource, /async function saveCloudHermesFellowCapabilities/);
+  assert.match(commandsSource, /async function saveDesktopLocalFellowCapabilities/);
+});
+
+test("social bootstrap delegates desktop-local fellow sync through fellow command adapters", () => {
+  const socialSource = fs.readFileSync(path.join(root, "src/renderer/social/social.js"), "utf8");
+  const commandsSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-commands.js"), "utf8");
+
+  assert.match(socialSource, /window\.miaFellowCommands\.ensureDesktopLocalFellowRoom\(\{/);
+  assert.match(socialSource, /window\.miaFellowCommands\.syncDesktopLocalFellowRuntimeBinding\(\{/);
+  assert.doesNotMatch(socialSource, /api\.saveFellowRuntime\(fellowKey/);
+  assert.doesNotMatch(socialSource, /api\.ensureFellowRoom\(fellow\.key,/);
+  assert.match(commandsSource, /function desktopLocalRuntimeConfig/);
+  assert.match(commandsSource, /async function ensureDesktopLocalFellowRoom/);
 });
 
 test("fellow creation dialog separates runtime location from agent engine", () => {

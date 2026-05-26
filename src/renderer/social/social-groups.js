@@ -58,10 +58,17 @@
     const avatar = (spec && spec.avatar) || { image: "", crop: null, color: "" };
     const avatarColor = avatar.color || accentColor || "#5e5ce6";
     const avatarHelpers = window.miaAvatar;
-    const avatarStyle = (avatarHelpers && typeof avatarHelpers.avatarThumbBackgroundStyle === "function")
-      ? avatarHelpers.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatarColor)
-      : `background-color:${avatarColor};`;
     const avatarLetter = avatar.image ? "" : ((authorName || "?")[0] || "?").toUpperCase();
+    const avatarHtml = avatarHelpers?.avatarHtml
+      ? avatarHelpers.avatarHtml({
+        className: "avatar message-avatar",
+        image: avatar.image,
+        crop: avatar.crop,
+        color: avatarColor,
+        text: avatarLetter,
+        attrs: `data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" title="${escapeHtml(spec?.authorName || "")}"`
+      })
+      : `<div class="avatar message-avatar" data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" style="background-color:${escapeHtml(avatarColor)};" title="${escapeHtml(spec?.authorName || "")}">${escapeHtml(avatarLetter)}</div>`;
     const bodyHtml = renderMsgBody((spec ? spec.bodyMd : msg.body_md) || "");
     const attachmentHtml = typeof ctx.renderAttachmentChips === "function"
       ? ctx.renderAttachmentChips(spec?.attachments || msg.attachments || [])
@@ -96,7 +103,7 @@
     const article = document.createElement("article");
     article.className = `message ${roleClass}`;
     article.innerHTML = `
-      <div class="avatar message-avatar" data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}" title="${escapeHtml(spec?.authorName || "")}">${escapeHtml(avatarLetter)}</div>
+      ${avatarHtml}
       <div class="message-stack">
         ${senderLabel ? `<span class="message-sender">${escapeHtml(senderLabel)}</span>` : ""}
         <div class="bubble" data-message-index="${messageIndex}" data-message-source="cloud-room" data-message-id="${escapeHtml(msg.id || "")}">${bodyHtml}</div>
@@ -175,7 +182,9 @@
 
       const avatarEl = document.createElement("span");
       avatarEl.className = "member-avatar";
-      if (entry.image && typeof window.miaAvatar?.avatarThumbBackgroundStyle === "function") {
+      if (entry.image && typeof window.miaAvatar?.applyAvatarMedia === "function") {
+        window.miaAvatar.applyAvatarMedia(avatarEl, entry.image, entry.crop, entry.color);
+      } else if (entry.image && typeof window.miaAvatar?.avatarThumbBackgroundStyle === "function") {
         avatarEl.style.cssText = window.miaAvatar.avatarThumbBackgroundStyle(entry.image, entry.crop, entry.color);
       } else {
         avatarEl.style.background = entry.color;

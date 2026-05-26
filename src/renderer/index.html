@@ -570,7 +570,7 @@
         <section class="avatar-picker">
           <div id="profileAvatarPreview" class="avatar-crop-preview"></div>
           <div id="profileAvatarDrop" class="avatar-drop">
-            <input id="profileAvatarFile" type="file" accept="image/*" class="hidden">
+            <input id="profileAvatarFile" type="file" accept="image/*,video/*" class="hidden">
             <input id="profileAvatarImage" type="hidden">
             <button id="chooseProfileAvatar" class="secondary avatar-file-button" type="button" title="选择图片" aria-label="选择图片">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12"/></svg>
@@ -613,7 +613,7 @@
         <section class="avatar-picker">
           <div id="fellowAvatarPreview" class="avatar-crop-preview"></div>
           <div id="fellowAvatarDrop" class="avatar-drop">
-            <input id="fellowAvatarFile" type="file" accept="image/*" class="hidden">
+            <input id="fellowAvatarFile" type="file" accept="image/*,video/*" class="hidden">
             <input id="fellowAvatar" type="hidden">
             <button id="chooseFellowAvatar" class="secondary avatar-file-button" type="button" title="选择图片" aria-label="选择图片">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12"/></svg>
@@ -691,6 +691,20 @@
         <div id="avatarCropStage" class="avatar-crop-stage">
           <div class="avatar-crop-circle"></div>
         </div>
+        <section id="avatarTrimControls" class="avatar-trim-controls hidden" aria-label="头像视频时间">
+          <div id="avatarTrimTimeline" class="avatar-trim-timeline" role="group" aria-label="头像视频截取时间">
+            <video id="avatarTrimPreview" class="avatar-trim-preview" muted playsinline preload="metadata" aria-hidden="true"></video>
+            <div class="avatar-trim-mask avatar-trim-mask-left" aria-hidden="true"></div>
+            <div class="avatar-trim-mask avatar-trim-mask-right" aria-hidden="true"></div>
+            <div class="avatar-trim-selection" data-avatar-trim-handle="selection" aria-hidden="true">
+              <span class="avatar-trim-handle avatar-trim-handle-start" data-avatar-trim-handle="start"></span>
+              <span class="avatar-trim-handle avatar-trim-handle-end" data-avatar-trim-handle="end"></span>
+            </div>
+            <span id="avatarTrimLabel" class="avatar-trim-label">0.0s - 3.0s</span>
+          </div>
+          <input id="avatarTrimStart" type="hidden" value="0">
+          <input id="avatarTrimDuration" type="hidden" value="3">
+        </section>
         <footer class="avatar-crop-actions">
           <button id="resetAvatarCrop" class="secondary" type="button">重置</button>
           <span>拖拽移动，滚轮缩放</span>
@@ -910,9 +924,12 @@
   <script src="../shared/cloud-events.js"></script>
   <script src="../shared/unread.js"></script>
   <script src="../shared/conversation-kinds.js"></script>
+  <script src="../shared/avatar-media.js"></script>
   <script src="../shared/session-history.js"></script>
   <script src="../shared/group-tiles.js"></script>
   <script src="../shared/send-pipeline.js"></script>
+  <script src="../shared/avatar-media.js"></script>
+  <script src="../shared/fellow-runtime-control.js"></script>
   <script src="./app-state.js"></script>
   <!-- Feature modules -->
   <script src="./loaders.js"></script>

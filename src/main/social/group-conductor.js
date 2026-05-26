@@ -2,42 +2,15 @@
 
 const { MemberKind, SenderKind } = require("../../shared/conversation-kinds.js");
 const {
+  buildDispatchPrompt,
   directFellowIdsForMessage,
   fellowForMember,
+  hostFellowIdFor,
   messageHasMentions
 } = require("../../shared/group-fellow-routing.js");
 const { buildInvocation } = require("./fellow-invocation.js");
 
 const PROCESSED_CAP = 500;
-
-function fillTemplate(template, vars) {
-  return String(template || "").replace(/\{\{(\w+)\}\}/g, (_, key) =>
-    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : ""
-  );
-}
-
-function formatMembers(members) {
-  return members.map((member) => `- ${member.name} (id=${member.id})`).join("\n");
-}
-
-function formatMessages(messages, fellowNamesById) {
-  return (Array.isArray(messages) ? messages : []).map((message) => {
-    if (message.sender_kind === SenderKind.User) {
-      return `${message.sender_username || message.sender_ref || "用户"}: ${message.body_md || ""}`;
-    }
-    const name = fellowNamesById[message.sender_ref] || message.sender_ref || "Fellow";
-    return `${name}: ${message.body_md || ""}`;
-  }).join("\n");
-}
-
-function buildDispatchPrompt(template, ctx) {
-  return fillTemplate(template, {
-    members: formatMembers(ctx.members),
-    summary: ctx.summary || "（暂无摘要）",
-    recent: formatMessages(ctx.recentMessages, ctx.fellowNamesById),
-    userMessage: ctx.userMessage || ""
-  });
-}
 
 function safeParseJSON(text) {
   if (!text || typeof text !== "string") return null;
@@ -60,13 +33,6 @@ function inferRoomType(room) {
 
 function responseModeFor(room) {
   return room?.decorations?.responseMode === "mentions-only" ? "mentions-only" : "conductor";
-}
-
-function hostFellowIdFor(room, ownFellowMembers, fellowMembers = []) {
-  const explicit = room?.decorations?.hostMember || room?.hostMember;
-  if (explicit && explicit.kind === MemberKind.Fellow && explicit.fellowId) return explicit.fellowId;
-  if (fellowMembers.some((member) => !ownFellowMembers.includes(member))) return null;
-  return ownFellowMembers[0]?.member_ref || null;
 }
 
 function normalizeMessages(result) {

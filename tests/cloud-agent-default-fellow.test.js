@@ -71,6 +71,8 @@ test("ensureDefaultCloudFellow creates fellow, binding, room, and members idempo
     const out2 = ensureDefaultCloudFellow(ctx, account.user.id);
 
     assert.equal(out1.fellow.id, "mia");
+    assert.equal(out1.fellow.bio, "Mia Fellow");
+    assert.doesNotMatch(out1.fellow.personaText, /云端 Agent|本地运行/);
     assert.equal(out1.room.id, `fellow:${account.user.id}:mia`);
     assert.equal(out1.room.type, "fellow");
     assert.equal(out2.room.id, out1.room.id);

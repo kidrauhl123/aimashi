@@ -1,7 +1,12 @@
 const { parseAttachmentsFromMessage } = require("./attachment-materializer.js");
 const {
+  DEFAULT_DISPATCH_PROMPT,
+  buildDispatchPrompt,
   directFellowIdsForMessage,
-  messageHasMentions
+  fellowForMember,
+  hostFellowIdFor,
+  messageHasMentions,
+  parseDispatchSpeak
 } = require("../shared/group-fellow-routing.js");
 
 function requireDep(deps, key) {
@@ -30,6 +35,10 @@ function createCloudAgentDispatcher(deps = {}) {
   const broadcastTransientEvent = typeof deps.broadcastTransientEvent === "function"
     ? deps.broadcastTransientEvent
     : () => {};
+  const loadPrompts = typeof deps.loadPrompts === "function"
+    ? deps.loadPrompts
+    : async () => ({ dispatch: DEFAULT_DISPATCH_PROMPT });
+  const log = typeof deps.log === "function" ? deps.log : () => {};
   const pending = new Set();
 
   function conversationHistory(roomId) {
@@ -46,35 +55,108 @@ function createCloudAgentDispatcher(deps = {}) {
     return Boolean(runtimeBindingsStore.getEnabledBinding(userId, fellowId, "cloud-hermes"));
   }
 
-  async function runInvocation(args = {}) {
-    const userId = String(args.userId || "").trim();
-    const roomId = String(args.roomId || "").trim();
-    const requestedFellowId = String(args.fellowId || "").trim();
-    const message = args.message || {};
-    if (!userId || !roomId || !message.id) return null;
-    if (message.sender_kind && message.sender_kind !== "user") return null;
-    if (!requestedFellowId && messageHasMentions(message)) return null;
+  function responseModeFor(room) {
+    return room?.decorations?.responseMode === "mentions-only" ? "mentions-only" : "conductor";
+  }
 
-    const room = socialStore.getRoom(roomId);
-    if (!room) return null;
-    if (room.type === "fellow" && room.decorations?.runtimeKind !== "cloud-hermes") return null;
+  function normalizeMessages(result) {
+    if (Array.isArray(result)) return result;
+    if (Array.isArray(result?.messages)) return result.messages;
+    return [];
+  }
+
+  function recentMessagesForDispatch(roomId, message) {
+    const sinceSeq = Math.max(0, Number(message?.seq || 0) - 6);
+    return normalizeMessages(messagesStore.listMessagesSince(roomId, sinceSeq, 6));
+  }
+
+  function conductorSessionId(userId, roomId, messageId) {
+    return `cloud:${userId}:conductor:${roomId}:${messageId}`;
+  }
+
+  async function chooseCloudConductedMembers({ userId, roomId, room, message, enabledFellowMembers, fellows }) {
+    if (room.type !== "group") return [];
+    if (responseModeFor(room) !== "conductor") return [];
+    if (enabledFellowMembers.length < 2) return [];
+    const hostFellowId = hostFellowIdFor(room, enabledFellowMembers, enabledFellowMembers);
+    const hostMember = enabledFellowMembers.find((member) => member.member_ref === hostFellowId);
+    if (!hostMember) return [];
+    const prompts = await loadPrompts().catch((error) => {
+      log(`[cloud-agent-dispatcher] load conductor prompts failed: ${error?.message || error}`);
+      return null;
+    });
+    const template = prompts?.dispatch || DEFAULT_DISPATCH_PROMPT;
+    const fellowNamesById = {};
+    const memberDescriptors = enabledFellowMembers.map((member) => {
+      const fellow = fellowForMember(member, fellows);
+      const name = fellow?.name || member.fellow_name || member.member_ref;
+      fellowNamesById[member.member_ref] = name;
+      return { id: member.member_ref, name };
+    });
+    const recentMessages = recentMessagesForDispatch(roomId, message);
+    const dispatchPrompt = buildDispatchPrompt(template, {
+      members: memberDescriptors,
+      summary: room.contextCard?.summary || room.decorations?.pinnedGoal || null,
+      recentMessages,
+      fellowNamesById,
+      userMessage: message.body_md || ""
+    });
+    const binding = runtimeBindingsStore.getEnabledBinding(userId, hostFellowId, "cloud-hermes");
+    if (!binding) return [];
+    const runtimeConfig = binding.config || {};
+    const fellow = fellowsStore.getFellow(userId, hostFellowId) || { id: hostFellowId, name: hostFellowId };
+    try {
+      const worker = await workerManager.ensureWorker(userId);
+      const result = await hermesRunsClient.runChat({
+        baseUrl: worker.baseUrl,
+        apiKey: worker.apiKey,
+        userId,
+        fellow,
+        roomId,
+        sessionId: conductorSessionId(userId, roomId, message.id),
+        metadataRole: "group-conductor",
+        model: runtimeConfig.model || "mia-default",
+        effortLevel: runtimeConfig.effortLevel || "medium",
+        permissionMode: "ask",
+        input: dispatchPrompt,
+        attachments: [],
+        conversationHistory: []
+      });
+      const suggested = parseDispatchSpeak(result.content || "");
+      const chosen = suggested.length ? suggested : [hostFellowId];
+      const selected = chosen
+        .map((fellowId) => enabledFellowMembers.find((member) => member.member_ref === fellowId))
+        .filter(Boolean)
+        .slice(0, 3);
+      return selected.length ? selected : [hostMember];
+    } catch (error) {
+      log(`[cloud-agent-dispatcher] conductor dispatch failed: ${error?.message || error}`);
+      return [];
+    }
+  }
+
+  async function selectedFellowMembersForMessage({ userId, roomId, room, message, requestedFellowId }) {
     const fellowMembers = socialStore.listRoomMembers(roomId)
       .filter((member) => member.member_kind === "fellow" && member.owner_id === userId);
     const enabledFellowMembers = fellowMembers.filter((member) =>
       runtimeBindingsStore.getEnabledBinding(userId, member.member_ref, "cloud-hermes")
     );
-    let fellowMember = null;
     if (requestedFellowId) {
-      fellowMember = fellowMembers.find((member) => member.member_ref === requestedFellowId) || null;
-    } else if (room.type === "fellow") {
-      fellowMember = enabledFellowMembers[0] || null;
-    } else {
-      const fellows = fellowsStore.listFellows(userId);
-      const directFellowIds = directFellowIdsForMessage(message, enabledFellowMembers, enabledFellowMembers, fellows);
-      fellowMember = enabledFellowMembers.find((member) => member.member_ref === directFellowIds[0]) || null;
+      const fellowMember = fellowMembers.find((member) => member.member_ref === requestedFellowId);
+      return fellowMember ? [fellowMember] : [];
     }
-    if (!fellowMember) return null;
+    if (room.type === "fellow") return enabledFellowMembers[0] ? [enabledFellowMembers[0]] : [];
+    const fellows = fellowsStore.listFellows(userId);
+    const directFellowIds = directFellowIdsForMessage(message, enabledFellowMembers, enabledFellowMembers, fellows);
+    const directMembers = directFellowIds
+      .map((fellowId) => enabledFellowMembers.find((member) => member.member_ref === fellowId))
+      .filter(Boolean);
+    if (directMembers.length) return directMembers;
+    return chooseCloudConductedMembers({ userId, roomId, room, message, enabledFellowMembers, fellows });
+  }
 
+  async function runSingleInvocation({ userId, roomId, message, fellowMember }) {
+    if (!fellowMember) return null;
     const fellowId = fellowMember.member_ref;
     const binding = runtimeBindingsStore.getEnabledBinding(userId, fellowId, "cloud-hermes");
     if (!binding) return null;
@@ -160,6 +242,28 @@ function createCloudAgentDispatcher(deps = {}) {
       cloudAgentRunsStore.markError(run.id, error);
       return null;
     }
+  }
+
+  async function runInvocation(args = {}) {
+    const userId = String(args.userId || "").trim();
+    const roomId = String(args.roomId || "").trim();
+    const requestedFellowId = String(args.fellowId || "").trim();
+    const message = args.message || {};
+    if (!userId || !roomId || !message.id) return null;
+    if (message.sender_kind && message.sender_kind !== "user") return null;
+    if (!requestedFellowId && messageHasMentions(message)) return null;
+
+    const room = socialStore.getRoom(roomId);
+    if (!room) return null;
+    if (room.type === "fellow" && room.decorations?.runtimeKind !== "cloud-hermes") return null;
+    const fellowMembers = await selectedFellowMembersForMessage({ userId, roomId, room, message, requestedFellowId });
+    if (!fellowMembers.length) return null;
+    const replies = [];
+    for (const fellowMember of fellowMembers.slice(0, 3)) {
+      const reply = await runSingleInvocation({ userId, roomId, message, fellowMember });
+      if (reply) replies.push(reply);
+    }
+    return replies[0] || null;
   }
 
   async function runUserMessage(args = {}) {

@@ -39,11 +39,14 @@
     const custom = room?.decorations?.avatar;
     if (custom && custom.image) {
       slot.className = "avatar";
-      const style = global.miaAvatar?.avatarThumbBackgroundStyle?.(custom.image, custom.crop, "#5e5ce6")
-        || `background-image:url('${custom.image}');background-size:cover;background-position:center;`;
-      slot.style.cssText = style;
+      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
+        global.miaAvatar.applyAvatarMedia(slot, custom.image, custom.crop, "#5e5ce6");
+      } else {
+        const style = global.miaAvatar?.avatarThumbBackgroundStyle?.(custom.image, custom.crop, "#5e5ce6")
+          || `background-image:url('${custom.image}');background-size:cover;background-position:center;`;
+        slot.style.cssText = style;
+      }
       slot.removeAttribute("data-count");
-      slot.innerHTML = "";
       return;
     }
     slot.className = "avatar group-avatar";
@@ -133,10 +136,14 @@
         label = userNameFor(member, friends, self);
         avatar = { image: "", crop: null, color: "#5e5ce6" };
       }
-      const style = avatar.image
-        ? global.miaAvatar.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatar.color)
-        : `background-color:${avatar.color};`;
-      avatarEl.style.cssText = style || `background-color:${avatar.color};`;
+      if (avatar.image && typeof global.miaAvatar?.applyAvatarMedia === "function") {
+        global.miaAvatar.applyAvatarMedia(avatarEl, avatar.image, avatar.crop, avatar.color);
+      } else {
+        const style = avatar.image
+          ? global.miaAvatar.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatar.color)
+          : `background-color:${avatar.color};`;
+        avatarEl.style.cssText = style || `background-color:${avatar.color};`;
+      }
       const nameEl = document.createElement("span");
       nameEl.className = "group-info-member-name";
       nameEl.textContent = label;

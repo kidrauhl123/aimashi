@@ -368,14 +368,18 @@
     }
   }
 
-  // Manual tasks post into the chosen fellow's current conversation, matching
-  // how chat-created tasks bind to the originating session. Fall back to the
-  // fellow's most recent session, and only create a fresh one if it has none.
+  // Bind the task to a session that ACTUALLY EXISTS in the store, so its output
+  // lands in a conversation the user can find. activeSessionIdByPersona can point
+  // at an unsaved/empty session that gets pruned → a phantom binding, so only
+  // trust it when it's present in chatStore; otherwise use the fellow's latest
+  // real session, and only create one when the fellow has none.
   async function resolveSessionForFellow(fellowKey) {
+    const list = state.chatStore?.sessions?.[fellowKey];
     const active = state.activeSessionIdByPersona?.[fellowKey];
-    if (active) return active;
-    const existing = state.chatStore?.sessions?.[fellowKey];
-    if (Array.isArray(existing) && existing.length) return existing[0].id;
+    if (Array.isArray(list) && list.length) {
+      if (active && list.some((s) => s.id === active)) return active;
+      return list[0].id;
+    }
     state.chatStore = await window.mia.createChatSession({ personaKey: fellowKey });
     const created = state.chatStore?.sessions?.[fellowKey];
     return Array.isArray(created) && created.length ? created[0].id : null;
@@ -388,17 +392,12 @@
       renderTaskDetail(task);
       return;
     }
-    const message = lookupMessage(task.sessionId, run.outputMessageId);
-    const user = state.runtime?.user || { displayName: "Boss", avatarText: "B", avatarColor: "#111827" };
-    const persona = (state.runtime?.fellows || state.runtime?.personas || []).find((f) => f.key === task.fellowId) || null;
-    const messageHtml = message
-      ? renderMessageHtml(message, {
-          messageIndex: 0,
-          user,
-          persona,
-          showTaskAffordance: false
-        })
-      : `<div class="run-detail-empty">本次输出消息已不在会话历史里${run.error ? `（失败：${escapeHtml(run.error)}）` : "（可能被清理过）"}</div>`;
+    // Plain text, not a chat bubble — the run-detail is a report, not a conversation.
+    // Prefer the race-free copy stored on the run; fall back to the session message.
+    const outputText = run.outputText || lookupMessage(task.sessionId, run.outputMessageId)?.content || "";
+    const outputHtml = outputText
+      ? `<div class="run-output-text">${window.miaMarkdown.renderMarkdown(outputText)}</div>`
+      : `<div class="run-detail-empty">${run.error ? `运行失败：${escapeHtml(run.error)}` : "本次没有产生输出。"}</div>`;
     const statusLabel = run.status === "ok" ? "完成" : run.status === "failed" ? "失败" : "跳过";
     els.tasksContent.innerHTML = `
       <article class="run-detail">
@@ -417,7 +416,7 @@
         <section class="run-detail-output">
           <h3>AI 输出</h3>
           <div class="run-output-shell">
-            ${messageHtml}
+            ${outputHtml}
           </div>
         </section>
       </article>
@@ -463,10 +462,37 @@
     else { renderView(); if (typeof renderChat === "function") renderChat(); }
   }
 
+  function scheduleText(task) {
+    const t = task.trigger || {};
+    const pad = (n) => String(n).padStart(2, "0");
+    if (t.type === "oneshot") {
+      if (!t.at) return "一次性";
+      const d = new Date(t.at);
+      return Number.isNaN(d.getTime())
+        ? "一次性"
+        : `一次性 · ${d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+    }
+    if (t.type === "cron") {
+      const parts = String(t.cron || "").trim().split(/\s+/);
+      if (parts.length !== 5) return t.cron || "—";
+      const [m, h, dom, , dow] = parts;
+      const time = `${pad(h)}:${pad(m)}`;
+      const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+      if (dom === "*" && dow === "*") return `每天 ${time}`;
+      if (dom === "*" && dow !== "*") return `每${days[Number(dow)] || "周" + dow} ${time}`;
+      if (dom !== "*" && dow === "*") return `每月 ${dom} 号 ${time}`;
+      return t.cron;
+    }
+    return "—";
+  }
+
   function renderTaskDetail(task) {
     const sessionTitle = lookupSessionTitle(task.sessionId) || task.sessionId;
     const pauseLabel = task.status === "paused" ? "启用" : "暂停";
     const pauseAction = task.status === "paused" ? "resume" : "pause";
+    const closed = task.status === "done" || task.status === "failed";
+    const statusText = { active: "进行中", paused: "已暂停", done: "已完成", failed: "已失败" }[task.status] || task.status;
+    const nextText = task.status === "active" && task.nextFireAt ? ` · 下次 ${escapeHtml(formatRunTime(task.nextFireAt))}` : "";
     els.tasksContent.innerHTML = `
       <article class="task-detail">
         <header class="task-detail-head">
@@ -477,35 +503,19 @@
           </div>
           <div class="task-detail-actions">
             <button class="secondary" type="button" data-action="run-now">运行一次</button>
-            <button class="secondary" type="button" data-action="${pauseAction}">${pauseLabel}</button>
-            <button class="danger" type="button" data-action="delete">删除</button>
+            ${closed ? "" : `<button class="secondary" type="button" data-action="${pauseAction}">${pauseLabel}</button>`}
+            <button class="secondary danger" type="button" data-action="delete">删除</button>
           </div>
         </header>
 
-        <section class="task-schedule">
-          <h3>调度</h3>
-          <div class="task-form-row">
-            <label><input type="radio" name="triggerType" value="cron" ${task.trigger.type === "cron" ? "checked" : ""}>重复</label>
-            <label><input type="radio" name="triggerType" value="oneshot" ${task.trigger.type === "oneshot" ? "checked" : ""}>一次性</label>
-            <label class="disabled"><input type="radio" name="triggerType" value="event" disabled>事件触发（V1 不可用）</label>
-          </div>
-          <div class="task-form-row" ${task.trigger.type === "cron" ? "" : "hidden"}>
-            <label>Cron <input id="taskCron" value="${escapeHtml(task.trigger.cron || "")}"></label>
-          </div>
-          <div class="task-form-row" ${task.trigger.type === "oneshot" ? "" : "hidden"}>
-            <label>触发时间 <input id="taskAt" type="datetime-local" value="${task.trigger.at ? toLocalDatetimeInput(task.trigger.at) : ""}"></label>
-          </div>
-          <div class="task-form-row">
-            <label>时区 <input id="taskTimezone" value="${escapeHtml(task.timezone || "UTC")}"></label>
-          </div>
-          <div class="task-form-row task-next">
-            <small>下次: ${task.nextFireAt ? formatRunTime(task.nextFireAt) : "—"}</small>
-          </div>
+        <section class="task-meta">
+          <div class="task-meta-item"><small>执行时间</small><span>${escapeHtml(scheduleText(task))}</span></div>
+          <div class="task-meta-item"><small>状态</small><span>${escapeHtml(statusText)}${nextText}</span></div>
         </section>
 
-        <section class="task-prompt">
-          <h3>Prompt</h3>
-          <textarea id="taskPrompt" rows="3">${escapeHtml(task.prompt)}</textarea>
+        <section class="task-prompt-view">
+          <small>要求说明</small>
+          <p>${escapeHtml(task.prompt)}</p>
         </section>
 
         <section class="task-history">
@@ -536,52 +546,7 @@
     return null;
   }
 
-  function toLocalDatetimeInput(iso) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  function debounceTask(fn, ms) {
-    let t = null;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
-  }
-
   function attachTaskDetailHandlers(task) {
-    const save = debounceTask(async (patch) => {
-      try {
-        const updated = await window.mia.tasks.update(task.id, patch);
-        const idx = state.tasks.findIndex((t) => t.id === task.id);
-        if (idx >= 0) state.tasks[idx] = updated;
-        renderTaskSidebar();
-      } catch (e) {
-        console.warn("update task failed", e);
-      }
-    }, 400);
-
-    document.querySelectorAll("[name=triggerType]").forEach((r) => {
-      r.addEventListener("change", () => {
-        if (r.value === "event") return;
-        save({ trigger: { type: r.value, cron: task.trigger.cron, at: task.trigger.at } });
-      });
-    });
-    document.getElementById("taskCron")?.addEventListener("input", (e) => {
-      save({ trigger: { ...task.trigger, type: "cron", cron: e.target.value } });
-    });
-    document.getElementById("taskAt")?.addEventListener("input", (e) => {
-      const iso = new Date(e.target.value).toISOString();
-      save({ trigger: { ...task.trigger, type: "oneshot", at: iso } });
-    });
-    document.getElementById("taskTimezone")?.addEventListener("input", (e) => {
-      save({ timezone: e.target.value });
-    });
-    document.getElementById("taskPrompt")?.addEventListener("input", (e) => {
-      save({ prompt: e.target.value });
-    });
     els.tasksContent.querySelectorAll("[data-action]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const action = btn.dataset.action;
@@ -638,10 +603,42 @@
     }
   }
 
+  // A task fires inside the daemon, a separate process. Rather than let the
+  // daemon's overwrite-style chat write race the desktop's in-memory store, the
+  // daemon reports the reply via the task event and the desktop merges it into
+  // the executor's conversation through the normal (disk-fresh, dedup) save path
+  // — so the result shows up in that fellow's chat instead of vanishing.
+  async function deliverTaskOutputToChat(payload = {}) {
+    const { fellowId, sessionId, outputText, messageId, createdAt } = payload;
+    if (!fellowId || !outputText) return;
+    const list = state.chatStore?.sessions?.[fellowId];
+    if (!Array.isArray(list) || !list.length) return; // nothing on screen yet; daemon's own write covers reopen
+    // Land in the session the user actually sees: the task's own session, else
+    // the fellow's currently-open session, else its most recent.
+    const activeId = state.activeSessionIdByPersona?.[fellowId];
+    const target = list.find((s) => s.id === sessionId)
+      || list.find((s) => s.id === activeId)
+      || list[0];
+    const id = messageId || ("msg-task-" + (payload.runId || Date.now()));
+    if ((target.messages || []).some((m) => m.id === id)) return;
+    const message = { id, role: "assistant", content: outputText, createdAt: createdAt || new Date().toISOString() };
+    try {
+      state.chatStore = await window.mia.saveChatSession({
+        personaKey: target.personaKey || fellowId,
+        session: { ...target, personaKey: target.personaKey || fellowId, messages: [...(target.messages || []), message] }
+      });
+    } catch (e) {
+      console.warn("deliver task output to chat failed", e);
+      return;
+    }
+    if (state.activeView === "chat" && state.activeKey === fellowId && typeof render === "function") render();
+  }
+
   let _tasksUnsubscribe = null;
   function subscribeTaskEvents() {
     if (_tasksUnsubscribe) return;
     _tasksUnsubscribe = window.mia.tasks.subscribe(async (envelope) => {
+      if (envelope.type === "finished") await deliverTaskOutputToChat(envelope.payload);
       await loadTasksFromDaemon();
       if (envelope.type === "finished" || envelope.type === "failed") {
         const taskId = envelope.payload?.taskId;

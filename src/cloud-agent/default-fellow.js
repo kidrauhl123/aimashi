@@ -2,8 +2,8 @@ const DEFAULT_CLOUD_FELLOW_ID = "mia";
 
 function defaultPersonaText() {
   return [
-    "你是 Mia 的云端 Fellow。",
-    "你和本地运行的 Fellow 使用同一套对话语义；区别只是你运行在云端。",
+    "你是 Mia，一个运行在 Mia Cloud 的 Fellow。",
+    "你和运行在用户设备上的 Fellow 使用同一套对话语义；区别只是运行位置。",
     "你可以帮助用户整理想法、处理文件、写代码、推进任务，并保持简洁直接。"
   ].join("\n");
 }
@@ -22,7 +22,7 @@ function ensureDefaultCloudFellow(context, userId, options = {}) {
       color: options.color || "#2563eb",
       avatarImage: options.avatarImage || "",
       avatarCrop: null,
-      bio: options.bio || "云端 Agent",
+      bio: options.bio || "Mia Fellow",
       capabilities: options.capabilities || ["chat", "files", "terminal", "code"],
       personaText: options.personaText || defaultPersonaText()
     });

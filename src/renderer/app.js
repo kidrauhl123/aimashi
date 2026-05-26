@@ -7,8 +7,9 @@ const SIDEBAR_WIDTH_MIN = 220;
 const SIDEBAR_WIDTH_MAX = 380;
 const SIDEBAR_WIDTH_DEFAULT = 280;
 let skillPickerHoverCloseTimer = 0;
+let avatarTrimDrag = null;
 const qrSvgCache = new Map();
-const cloudFellowRuntimeCache = new Map();
+const fellowRuntimeControlCache = new Map();
 const platformModelCatalog = { loaded: false, loading: false, entries: [] };
 const ICON_PARK_PIN_SVG = '<svg class="icon-park-pin" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M10.6963 17.5042C13.3347 14.8657 16.4701 14.9387 19.8781 16.8076L32.62 9.74509L31.8989 4.78683L43.2126 16.1005L38.2656 15.3907L31.1918 28.1214C32.9752 31.7589 33.1337 34.6647 30.4953 37.3032C30.4953 37.3032 26.235 33.0429 22.7171 29.525L6.44305 41.5564L18.4382 25.2461C14.9202 21.7281 10.6963 17.5042 10.6963 17.5042Z"/></svg>';
 
@@ -82,6 +83,12 @@ const els = {
   cancelFellow: document.getElementById("cancelFellow"),
   avatarCropDialog: document.getElementById("avatarCropDialog"),
   avatarCropStage: document.getElementById("avatarCropStage"),
+  avatarTrimControls: document.getElementById("avatarTrimControls"),
+  avatarTrimTimeline: document.getElementById("avatarTrimTimeline"),
+  avatarTrimPreview: document.getElementById("avatarTrimPreview"),
+  avatarTrimLabel: document.getElementById("avatarTrimLabel"),
+  avatarTrimStart: document.getElementById("avatarTrimStart"),
+  avatarTrimDuration: document.getElementById("avatarTrimDuration"),
   confirmAvatarCrop: document.getElementById("confirmAvatarCrop"),
   cancelAvatarCrop: document.getElementById("cancelAvatarCrop"),
   resetAvatarCrop: document.getElementById("resetAvatarCrop"),
@@ -555,7 +562,7 @@ function conversationCardSpecFromRow(row, personas) {
     if (isFellow) {
       const fellowKey = room.decorations?.fellowKey || (room.id?.split(":")[2] || "");
       const fellow = personas.find((p) => (p.id || p.key) === fellowKey);
-      name = room.name || fellow?.name || "对话";
+      name = sessionHistory.fellowDisplayTitle(room, personas, "对话");
       avatar = {
         image: fellow?.avatarImage || avatarHelper?.avatarAssetForKey(fellowKey),
         crop: fellow?.avatarCrop,
@@ -705,8 +712,7 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
         avatarEl.className = "profile-avatar";
         avatarEl.innerHTML = "";
         avatarEl.removeAttribute("data-count");
-        const style = avatarHelper.avatarThumbBackgroundStyle(customAvatar.image, customAvatar.crop, "#5e5ce6");
-        avatarEl.setAttribute("style", style);
+        avatarHelper.applyAvatarMedia(avatarEl, customAvatar.image, customAvatar.crop, "#5e5ce6");
       } else {
         avatarEl.className = "profile-avatar group-avatar";
         groupAvatarHelper.applyGroupAvatar(avatarEl, tiles);
@@ -726,7 +732,7 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
       avatarEl.className = "profile-avatar";
       avatarHelper.applyFellowAvatar(avatarEl, fellow || { key: fellowKey, name: room.name });
     }
-    setText(nameEl, room.name || fellow?.name || "对话");
+    setText(nameEl, sessionHistory.fellowDisplayTitle(room, personas, "对话"));
     if (metaEl) metaEl.textContent = "私聊";
     return;
   }
@@ -744,12 +750,7 @@ function paintActiveCloudRoomHeader(room, { personas, social }) {
     avatarEl.removeAttribute("data-count");
     avatarEl.className = "profile-avatar";
     if (friend) {
-      avatarHelper.applyFellowAvatar(avatarEl, {
-        key: friend.id,
-        avatarImage: friend.avatarImage,
-        avatarCrop: friend.avatarCrop,
-        color: friend.avatarColor
-      });
+      avatarHelper.applyAvatarMedia(avatarEl, friend.avatarImage, friend.avatarCrop, friend.avatarColor || "#5e5ce6");
     } else {
       const letter = (displayName[0] || "?").toUpperCase();
       avatarEl.textContent = letter;
@@ -1260,7 +1261,7 @@ function render() {
     modelAvatar.style.backgroundImage = activeIcon ? `url("${activeIcon}")` : "";
   }
   window.miaModelSettings.syncPermissionControl(runtime);
-  syncCloudFellowRuntimeControls();
+  syncRoomFellowRuntimeControls();
 
   const personas = runtime.fellows || runtime.personas || [];
   const social = window.miaSocial;
@@ -1279,17 +1280,17 @@ function render() {
   } else if (!personas.some((persona) => persona.key === state.activeKey) && personas.length && !activeCloudRoomId) {
     state.activeKey = personas[0].key;
   }
-  const cloudFellowKeys = new Set((social?.moduleState?.fellows || [])
+  const syncedFellowKeys = new Set((social?.moduleState?.fellows || [])
     .map((fellow) => String(fellow?.key || fellow?.id || "").trim())
     .filter(Boolean));
   const contactKeys = new Set([
     ...personas.map((persona) => String(persona.key || persona.id || "")),
-    ...cloudFellowKeys
+    ...syncedFellowKeys
   ].filter(Boolean));
   if (!contactKeys.has(state.activeContactKey) && contactKeys.size) {
     state.activeContactKey = personas.find((persona) => persona.key === state.activeKey)?.key
       || personas[0]?.key
-      || [...cloudFellowKeys][0]
+      || [...syncedFellowKeys][0]
       || "";
   }
   window.miaSessionReadState.initializeReadStateForPersonas(personas);
@@ -1496,10 +1497,7 @@ async function deleteFellow(fellowKey) {
   const fellow = window.miaFellowManager.fellowByKey(fellowKey);
   if (!fellow) return;
   if (fellow.canDelete === false) return;
-  const isCloudFellow = fellow.runtimeKind === "cloud-hermes";
-  const detail = isCloudFellow
-    ? "这会从云端联系人里移除该伙伴。"
-    : "这会移除该伙伴、人设文件和本地会话记录。";
+  const detail = "这会删除该 Fellow，并清理当前账号可管理的配置和会话。";
   const ok = window.confirm(`删除「${fellow.name || fellow.key}」？\n\n${detail}`);
   if (!ok) return;
   try {
@@ -1805,12 +1803,6 @@ function renderMessageHtml(message, ctx) {
   const fellowAvatar = window.miaAvatar.avatarImageSrc(fellowAvatarImage);
   const userAvatarImage = user.avatarImage || "";
   const userAvatar = window.miaAvatar.avatarImageSrc(userAvatarImage);
-  const avatarBackgroundColor = message.role === "assistant"
-    ? (fellowAvatar ? "transparent" : (color || "#111827"))
-    : (userAvatar ? "transparent" : (color || "#111827"));
-  const imageStyle = message.role === "assistant"
-    ? window.miaAvatar.avatarThumbBackgroundStyle(fellowAvatarImage, persona?.avatarCrop, color)
-    : (userAvatar ? window.miaAvatar.avatarThumbBackgroundStyle(userAvatarImage, user.avatarCrop, color) : "");
   const traceHtml = message.role === "assistant"
     ? window.miaTraceBlocks.renderTraceBlocks({
       reasoning: message.reasoning,
@@ -1837,8 +1829,19 @@ function renderMessageHtml(message, ctx) {
     ? (persona?.key || "")
     : (state.runtime?.cloud?.user?.id || "");
   const avatarTitle = message.role === "assistant" ? (persona?.name || "") : (user.displayName || "");
+  const avatarImage = message.role === "assistant" ? fellowAvatarImage : userAvatarImage;
+  const avatarCrop = message.role === "assistant" ? persona?.avatarCrop : user.avatarCrop;
+  const avatarText = message.role === "user" && !userAvatar ? label : "";
+  const avatarHtml = window.miaAvatar.avatarHtml({
+    className: "avatar message-avatar",
+    image: avatarImage,
+    crop: avatarCrop,
+    color: color || "#111827",
+    text: avatarText,
+    attrs: `data-sender-kind="${senderKind}" data-sender-ref="${window.miaMarkdown.escapeHtml(senderRef)}" title="${window.miaMarkdown.escapeHtml(avatarTitle)}"`
+  });
   return `<article class="message ${roleClass}">
-      <div class="avatar message-avatar" data-sender-kind="${senderKind}" data-sender-ref="${window.miaMarkdown.escapeHtml(senderRef)}" title="${window.miaMarkdown.escapeHtml(avatarTitle)}" style="background-color:${window.miaMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}">${message.role === "user" && !userAvatar ? window.miaMarkdown.escapeHtml(label) : ""}</div>
+      ${avatarHtml}
       <div class="message-stack">${taskAffordanceHtml}${traceHtml}<div class="bubble${message.pinned ? " pinned" : ""}" data-message-index="${messageIndex}">${pinnedHtml}${replyHtml}${bodyHtml}${commandResultHtml}${attachmentHtml}${translation}</div>${timeHtml}</div>
     </article>`;
 }
@@ -1917,9 +1920,6 @@ function renderChat() {
     article.className = "message assistant streaming";
     const personaForStream = active;
     const fellowAvatarImage = personaForStream?.avatarImage || window.miaAvatar.avatarAssetForKey(personaForStream?.key);
-    const fellowAvatar = window.miaAvatar.avatarImageSrc(fellowAvatarImage);
-    const avatarBackgroundColor = fellowAvatar ? "transparent" : (personaForStream?.color || "#23444d");
-    const imageStyle = window.miaAvatar.avatarThumbBackgroundStyle(fellowAvatarImage, personaForStream?.avatarCrop, personaForStream?.color);
     const traceHtml = window.miaTraceBlocks.renderTraceBlocks({
       reasoning: s.reasoning,
       tools: s.tools,
@@ -1929,11 +1929,18 @@ function renderChat() {
     });
     const textHtml = s.text ? `<div class="bubble">${window.miaMarkdown.renderMarkdown(s.text)}</div>${renderMessageTime(s.createdAt)}` : "";
     article.innerHTML = `
-      <div class="avatar" style="background-color:${window.miaMarkdown.escapeHtml(avatarBackgroundColor)};${imageStyle}"></div>
+      ${window.miaAvatar.avatarHtml({
+        className: "avatar message-avatar",
+        image: fellowAvatarImage,
+        crop: personaForStream?.avatarCrop,
+        color: personaForStream?.color || "#23444d",
+        attrs: `data-sender-kind="fellow" data-sender-ref="${window.miaMarkdown.escapeHtml(personaForStream?.key || "")}" title="${window.miaMarkdown.escapeHtml(personaForStream?.name || "")}"`
+      })}
       <div class="message-stack">${traceHtml}${textHtml}</div>
     `;
     els.chat.appendChild(article);
   }
+  window.miaAvatar?.hydrateAvatarVideos?.(els.chat);
   if (state.forceScrollToBottom || wasNearBottom) {
     els.chat.scrollTop = els.chat.scrollHeight;
   }
@@ -1948,32 +1955,59 @@ function roomTypeForComposer(room, roomId = "") {
   return sessionHistory.roomType(room, roomId);
 }
 
-function fellowKeyForCloudRoom(room) {
+function fellowKeyForRoom(room) {
   return sessionHistory.fellowKey(room);
 }
 
-function runtimeKindForCloudFellowRoom(room) {
+function runtimeKindForFellowRoom(room) {
   return sessionHistory.runtimeKind(room, "desktop-local");
 }
 
-function activeCloudFellowContext() {
+function activeRoomFellowContext() {
   const social = window.miaSocial;
   const roomId = social?.getActiveRoomId?.();
   if (!roomId) return null;
   const room = social?.getRoomById?.(roomId) || { id: roomId };
   if (roomTypeForComposer(room, roomId) !== "fellow") return null;
-  const fellowKey = fellowKeyForCloudRoom(room);
+  const fellowKey = fellowKeyForRoom(room);
   if (!fellowKey) return null;
   return {
     room,
     roomId,
     fellowKey,
-    runtimeKind: runtimeKindForCloudFellowRoom(room)
+    runtimeKind: runtimeKindForFellowRoom(room)
   };
 }
 
-function cloudFellowRuntimeCacheKey(fellowKey, runtimeKind = "cloud-hermes") {
-  return `${fellowKey}:${runtimeKind}`;
+function activeFellowRuntimeControlContext() {
+  const roomContext = activeRoomFellowContext();
+  if (roomContext) {
+    const personas = state.runtime?.fellows || state.runtime?.personas || [];
+    const fellow = personas.find((persona) => (persona.key || persona.id) === roomContext.fellowKey) || {};
+    return {
+      ...roomContext,
+      fellow: {
+        ...fellow,
+        key: roomContext.fellowKey,
+        id: fellow.id || fellow.key || roomContext.fellowKey,
+        runtimeKind: roomContext.runtimeKind
+      }
+    };
+  }
+  const fellow = activePersona();
+  const fellowKey = String(fellow?.key || fellow?.id || "").trim();
+  if (!fellowKey) return null;
+  return {
+    room: null,
+    roomId: "",
+    fellowKey,
+    runtimeKind: fellow.runtimeKind || fellow.runtime_kind || "desktop-local",
+    fellow: { ...fellow, key: fellowKey }
+  };
+}
+
+function fellowRuntimeCacheKey(fellowKey, runtimeKind = "cloud-hermes") {
+  return window.miaFellowCommands.runtimeCacheKey(fellowKey, runtimeKind);
 }
 
 function normalizePlatformModelEntry(entry = {}) {
@@ -2006,13 +2040,13 @@ async function loadPlatformModelCatalog() {
   return platformModelCatalog.entries;
 }
 
-function cloudHermesModelEntries() {
+function platformHermesModelEntries() {
   return platformModelCatalog.entries.length
     ? platformModelCatalog.entries
     : [{ id: "mia-default", label: "Mia Default" }];
 }
 
-function cloudHermesPermissionEntries() {
+function platformHermesPermissionEntries() {
   return [
     { value: "ask", label: "Ask" },
     { value: "auto", label: "Auto" },
@@ -2045,23 +2079,46 @@ function setComposerSelectOptions(select, entries, selectedValue) {
   return select.selectedOptions?.[0]?.textContent || "";
 }
 
-async function ensureCloudFellowRuntime(fellowKey, runtimeKind = "cloud-hermes") {
-  if (!fellowKey || runtimeKind !== "cloud-hermes") return null;
-  const key = cloudFellowRuntimeCacheKey(fellowKey, runtimeKind);
-  if (cloudFellowRuntimeCache.has(key)) return cloudFellowRuntimeCache.get(key);
-  const response = await window.mia.social.getFellowRuntime(fellowKey, runtimeKind);
-  if (!response?.ok) throw new Error(response?.error || "读取云端运行配置失败");
-  const binding = response.data?.binding || null;
-  cloudFellowRuntimeCache.set(key, binding);
-  return binding;
+async function ensureFellowRuntimeBinding(fellowKey, runtimeKind = "cloud-hermes") {
+  return window.miaFellowCommands.getFellowRuntimeBinding({
+    api: window.mia,
+    cache: fellowRuntimeControlCache,
+    fellowKey,
+    runtimeKind
+  });
 }
 
-function syncCloudFellowRuntimeControls() {
-  const context = activeCloudFellowContext();
+function normalizeAgentEngineForRuntime(value) {
+  const normalizer = window.miaEngineContracts?.normalizeAgentEngine;
+  if (typeof normalizer === "function") return normalizer(value);
+  const raw = String(value || "hermes").trim().toLowerCase().replace(/_/g, "-");
+  if (raw === "claude" || raw === "claude-code") return "claude-code";
+  if (raw === "codex" || raw === "openai-codex") return "codex";
+  return "hermes";
+}
+
+function agentEngineForRuntimeControl(context = activeFellowRuntimeControlContext()) {
+  if (context?.runtimeKind === "cloud-hermes") return "hermes";
+  return normalizeAgentEngineForRuntime(
+    context?.fellow?.agentEngine
+      || context?.fellow?.agent_engine
+      || window.miaEngineOptions.activeAgentEngine()
+  );
+}
+
+function modelEntriesForRuntimeControl(context = activeFellowRuntimeControlContext()) {
+  const engine = agentEngineForRuntimeControl(context);
+  if (context?.runtimeKind === "cloud-hermes") return platformHermesModelEntries();
+  if (engine === "claude-code" || engine === "codex") return window.miaEngineOptions.externalModelEntries(engine);
+  return window.miaModelSettings.connectedModelEntries(state.runtime);
+}
+
+function syncRoomFellowRuntimeControls() {
+  const context = activeRoomFellowContext();
   if (!context || context.runtimeKind !== "cloud-hermes") return false;
-  const binding = cloudFellowRuntimeCache.get(cloudFellowRuntimeCacheKey(context.fellowKey, context.runtimeKind));
+  const binding = fellowRuntimeControlCache.get(fellowRuntimeCacheKey(context.fellowKey, context.runtimeKind));
   const config = binding?.config || {};
-  const modelEntries = cloudHermesModelEntries();
+  const modelEntries = platformHermesModelEntries();
   const modelLabel = setComposerSelectOptions(els.quickModelSelect, modelEntries, config.model || modelEntries[0]?.id || "mia-default");
   setText(els.quickModelLabel, modelLabel || "Mia Default");
   const effortLabel = setComposerSelectOptions(
@@ -2070,7 +2127,7 @@ function syncCloudFellowRuntimeControls() {
     config.effortLevel || "medium"
   );
   setText(els.effortLabel, effortLabel || "Medium");
-  const permissionLabel = setComposerSelectOptions(els.permissionMode, cloudHermesPermissionEntries(), config.permissionMode || "ask");
+  const permissionLabel = setComposerSelectOptions(els.permissionMode, platformHermesPermissionEntries(), config.permissionMode || "ask");
   setText(els.permissionLabel, permissionLabel || "Ask");
   const permissionSwitcher = els.permissionMode?.closest(".permission-switcher");
   permissionSwitcher?.classList.toggle("yolo", false);
@@ -2078,17 +2135,17 @@ function syncCloudFellowRuntimeControls() {
   if (els.quickModelSelect) els.quickModelSelect.disabled = false;
   if (els.effortSelect) els.effortSelect.disabled = false;
   if (els.permissionMode) els.permissionMode.disabled = false;
-  setText(els.modelSwitchStatus, "Cloud Hermes");
+  setText(els.modelSwitchStatus, "Hermes");
   if (!platformModelCatalog.loaded && !platformModelCatalog.loading) {
     loadPlatformModelCatalog().then(() => {
-      const latest = activeCloudFellowContext();
+      const latest = activeRoomFellowContext();
       if (latest?.roomId === context.roomId) render();
     });
   }
   if (!binding) {
-    ensureCloudFellowRuntime(context.fellowKey, context.runtimeKind)
+    ensureFellowRuntimeBinding(context.fellowKey, context.runtimeKind)
       .then(() => {
-        const latest = activeCloudFellowContext();
+        const latest = activeRoomFellowContext();
         if (latest?.roomId === context.roomId) render();
       })
       .catch((error) => {
@@ -2099,52 +2156,72 @@ function syncCloudFellowRuntimeControls() {
   return true;
 }
 
-async function saveActiveCloudFellowRuntimeConfig(patch, pendingText, successText, errorPrefix) {
-  const context = activeCloudFellowContext();
-  if (!context || context.runtimeKind !== "cloud-hermes") return false;
-  const key = cloudFellowRuntimeCacheKey(context.fellowKey, context.runtimeKind);
+function setRuntimeControlDisabled(disabled) {
+  if (els.quickModelSelect) els.quickModelSelect.disabled = disabled;
+  if (els.effortSelect) els.effortSelect.disabled = disabled;
+  if (els.permissionMode) els.permissionMode.disabled = disabled;
+}
+
+async function saveActiveFellowRuntimeControl(field, value, pendingText, successText, errorPrefix, modelEntries = []) {
+  const context = activeFellowRuntimeControlContext();
+  if (!context) return false;
   setText(els.modelSwitchStatus, pendingText);
-  if (els.quickModelSelect) els.quickModelSelect.disabled = true;
-  if (els.effortSelect) els.effortSelect.disabled = true;
-  if (els.permissionMode) els.permissionMode.disabled = true;
+  setRuntimeControlDisabled(true);
   try {
-    const current = cloudFellowRuntimeCache.get(key) || await ensureCloudFellowRuntime(context.fellowKey, context.runtimeKind) || {
-      fellowId: context.fellowKey,
+    const result = await window.miaFellowCommands.saveFellowRuntimeControl({
+      api: window.mia,
+      cache: fellowRuntimeControlCache,
+      fellow: context.fellow,
       runtimeKind: context.runtimeKind,
-      enabled: true,
-      config: {}
-    };
-    const response = await window.mia.social.saveFellowRuntime(context.fellowKey, {
-      runtimeKind: context.runtimeKind,
-      enabled: true,
-      config: { ...(current.config || {}), ...patch }
+      field,
+      value,
+      modelEntries,
+      engineContracts: window.miaEngineContracts
     });
-    if (!response?.ok) throw new Error(response?.error || "保存云端运行配置失败");
-    cloudFellowRuntimeCache.set(key, response.data?.binding || { ...current, config: { ...(current.config || {}), ...patch } });
+    if (!result?.saved) return false;
+    if (result.runtime) state.runtime = result.runtime;
+    if (context.runtimeKind !== "cloud-hermes") syncLocalFellowRuntimeBindingsSoon();
     setText(els.modelSwitchStatus, successText);
+    if (field === "model" && context.runtimeKind !== "cloud-hermes" && agentEngineForRuntimeControl(context) === "hermes") {
+      const entry = modelEntries.find((item) => [item.id, item.value, item.model].some((candidate) => String(candidate || "") === String(value || "")));
+      if (entry) {
+        window.miaModelSettings.applyModelEntryToFields(entry);
+        const auth = window.miaModelSettings.modelAuthCopy(entry, state.runtime);
+        if (auth.state.includes("需要")) {
+          state.settingsOpen = true;
+          state.activeSettingsTab = "model";
+        }
+      }
+    }
     render();
   } catch (error) {
     setText(els.modelSwitchStatus, "保存失败");
     appendTransientChat("assistant", `${errorPrefix}: ${error.message || error}`);
-    syncCloudFellowRuntimeControls();
+    if (context.runtimeKind === "cloud-hermes") {
+      syncRoomFellowRuntimeControls();
+    } else {
+      await refreshRuntime();
+    }
+  } finally {
+    setRuntimeControlDisabled(false);
   }
   return true;
 }
 
-function activeCloudFellowKey() {
+function activeRoomFellowKey() {
   const social = window.miaSocial;
   const roomId = social?.getActiveRoomId?.();
   if (!roomId) return "";
   const room = social?.getRoomById?.(roomId) || { id: roomId };
-  return roomTypeForComposer(room, roomId) === "fellow" ? fellowKeyForCloudRoom(room) : "";
+  return roomTypeForComposer(room, roomId) === "fellow" ? fellowKeyForRoom(room) : "";
 }
 
 function activePersona() {
   const personas = state.runtime?.fellows || state.runtime?.personas || [];
-  const cloudFellowKey = activeCloudFellowKey();
-  if (cloudFellowKey) {
-    const cloudPersona = personas.find((persona) => (persona.key || persona.id) === cloudFellowKey);
-    if (cloudPersona) return cloudPersona;
+  const roomFellowKey = activeRoomFellowKey();
+  if (roomFellowKey) {
+    const roomPersona = personas.find((persona) => (persona.key || persona.id) === roomFellowKey);
+    if (roomPersona) return roomPersona;
     return null;
   }
   return personas.find((persona) => persona.key === state.activeKey) || personas[0];
@@ -3034,8 +3111,8 @@ if (window.mia.onCloudEvent) {
       ? envelope.binding
       : envelope.payload?.binding;
     if (runtimeBinding?.fellowId && runtimeBinding?.runtimeKind) {
-      cloudFellowRuntimeCache.set(
-        cloudFellowRuntimeCacheKey(runtimeBinding.fellowId, runtimeBinding.runtimeKind),
+      fellowRuntimeControlCache.set(
+        fellowRuntimeCacheKey(runtimeBinding.fellowId, runtimeBinding.runtimeKind),
         runtimeBinding
       );
     }
@@ -3151,179 +3228,40 @@ els.authMethod.addEventListener("change", () => {
 
 els.quickModelSelect?.addEventListener("change", async () => {
   window.miaModelSettings.syncQuickModelLabel();
-  if (await saveActiveCloudFellowRuntimeConfig(
-    { model: els.quickModelSelect.value || cloudHermesModelEntries()[0]?.id || "mia-default" },
+  const context = activeFellowRuntimeControlContext();
+  const modelEntries = modelEntriesForRuntimeControl(context);
+  await saveActiveFellowRuntimeControl(
+    "model",
+    els.quickModelSelect.value || modelEntries[0]?.id || modelEntries[0]?.value || modelEntries[0]?.model || "",
     "保存模型...",
     "模型已更新",
-    "Cloud model switch failed"
-  )) return;
-  const engine = window.miaEngineOptions.activeAgentEngine();
-  if (engine === "claude-code" || engine === "codex") {
-    const persona = activePersona();
-    const entry = window.miaEngineOptions.externalModelEntries(engine).find((item) => item.id === els.quickModelSelect.value);
-    if (!persona || !entry) return;
-    els.quickModelSelect.disabled = true;
-    setText(els.modelSwitchStatus, "保存模型...");
-    try {
-      state.runtime = await window.mia.saveFellowEngine({
-        key: persona.key,
-        agentEngine: engine,
-        engineConfig: {
-          ...window.miaEngineOptions.engineConfigForPersona(persona),
-          model: entry.model || ""
-        }
-      });
-      syncLocalFellowRuntimeBindingsSoon();
-      setText(els.modelSwitchStatus, "模型已更新");
-      render();
-    } catch (error) {
-      setText(els.modelSwitchStatus, "模型更新失败");
-      appendTransientChat("assistant", `Model switch failed: ${error.message}`);
-      await refreshRuntime();
-    } finally {
-      els.quickModelSelect.disabled = false;
-    }
-    return;
-  }
-  const entry = window.miaModelSettings.connectedModelEntries().find((item) => item.id === els.quickModelSelect.value);
-  if (!entry) return;
-  els.quickModelSelect.disabled = true;
-  setText(els.modelSwitchStatus, "切换中...");
-  try {
-    state.runtime = await window.mia.saveModel({
-      provider: entry.provider,
-      model: entry.model,
-      apiKeyEnv: entry.apiKeyEnv,
-      baseUrl: entry.baseUrl,
-      apiMode: entry.apiMode,
-      providerLabel: entry.providerLabel,
-      authType: entry.authType
-    });
-    syncLocalFellowRuntimeBindingsSoon();
-    window.miaModelSettings.applyModelEntryToFields(entry);
-    setText(els.modelSwitchStatus, "已切换");
-    const auth = window.miaModelSettings.modelAuthCopy(entry, state.runtime);
-    if (auth.state.includes("需要")) {
-      state.settingsOpen = true;
-      state.activeSettingsTab = "model";
-    }
-    render();
-  } catch (error) {
-    setText(els.modelSwitchStatus, "切换失败");
-    appendTransientChat("assistant", `Model switch failed: ${error.message}`);
-    await refreshRuntime();
-  } finally {
-    els.quickModelSelect.disabled = !window.miaModelSettings.connectedModelEntries(state.runtime).length;
-  }
+    "Model switch failed",
+    modelEntries
+  );
 });
 
 els.effortSelect?.addEventListener("change", async () => {
   const level = els.effortSelect.value;
   window.miaModelSettings.syncEffortControl(state.runtime);
-  if (await saveActiveCloudFellowRuntimeConfig(
-    { effortLevel: level || "medium" },
+  await saveActiveFellowRuntimeControl(
+    "effortLevel",
+    level || "medium",
     "保存推理强度...",
     "推理强度已更新",
-    "Cloud effort update failed"
-  )) return;
-  const engine = window.miaEngineOptions.activeAgentEngine();
-  if (engine === "claude-code" || engine === "codex") {
-    const persona = activePersona();
-    if (!persona) return;
-    setText(els.modelSwitchStatus, "保存推理强度...");
-    els.effortSelect.disabled = true;
-    try {
-      state.runtime = await window.mia.saveFellowEngine({
-        key: persona.key,
-        agentEngine: engine,
-        engineConfig: {
-          ...window.miaEngineOptions.engineConfigForPersona(persona),
-          effortLevel: level
-        }
-      });
-      syncLocalFellowRuntimeBindingsSoon();
-      window.miaModelSettings.syncEffortControl(state.runtime);
-      setText(els.modelSwitchStatus, "推理强度已更新");
-      render();
-    } catch (error) {
-      setText(els.modelSwitchStatus, "推理强度更新失败");
-      appendTransientChat("assistant", `Effort update failed: ${error.message}`);
-      await refreshRuntime();
-    } finally {
-      els.effortSelect.disabled = false;
-    }
-    return;
-  }
-  setText(els.modelSwitchStatus, "保存推理强度...");
-  els.effortSelect.disabled = true;
-  try {
-    state.runtime = await window.mia.saveEffort({ level });
-    syncLocalFellowRuntimeBindingsSoon();
-    window.miaModelSettings.syncEffortControl(state.runtime);
-    setText(els.modelSwitchStatus, "推理强度已更新");
-    render();
-  } catch (error) {
-    setText(els.modelSwitchStatus, "推理强度更新失败");
-    appendTransientChat("assistant", `Effort update failed: ${error.message}`);
-    await refreshRuntime();
-  } finally {
-    els.effortSelect.disabled = false;
-  }
+    "Effort update failed"
+  );
 });
 
 els.permissionMode?.addEventListener("change", async () => {
   const mode = els.permissionMode.value;
-  if (await saveActiveCloudFellowRuntimeConfig(
-    { permissionMode: mode || "ask" },
+  setText(els.permissionLabel, window.miaModelSettings.permissionLabelForMode(mode));
+  await saveActiveFellowRuntimeControl(
+    "permissionMode",
+    mode || "ask",
     "保存权限...",
     "权限已更新",
-    "Cloud permission mode failed"
-  )) return;
-  const engine = window.miaEngineOptions.activeAgentEngine();
-  if (engine === "claude-code" || engine === "codex") {
-    const persona = activePersona();
-    if (!persona) return;
-    setText(els.permissionLabel, window.miaModelSettings.permissionLabelForMode(mode));
-    setText(els.modelSwitchStatus, "保存权限...");
-    els.permissionMode.disabled = true;
-    try {
-      state.runtime = await window.mia.saveFellowEngine({
-        key: persona.key,
-        agentEngine: engine,
-        engineConfig: {
-          ...window.miaEngineOptions.engineConfigForPersona(persona),
-          permissionMode: mode
-        }
-      });
-      syncLocalFellowRuntimeBindingsSoon();
-      window.miaModelSettings.syncPermissionControl(state.runtime);
-      setText(els.modelSwitchStatus, "权限已更新");
-      render();
-    } catch (error) {
-      setText(els.modelSwitchStatus, "权限更新失败");
-      appendTransientChat("assistant", `Permission mode failed: ${error.message}`);
-      await refreshRuntime();
-    } finally {
-      els.permissionMode.disabled = false;
-    }
-    return;
-  }
-  window.miaModelSettings.syncPermissionControl({ permissions: { mode } });
-  setText(els.modelSwitchStatus, "保存权限...");
-  els.permissionMode.disabled = true;
-  try {
-    state.runtime = await window.mia.savePermissions({ mode });
-    syncLocalFellowRuntimeBindingsSoon();
-    window.miaModelSettings.syncPermissionControl(state.runtime);
-    setText(els.modelSwitchStatus, "权限已更新");
-    render();
-  } catch (error) {
-    setText(els.modelSwitchStatus, "权限更新失败");
-    appendTransientChat("assistant", `Permission mode failed: ${error.message}`);
-    await refreshRuntime();
-  } finally {
-    els.permissionMode.disabled = false;
-  }
+    "Permission mode failed"
+  );
 });
 
 els.modelSelect?.addEventListener("change", () => {
@@ -3520,6 +3458,96 @@ els.avatarCropStage?.addEventListener("wheel", (event) => {
     zoom: state.avatarCropEditor.crop.zoom + direction * 0.03
   });
 });
+function avatarTrimTimelineDuration() {
+  const metadataDuration = Number(els.avatarTrimPreview?.duration) || 0;
+  const crop = state.avatarCropEditor?.crop || {};
+  const trim = window.miaAvatarMedia?.normalizeTrim?.(crop) || { start: 0, duration: 3 };
+  return Math.max(metadataDuration, trim.start + trim.duration, window.miaAvatarMedia?.MAX_TRIM_DURATION || 5);
+}
+function avatarTrimSecondsFromPointer(event) {
+  const rect = els.avatarTrimTimeline?.getBoundingClientRect?.();
+  if (!rect || rect.width <= 0) return 0;
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  return ratio * avatarTrimTimelineDuration();
+}
+function setAvatarTrimRange(start, duration) {
+  const media = window.miaAvatarMedia;
+  const total = avatarTrimTimelineDuration();
+  const minDuration = media?.MIN_TRIM_DURATION || 1;
+  const maxDuration = Math.min(media?.MAX_TRIM_DURATION || 5, total || 5);
+  const nextDuration = Math.max(minDuration, Math.min(maxDuration, Number(duration) || maxDuration));
+  const maxStart = Math.max(0, total - nextDuration);
+  const nextStart = Math.max(0, Math.min(maxStart, Number(start) || 0));
+  const trim = media?.normalizeTrim?.({ start: nextStart, duration: nextDuration }) || { start: nextStart, duration: nextDuration };
+  if (els.avatarTrimStart) els.avatarTrimStart.value = String(trim.start);
+  if (els.avatarTrimDuration) els.avatarTrimDuration.value = String(trim.duration);
+  window.miaFellowDialog.updateAvatarCropEditor(trim);
+}
+function beginAvatarTrimDrag(event) {
+  if (!state.avatarCropEditor?.open || !window.miaAvatarMedia?.isVideo?.(state.avatarCropEditor.image)) return;
+  const timeline = els.avatarTrimTimeline;
+  if (!timeline) return;
+  event.preventDefault();
+  const crop = state.avatarCropEditor.crop || {};
+  const trim = window.miaAvatarMedia.normalizeTrim(crop);
+  const seconds = avatarTrimSecondsFromPointer(event);
+  const mode = event.target?.dataset?.avatarTrimHandle || "track";
+  if (mode === "selection") {
+    avatarTrimDrag = { mode, start: trim.start, duration: trim.duration, offset: seconds - trim.start };
+  } else if (mode === "start" || mode === "end") {
+    avatarTrimDrag = { mode, start: trim.start, duration: trim.duration };
+  } else {
+    const nextStart = seconds - trim.duration / 2;
+    setAvatarTrimRange(nextStart, trim.duration);
+    avatarTrimDrag = { mode: "selection", start: nextStart, duration: trim.duration, offset: trim.duration / 2 };
+  }
+  timeline.setPointerCapture?.(event.pointerId);
+}
+function updateAvatarTrimDrag(event) {
+  if (!avatarTrimDrag) return;
+  event.preventDefault();
+  const seconds = avatarTrimSecondsFromPointer(event);
+  const minDuration = window.miaAvatarMedia?.MIN_TRIM_DURATION || 1;
+  const maxDuration = window.miaAvatarMedia?.MAX_TRIM_DURATION || 5;
+  if (avatarTrimDrag.mode === "start") {
+    const end = avatarTrimDrag.start + avatarTrimDrag.duration;
+    const nextStart = Math.max(0, Math.min(seconds, end - minDuration, end - maxDuration));
+    setAvatarTrimRange(nextStart, end - nextStart);
+    return;
+  }
+  if (avatarTrimDrag.mode === "end") {
+    const nextEnd = Math.max(avatarTrimDrag.start + minDuration, Math.min(seconds, avatarTrimDrag.start + maxDuration, avatarTrimTimelineDuration()));
+    setAvatarTrimRange(avatarTrimDrag.start, nextEnd - avatarTrimDrag.start);
+    return;
+  }
+  setAvatarTrimRange(seconds - avatarTrimDrag.offset, avatarTrimDrag.duration);
+}
+function endAvatarTrimDrag(event) {
+  if (!avatarTrimDrag) return;
+  avatarTrimDrag = null;
+  els.avatarTrimTimeline?.releasePointerCapture?.(event.pointerId);
+}
+els.avatarTrimTimeline?.addEventListener("pointerdown", beginAvatarTrimDrag);
+els.avatarTrimTimeline?.addEventListener("pointermove", updateAvatarTrimDrag);
+els.avatarTrimTimeline?.addEventListener("pointerup", endAvatarTrimDrag);
+els.avatarTrimTimeline?.addEventListener("pointercancel", endAvatarTrimDrag);
+els.avatarTrimPreview?.addEventListener("loadedmetadata", () => {
+  window.miaFellowDialog.updateAvatarTrimControls?.();
+});
+if (els.avatarTrimStart) els.avatarTrimStart.addEventListener("input", () => {
+  const trim = window.miaAvatarMedia?.normalizeTrim?.({
+    ...state.avatarCropEditor.crop,
+    start: els.avatarTrimStart.value
+  }) || { start: 0, duration: 3 };
+  window.miaFellowDialog.updateAvatarCropEditor(trim);
+});
+if (els.avatarTrimDuration) els.avatarTrimDuration.addEventListener("input", () => {
+  const trim = window.miaAvatarMedia?.normalizeTrim?.({
+    ...state.avatarCropEditor.crop,
+    duration: els.avatarTrimDuration.value
+  }) || { start: 0, duration: 3 };
+  window.miaFellowDialog.updateAvatarCropEditor(trim);
+});
 els.confirmAvatarCrop?.addEventListener("click", async () => {
   if (state.avatarCropEditor.target === "groupRoom") {
     const image = state.avatarCropEditor.image;
@@ -3651,7 +3679,7 @@ els.fellowForm?.addEventListener("submit", async (event) => {
     isCreate: state.fellowDialogMode !== "edit",
     api: window.mia,
     social: window.miaSocial,
-    cloudModelEntries: cloudHermesModelEntries,
+    cloudModelEntries: platformHermesModelEntries,
     loadChatSessions
   });
   if (saved.runtime) state.runtime = saved.runtime;

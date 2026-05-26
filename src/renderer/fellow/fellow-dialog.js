@@ -48,7 +48,7 @@
     const draft = state.profileAvatarDraft;
     const user = state.runtime?.user || {};
     const crop = window.miaAvatar.normalizeCrop(draft.crop);
-    els.profileAvatarPreview.setAttribute("style", window.miaAvatar.avatarBackgroundStyle(draft.image, crop, user.avatarColor || "#111827"));
+    window.miaAvatar.applyAvatarMedia(els.profileAvatarPreview, draft.image, crop, user.avatarColor || "#111827");
     els.profileAvatarPreview.title = draft.image ? "点击调整头像裁剪" : "选择头像";
     els.profileAvatarPreview.setAttribute("role", "button");
     els.profileAvatarPreview.setAttribute("tabindex", "0");
@@ -158,7 +158,7 @@
     const draft = state.fellowAvatarDraft;
     const crop = window.miaAvatar.normalizeCrop(draft.crop);
     if (els.fellowAvatarPreview) {
-      els.fellowAvatarPreview.setAttribute("style", window.miaAvatar.avatarBackgroundStyle(draft.image, crop, "#eef0ff"));
+      window.miaAvatar.applyAvatarMedia(els.fellowAvatarPreview, draft.image, crop, "#eef0ff");
       els.fellowAvatarPreview.title = "点击调整头像裁剪";
       els.fellowAvatarPreview.setAttribute("role", "button");
       els.fellowAvatarPreview.setAttribute("tabindex", "0");
@@ -171,7 +171,40 @@
     if (!state || !els || !els.avatarCropStage) return;
     const editor = state.avatarCropEditor;
     const crop = window.miaAvatar.normalizeCrop(editor.crop);
-    els.avatarCropStage.setAttribute("style", window.miaAvatar.avatarBackgroundStyle(editor.image, crop, "#eef0ff"));
+    window.miaAvatar.applyAvatarMedia(els.avatarCropStage, editor.image, crop, "#eef0ff", "", { preserveChildren: true });
+    updateAvatarTrimControls();
+  }
+
+  function updateAvatarTrimControls() {
+    if (!state || !els?.avatarTrimControls) return;
+    const editor = state.avatarCropEditor || {};
+    const isVideo = window.miaAvatarMedia?.isVideo?.(editor.image);
+    els.avatarTrimControls.classList.toggle("hidden", !isVideo);
+    if (!isVideo) return;
+    const trim = window.miaAvatarMedia.normalizeTrim(editor.crop || {});
+    const previewSrc = window.miaAvatar.avatarImageSrc(editor.image) || editor.image || "";
+    if (els.avatarTrimPreview && els.avatarTrimPreview.src !== previewSrc) {
+      els.avatarTrimPreview.src = previewSrc;
+      els.avatarTrimPreview.currentTime = trim.start || 0;
+    }
+    const total = Math.max(
+      Number(els.avatarTrimPreview?.duration) || 0,
+      trim.start + trim.duration,
+      window.miaAvatarMedia.MAX_TRIM_DURATION || 5
+    );
+    const startPct = total ? Math.max(0, Math.min(100, (trim.start / total) * 100)) : 0;
+    const endPct = total ? Math.max(startPct, Math.min(100, ((trim.start + trim.duration) / total) * 100)) : 100;
+    els.avatarTrimTimeline?.style.setProperty("--trim-start", `${startPct}%`);
+    els.avatarTrimTimeline?.style.setProperty("--trim-end", `${endPct}%`);
+    if (els.avatarTrimLabel) {
+      els.avatarTrimLabel.textContent = `${trim.start.toFixed(1)}s - ${(trim.start + trim.duration).toFixed(1)}s`;
+    }
+    if (els.avatarTrimStart && document.activeElement !== els.avatarTrimStart) {
+      els.avatarTrimStart.value = String(trim.start);
+    }
+    if (els.avatarTrimDuration && document.activeElement !== els.avatarTrimDuration) {
+      els.avatarTrimDuration.value = String(trim.duration);
+    }
   }
 
   function openAvatarCropEditor(image, crop = null, target = "fellow") {
@@ -207,19 +240,27 @@
   }
 
   function readFellowAvatarFile(file) {
-    if (!file || !file.type?.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      openAvatarCropEditor(String(reader.result || ""), { x: 50, y: 50, zoom: 1.12 }, "fellow");
-    });
-    reader.readAsDataURL(file);
+    readAvatarFile(file, "fellow");
   }
 
   function readProfileAvatarFile(file) {
-    if (!file || !file.type?.startsWith("image/")) return;
+    readAvatarFile(file, "profile");
+  }
+
+  function readAvatarFile(file, target) {
+    if (!file) return;
+    const isImage = file.type?.startsWith("image/");
+    const isVideo = file.type?.startsWith("video/");
+    if (!isImage && !isVideo) return;
+    if (isVideo && file.size > 8 * 1024 * 1024) {
+      window.alert?.("视频头像请控制在 8MB 以内。");
+      return;
+    }
     const reader = new FileReader();
     reader.addEventListener("load", () => {
-      openAvatarCropEditor(String(reader.result || ""), { x: 50, y: 50, zoom: 1.12 }, "profile");
+      openAvatarCropEditor(String(reader.result || ""), isVideo
+        ? { x: 50, y: 50, zoom: 1, start: 0, duration: 3 }
+        : { x: 50, y: 50, zoom: 1.12 }, target);
     });
     reader.readAsDataURL(file);
   }
@@ -329,6 +370,7 @@
     openAvatarCropEditor,
     closeAvatarCropEditor,
     updateAvatarCropEditor,
+    updateAvatarTrimControls,
     readFellowAvatarFile,
     readProfileAvatarFile,
     detectedAgentEngineOptions,

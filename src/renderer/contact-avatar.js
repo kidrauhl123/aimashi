@@ -7,6 +7,10 @@
     const avatar = contact && contact.avatar ? contact.avatar : { image: "", crop: null, color: "" };
     const color = avatar.color || "#5e5ce6";
     if (avatar.image) {
+      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
+        global.miaAvatar.applyAvatarMedia(el, avatar.image, avatar.crop, color);
+        return el;
+      }
       const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
       let style = "";
       if (typeof helper === "function") style = helper(avatar.image, avatar.crop, color);

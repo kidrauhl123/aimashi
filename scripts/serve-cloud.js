@@ -47,6 +47,12 @@ try {
 } catch {
   ({ loadSkillsCatalog } = require("./src/cloud/skills-catalog.js"));
 }
+let skillSafety = null;
+try {
+  skillSafety = require("../src/shared/skill-safety.js");
+} catch {
+  skillSafety = require("./src/shared/skill-safety.js");
+}
 let createUserSettingsStore = null;
 try {
   ({ createUserSettingsStore } = require("../src/cloud/user-settings-store.js"));
@@ -2043,11 +2049,21 @@ async function handleRequest(req, res, context) {
       const packageBase64 = String(pubBody?.packageBase64 || "");
       if (!name || !packageBase64) return writeError(res, 400, "name and packageBase64 required.");
       const username = auth.user.username || auth.user.id;
-      const slug = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "skill";
-      const id = pubBody?.id ? String(pubBody.id) : `${username}.${slug}`;
-      const existing = context.skillsStore.getSkill(id);
-      if (existing && existing.ownerUserId && existing.ownerUserId !== auth.user.id) {
+      const ownerNamespace = `${skillSafety.slugify(username)}.`;
+      const requestedId = String(pubBody?.id || "").trim();
+      const requestedNamespacedId = requestedId.includes(".");
+      if (requestedNamespacedId && !requestedId.startsWith(ownerNamespace)) {
         return writeError(res, 403, "你不是这个技能的拥有者。");
+      }
+      const id = requestedNamespacedId ? requestedId : `${ownerNamespace}${skillSafety.slugify(name)}`;
+      if (!skillSafety.isSafeId(id)) return writeError(res, 400, "invalid skill name.");
+      const existing = context.skillsStore.getSkill(id);
+      if (existing && existing.ownerUserId !== auth.user.id) {
+        // also blocks taking over a null-owner (official/seeded) listing
+        return writeError(res, 403, "你不是这个技能的拥有者。");
+      }
+      if (!existing && context.skillsStore.countByOwner(auth.user.id) >= 50) {
+        return writeError(res, 429, "已达到发布数量上限。");
       }
       const zipBuffer = Buffer.from(packageBase64, "base64");
       if (zipBuffer.length > 25 * 1024 * 1024) return writeError(res, 413, "package too large.");

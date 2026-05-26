@@ -10,6 +10,7 @@
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { packageBody, packageDir, packageFromZip } = require("./skill-packages.js");
+const { isSafeId, isSafeVersion, assertInside } = require("../shared/skill-safety.js");
 
 function nowIso() {
   return new Date().toISOString();
@@ -106,8 +107,10 @@ function createSkillsStore(db, options = {}) {
       version = "1.0.0", body = "", srcDir = "", zipBuffer = null, changelog = ""
     } = input || {};
     if (!id || !name) throw new Error("publishVersion: id and name required");
+    if (!isSafeId(id)) throw new Error("publishVersion: invalid skill id");
+    if (!isSafeVersion(version)) throw new Error("publishVersion: invalid version");
     if (!srcDir && !body && !zipBuffer) throw new Error("publishVersion: srcDir, body or zipBuffer required");
-    const destZip = path.join(pkgRoot, String(id), `${version}.zip`);
+    const destZip = assertInside(pkgRoot, path.join(pkgRoot, String(id), `${version}.zip`));
     const pkg = zipBuffer ? packageFromZip(zipBuffer, destZip)
       : srcDir ? packageDir(srcDir, destZip)
       : packageBody(body, destZip);
@@ -147,8 +150,14 @@ function createSkillsStore(db, options = {}) {
   }
 
   // Absolute on-disk path of a version's zip (for serving downloads).
+  // Asserts containment in pkgRoot so a poisoned package_path can't read out.
   function packageAbsPath(version) {
-    return version ? path.join(dataDir, version.packagePath) : "";
+    if (!version || !version.packagePath) return "";
+    try {
+      return assertInside(pkgRoot, path.join(dataDir, version.packagePath));
+    } catch {
+      return "";
+    }
   }
 
   // Idempotent per user: first install bumps the count; re-install just
@@ -176,6 +185,10 @@ function createSkillsStore(db, options = {}) {
 
   function deleteSkill(id) {
     return deleteStmt.run(String(id)).changes;
+  }
+
+  function countByOwner(ownerUserId) {
+    return db.prepare("SELECT COUNT(*) AS n FROM skills WHERE owner_user_id = ?").get(String(ownerUserId)).n;
   }
 
   // Seed/refresh first-party catalog from folders (each entry carries a dir).
@@ -226,6 +239,7 @@ function createSkillsStore(db, options = {}) {
     report,
     setStatus,
     deleteSkill,
+    countByOwner,
     seedFromCatalog,
     backfillBodyVersions
   };

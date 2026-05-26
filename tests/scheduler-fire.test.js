@@ -19,6 +19,7 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
     trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
   });
   const calls = [];
+  const emits = [];
   const runner = createFireRunner({
     store,
     runRemoteChatRequest: async (body) => {
@@ -36,17 +37,27 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
         assistantMessageId: "msg-mock"
       };
     },
-    emit: () => {}
+    emit: (type, payload) => emits.push({ type, payload })
   });
   await runner.fire(store.get(t.id));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].fellowKey, "f");
   assert.equal(calls[0].sessionId, "s");
   assert.equal(calls[0].text, "do");
+  // Task runs go through the independent (background) abort path.
+  assert.equal(calls[0].background, true);
   const after = store.get(t.id);
   assert.equal(after.runs.length, 1);
   assert.equal(after.runs[0].status, "ok");
   assert.equal(after.runs[0].outputMessageId, "msg-mock");
+  // Reply text is copied onto the run so it survives chat-session write races.
+  assert.equal(after.runs[0].outputText, "done");
+  // The finished event carries the reply so the desktop can merge it into the
+  // executor's conversation (delivery-by-event, not direct cross-process write).
+  const finished = emits.find((e) => e.type === "finished");
+  assert.equal(finished.payload.fellowId, "f");
+  assert.equal(finished.payload.outputText, "done");
+  assert.equal(finished.payload.createdAt, "2026-05-20T09:00:01Z");
 });
 
 test("createFireRunner.fire: error path records run with status=failed", async () => {

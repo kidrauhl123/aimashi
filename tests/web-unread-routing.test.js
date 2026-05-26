@@ -77,6 +77,15 @@ test("src/web/index.html loads shared session-history before app.js", () => {
   assert.ok(historyIdx < appIdx, "session-history must be loaded before app.js");
 });
 
+test("src/web/index.html loads shared fellow runtime control before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const controlIdx = html.indexOf("shared/fellow-runtime-control.js");
+  const appIdx = html.indexOf("./app.js");
+  assert.ok(controlIdx >= 0, "index.html must reference shared/fellow-runtime-control.js");
+  assert.ok(appIdx >= 0, "index.html must load app.js");
+  assert.ok(controlIdx < appIdx, "fellow runtime control must be loaded before app.js");
+});
+
 test("src/web/index.html loads desktop markdown helper before app.js", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
   const markdownIdx = html.indexOf("helpers/markdown-helpers.js");
@@ -131,11 +140,23 @@ test("scripts/build-cloud-release.js copies cloud shared modules into the api tr
   );
   assert.match(
     build,
+    /copyFile\(["']src\/shared\/conversation-kinds\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']conversation-kinds\.js["']\)\)/,
+    "build-cloud-release must copy conversation-kinds.js for api shared modules"
+  );
+  assert.match(
+    build,
     /copyFile\(["']src\/shared\/group-fellow-routing\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']group-fellow-routing\.js["']\)\)/,
     "build-cloud-release must copy group-fellow-routing.js for api cloud-agent modules"
   );
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/skill-safety\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']skill-safety\.js["']\)\)/,
+    "build-cloud-release must copy skill-safety.js for api skill package modules"
+  );
+  assert.match(build, /api\/src\/shared\/conversation-kinds\.js/);
   assert.match(build, /api\/src\/shared\/engine-contracts\.js/);
   assert.match(build, /api\/src\/shared\/group-fellow-routing\.js/);
+  assert.match(build, /api\/src\/shared\/skill-safety\.js/);
 });
 
 test("cloud release and local web server expose desktop model icon assets", () => {
@@ -195,7 +216,7 @@ test("src/web/app.js mirrors desktop rail avatar and model icon behavior", () =>
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.match(source, /userAvatar: document\.getElementById\("userAvatar"\)/);
   assert.match(source, /function renderUserAvatar\(\)/);
-  assert.match(source, /avatarBackgroundStyle\(user\.avatarImage/);
+  assert.match(source, /applyAvatarMedia\(els\.userAvatar, image, user\.avatarCrop/);
   assert.match(source, /quickModelAvatar: document\.getElementById\("quickModelAvatar"\)/);
   assert.match(source, /function modelIconSrc\(model = \{\}\)/);
   assert.match(source, /function setModelAvatar\(engine, entry = \{\}, config = \{\}\)/);
@@ -235,13 +256,25 @@ test("src/web/app.js lets web controls update desktop-local fellow runtime bindi
   assert.match(source, /selectEntriesForModel\(engine, runtimeKind, config\)/);
   assert.match(source, /config\.modelEntries/);
   assert.match(source, /const editable = Boolean\(fellowKey\);/);
-  assert.match(source, /body:\s*\{ runtimeKind, enabled: true, config \}/);
+  assert.match(source, /window\.miaFellowRuntimeControl/);
+  assert.match(source, /saveFellowRuntimeControl\(\{/);
+  assert.doesNotMatch(source, /body:\s*\{ runtimeKind, enabled: true, config \}/);
 });
 
-test("src/web/app.js adds clientOpId to PUT runtime writes", () => {
+test("shared fellow runtime control owns Web PUT runtime writes", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  const shared = fs.readFileSync(path.join(ROOT, "src/shared/fellow-runtime-control.js"), "utf8");
   assert.match(source, /method === "POST" \|\| method === "PUT" \|\| method === "PATCH" \|\| method === "DELETE"/);
-  assert.match(source, /\/api\/me\/fellows\/\$\{encodeURIComponent\(fellowKey\)\}\/runtime[\s\S]*method:\s*"PUT"/);
+  assert.match(shared, /\/api\/me\/fellows\/\$\{encodeURIComponent\(fellowKey\)\}\/runtime/);
+  assert.match(shared, /method:\s*"PUT"/);
+  assert.doesNotMatch(source, /\/api\/me\/fellows\/\$\{encodeURIComponent\(fellowKey\)\}\/runtime[\s\S]*method:\s*"PUT"/);
+});
+
+test("cloud release copies shared fellow runtime control into web assets", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(build, /src\/shared\/fellow-runtime-control\.js/);
+  assert.match(build, /path\.join\(webDir, "shared", "fellow-runtime-control\.js"\)/);
+  assert.match(build, /"web\/shared\/fellow-runtime-control\.js"/);
 });
 
 test("src/web/app.js switches conversations before awaiting network hydration", () => {
@@ -265,6 +298,8 @@ test("src/web/app.js restores the topbar chat history selector for fellow rooms"
   assert.match(source, /function renderSessionMenu\(\)/);
   assert.match(source, /function sessionRoomsForRoom\(room\)/);
   assert.match(source, /sessionHistory\.sessionRoomsForRoom/);
+  assert.match(source, /sessionHistory\.sidebarRooms\(state\.rooms/);
+  assert.match(source, /sessionHistory\.fellowDisplayTitle\(room, state\.fellows, "对话"\)/);
   assert.match(source, /sessionHistory\.createFellowSessionPayload/);
   assert.match(source, /function createNewSessionForActive\(\)/);
   assert.match(source, /\/api\/me\/fellow-rooms\/\$\{encodeURIComponent\(payload\.sessionId\)\}/);

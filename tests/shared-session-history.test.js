@@ -57,3 +57,26 @@ test("session-history derives title and new-session payload consistently", () =>
     sessionId: "sess_new"
   });
 });
+
+test("session-history collapses fellow sessions for sidebars but keeps the active blank session selected", () => {
+  const messages = new Map([
+    ["fellow:u:old", { messages: [{ created_at: "2026-01-03T00:00:00.000Z" }] }],
+    ["fellow:u:new", { messages: [] }]
+  ]);
+  const rooms = [
+    { id: "fellow:u:old", type: "fellow", name: "旧标题", decorations: { fellowKey: "rongcha" } },
+    { id: "fellow:u:new", type: "fellow", name: "新对话", decorations: { fellowKey: "rongcha" }, created_at: "2026-01-01T00:00:00.000Z" },
+    { id: "dm:a:b", type: "dm" },
+    { id: "g_1", type: "group" }
+  ];
+
+  const sidebar = sessionHistory.sidebarRooms(rooms, {
+    activeRoomId: "fellow:u:new",
+    messageCache: messages
+  });
+
+  assert.deepEqual(sidebar.map((room) => room.id).sort(), ["dm:a:b", "fellow:u:new", "g_1"].sort());
+  assert.equal(sessionHistory.fellowDisplayTitle(sidebar.find((room) => room.id === "fellow:u:new"), [
+    { id: "rongcha", name: "荣茶" }
+  ]), "荣茶");
+});

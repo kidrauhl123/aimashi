@@ -160,6 +160,323 @@
     return deleteDesktopLocalFellow(options);
   }
 
+  function identityForCapabilities(fellow = {}, capabilities) {
+    return {
+      name: fellow.name || fellow.key || fellow.id,
+      color: fellow.color || "#5e5ce6",
+      avatarImage: fellow.avatarImage || "",
+      avatarCrop: fellow.avatarCrop || null,
+      bio: fellow.bio || fellow.description || "",
+      personaText: fellow.personaText || "",
+      capabilities
+    };
+  }
+
+  async function saveCloudHermesFellowCapabilities({
+    state = {},
+    api = global.mia,
+    social = global.miaSocial,
+    fellow = {},
+    capabilities = []
+  } = {}) {
+    const key = String(fellow.key || fellow.id || "").trim();
+    if (!key) return { key: "", fellow: null, runtime: state.runtime };
+    if (typeof api?.social?.saveFellowIdentity !== "function") throw new Error("云端 Fellow 保存接口不可用。");
+    const response = await api.social.saveFellowIdentity(key, identityForCapabilities(fellow, capabilities));
+    if (response && response.ok === false) throw new Error(response.error || "保存云端 Fellow 能力失败");
+    const saved = savedFellowFromResult(response, { ...fellow, capabilities });
+    const nextFellow = { ...saved, key: saved.key || saved.id || key, id: saved.id || saved.key || key };
+    if (social?.moduleState) {
+      social.moduleState.fellows = [
+        nextFellow,
+        ...social.moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== key)
+      ];
+    }
+    return { key, fellow: nextFellow, runtime: state.runtime };
+  }
+
+  async function saveDesktopLocalFellowCapabilities({
+    api = global.mia,
+    fellow = {},
+    capabilities = []
+  } = {}) {
+    const key = String(fellow.key || fellow.id || "").trim();
+    if (!key) return { key: "", fellow: null, runtime: null };
+    if (typeof api?.saveFellow !== "function") throw new Error("本机 Fellow 保存接口不可用。");
+    const runtime = await api.saveFellow({ ...fellow, capabilities });
+    const fellows = runtime?.fellows || runtime?.personas || [];
+    const saved = fellows.find((item) => item.key === key || item.id === key) || null;
+    return { key, fellow: saved, runtime };
+  }
+
+  async function saveFellowCapabilities(options = {}) {
+    const fellow = options.fellow || {};
+    const runtimeKind = String(fellow.runtimeKind || options.runtimeKind || "desktop-local").trim();
+    if (runtimeKind === "cloud-hermes") return saveCloudHermesFellowCapabilities(options);
+    return saveDesktopLocalFellowCapabilities(options);
+  }
+
+  function runtimeCacheKey(fellowKey, runtimeKind = "cloud-hermes") {
+    return `${fellowKey}:${runtimeKind}`;
+  }
+
+  async function getFellowRuntimeBinding({
+    api = global.mia,
+    cache = null,
+    fellowKey = "",
+    runtimeKind = "cloud-hermes"
+  } = {}) {
+    const key = String(fellowKey || "").trim();
+    const kind = String(runtimeKind || "cloud-hermes").trim();
+    if (!key || kind !== "cloud-hermes") return null;
+    const cacheKey = runtimeCacheKey(key, kind);
+    if (cache?.has?.(cacheKey)) return cache.get(cacheKey);
+    if (typeof api?.social?.getFellowRuntime !== "function") throw new Error("云端 Fellow 运行配置读取接口不可用。");
+    const response = await api.social.getFellowRuntime(key, kind);
+    if (!response?.ok) throw new Error(response?.error || "读取云端运行配置失败");
+    const binding = response.data?.binding || null;
+    cache?.set?.(cacheKey, binding);
+    return binding;
+  }
+
+  async function saveFellowRuntimeConfig({
+    api = global.mia,
+    cache = null,
+    fellowKey = "",
+    runtimeKind = "cloud-hermes",
+    patch = {}
+  } = {}) {
+    const key = String(fellowKey || "").trim();
+    const kind = String(runtimeKind || "cloud-hermes").trim();
+    if (!key || kind !== "cloud-hermes") return { saved: false, binding: null };
+    const current = await getFellowRuntimeBinding({ api, cache, fellowKey: key, runtimeKind: kind }) || {
+      fellowId: key,
+      runtimeKind: kind,
+      enabled: true,
+      config: {}
+    };
+    if (typeof api?.social?.saveFellowRuntime !== "function") throw new Error("云端 Fellow 运行配置保存接口不可用。");
+    const response = await api.social.saveFellowRuntime(key, {
+      runtimeKind: kind,
+      enabled: true,
+      config: { ...(current.config || {}), ...(patch || {}) }
+    });
+    if (!response?.ok) throw new Error(response?.error || "保存云端运行配置失败");
+    const binding = response.data?.binding || {
+      ...current,
+      runtimeKind: kind,
+      enabled: true,
+      config: { ...(current.config || {}), ...(patch || {}) }
+    };
+    cache?.set?.(runtimeCacheKey(key, kind), binding);
+    return { saved: true, binding };
+  }
+
+  function normalizeAgentEngine(value, engineContracts = global?.miaEngineContracts) {
+    const normalizer = engineContracts?.normalizeAgentEngine;
+    if (typeof normalizer === "function") return normalizer(value);
+    const id = String(value || "hermes").trim().toLowerCase().replace(/_/g, "-");
+    if (id === "claude" || id === "claude-code") return "claude-code";
+    if (id === "codex" || id === "openai-codex") return "codex";
+    return "hermes";
+  }
+
+  function normalizeModelEntry(entry = {}, fallbackProvider = "") {
+    return {
+      value: String(entry.model || entry.id || entry.value || "").trim(),
+      label: String(entry.label || entry.model || entry.id || entry.value || "Default").trim(),
+      model: String(entry.model || "").trim(),
+      provider: String(entry.provider || fallbackProvider || "").trim(),
+      providerLabel: String(entry.providerLabel || entry.provider_label || "").trim()
+    };
+  }
+
+  function localHermesModelEntries(runtime = {}, modelSettings = global?.miaModelSettings) {
+    const entries = typeof modelSettings?.connectedModelEntries === "function"
+      ? modelSettings.connectedModelEntries(runtime)
+      : [];
+    return (Array.isArray(entries) ? entries : [])
+      .map((entry) => normalizeModelEntry(entry))
+      .filter((entry) => entry.value);
+  }
+
+  function externalModelEntries(engine, engineOptions = global?.miaEngineOptions) {
+    const entries = typeof engineOptions?.externalModelEntries === "function"
+      ? engineOptions.externalModelEntries(engine)
+      : [];
+    return (Array.isArray(entries) ? entries : [])
+      .map((entry) => normalizeModelEntry(entry, engine))
+      .filter((entry) => entry.value || entry.model === "");
+  }
+
+  function desktopLocalRuntimeConfig({
+    state = {},
+    fellow = {},
+    engineContracts = global?.miaEngineContracts,
+    modelSettings = global?.miaModelSettings,
+    engineOptions = global?.miaEngineOptions
+  } = {}) {
+    const runtime = state.runtime || {};
+    const engine = normalizeAgentEngine(fellow?.agentEngine || fellow?.agent_engine || "hermes", engineContracts);
+    const engineConfig = fellow?.engineConfig || fellow?.engine_config || {};
+    const config = { agentEngine: engine };
+    if (engine === "claude-code" || engine === "codex") {
+      config.model = String(engineConfig.model || "").trim();
+      config.effortLevel = String(engineConfig.effortLevel || "medium").trim();
+      config.permissionMode = String(engineConfig.permissionMode || "default").trim();
+      config.modelEntries = externalModelEntries(engine, engineOptions);
+      return config;
+    }
+    config.model = String(runtime.model?.model || "").trim();
+    config.effortLevel = String(runtime.effort?.level || "medium").trim();
+    config.permissionMode = String(runtime.permissions?.mode || "ask").trim();
+    config.modelEntries = localHermesModelEntries(runtime, modelSettings);
+    return config;
+  }
+
+  async function syncDesktopLocalFellowRuntimeBinding({
+    api = global?.mia?.social,
+    state = {},
+    fellow = {},
+    engineContracts = global?.miaEngineContracts,
+    modelSettings = global?.miaModelSettings,
+    engineOptions = global?.miaEngineOptions
+  } = {}) {
+    const fellowKey = String(fellow?.key || fellow?.id || "").trim();
+    if (!fellowKey || typeof api?.saveFellowRuntime !== "function") return null;
+    const body = {
+      runtimeKind: "desktop-local",
+      enabled: true,
+      config: desktopLocalRuntimeConfig({ state, fellow, engineContracts, modelSettings, engineOptions })
+    };
+    const response = await api.saveFellowRuntime(fellowKey, body);
+    if (response && response.ok === false) throw new Error(response.error || "保存本机 Fellow 运行配置失败");
+    return response?.data?.binding || response?.binding || { fellowId: fellowKey, ...body };
+  }
+
+  async function ensureDesktopLocalFellowRoom({
+    api = global?.mia?.social,
+    state = {},
+    fellow = {},
+    engineContracts = global?.miaEngineContracts,
+    modelSettings = global?.miaModelSettings,
+    engineOptions = global?.miaEngineOptions,
+    onRoom = null
+  } = {}) {
+    const fellowKey = String(fellow?.key || fellow?.id || "").trim();
+    if (!fellowKey || typeof api?.ensureFellowRoom !== "function") return { key: fellowKey, room: null, binding: null };
+    const result = await api.ensureFellowRoom(fellowKey, {
+      title: fellow.name || fellow.displayName || fellowKey,
+      runtimeKind: "desktop-local"
+    });
+    const binding = await syncDesktopLocalFellowRuntimeBinding({
+      api,
+      state,
+      fellow: { ...fellow, key: fellowKey },
+      engineContracts,
+      modelSettings,
+      engineOptions
+    });
+    if (result && result.ok === false) throw new Error(result.error || result.message || result.data?.error || "创建本机 Fellow 云端会话失败");
+    const room = roomFromResult(result);
+    const savedRoom = room && typeof onRoom === "function" ? onRoom(room) : room;
+    return { key: fellowKey, room: savedRoom || null, binding };
+  }
+
+  function modelEntryForValue(entries = [], value = "") {
+    const wanted = String(value || "").trim();
+    return (Array.isArray(entries) ? entries : [])
+      .find((entry) => [entry?.id, entry?.value, entry?.model].some((item) => String(item || "").trim() === wanted)) || null;
+  }
+
+  function patchForRuntimeField(field, value, modelEntries = []) {
+    if (field === "model") {
+      const entry = modelEntryForValue(modelEntries, value);
+      return { model: entry?.model ?? value };
+    }
+    if (field === "effortLevel" || field === "permissionMode") return { [field]: value };
+    return {};
+  }
+
+  async function saveDesktopLocalFellowRuntimeControl({
+    api = global?.mia,
+    fellow = {},
+    field = "",
+    value = "",
+    modelEntries = [],
+    engineContracts = global?.miaEngineContracts
+  } = {}) {
+    const key = String(fellow?.key || fellow?.id || "").trim();
+    const engine = normalizeAgentEngine(fellow?.agentEngine || fellow?.agent_engine || "hermes", engineContracts);
+    if (!key) return { saved: false, runtime: null };
+
+    if (engine === "claude-code" || engine === "codex") {
+      if (typeof api?.saveFellowEngine !== "function") return { saved: false, runtime: null };
+      const engineConfig = patchForRuntimeField(field, value, modelEntries);
+      if (!Object.keys(engineConfig).length) return { saved: false, runtime: null };
+      const runtime = await api.saveFellowEngine({
+        key,
+        agentEngine: engine,
+        engineConfig
+      });
+      return { saved: true, runtime };
+    }
+
+    if (field === "model") {
+      const entry = modelEntryForValue(modelEntries, value);
+      if (!entry || typeof api?.saveModel !== "function") return { saved: false, runtime: null };
+      const runtime = await api.saveModel({
+        provider: entry.provider,
+        model: entry.model,
+        apiKeyEnv: entry.apiKeyEnv,
+        baseUrl: entry.baseUrl,
+        apiMode: entry.apiMode,
+        providerLabel: entry.providerLabel,
+        authType: entry.authType
+      });
+      return { saved: true, runtime };
+    }
+    if (field === "effortLevel") {
+      if (typeof api?.saveEffort !== "function") return { saved: false, runtime: null };
+      const runtime = await api.saveEffort({ level: value });
+      return { saved: true, runtime };
+    }
+    if (field === "permissionMode") {
+      if (typeof api?.savePermissions !== "function") return { saved: false, runtime: null };
+      const runtime = await api.savePermissions({ mode: value });
+      return { saved: true, runtime };
+    }
+    return { saved: false, runtime: null };
+  }
+
+  async function saveFellowRuntimeControl({
+    api = global?.mia,
+    cache = null,
+    fellow = {},
+    runtimeKind = fellow?.runtimeKind || fellow?.runtime_kind || "desktop-local",
+    field = "",
+    value = "",
+    modelEntries = [],
+    engineContracts = global?.miaEngineContracts
+  } = {}) {
+    const kind = String(runtimeKind || fellow?.runtimeKind || fellow?.runtime_kind || "desktop-local").trim();
+    const key = String(fellow?.key || fellow?.id || "").trim();
+    if (!key) return { saved: false, runtime: null, binding: null };
+    if (kind === "cloud-hermes") {
+      const patch = patchForRuntimeField(field, value, modelEntries);
+      if (!Object.keys(patch).length) return { saved: false, binding: null };
+      return saveFellowRuntimeConfig({ api, cache, fellowKey: key, runtimeKind: kind, patch });
+    }
+    return saveDesktopLocalFellowRuntimeControl({
+      api,
+      fellow: { ...fellow, key, runtimeKind: kind },
+      field,
+      value,
+      modelEntries,
+      engineContracts
+    });
+  }
+
   const api = {
     slugFromFellowName,
     cloudFellowKeyFromName,
@@ -169,7 +486,18 @@
     saveFellow,
     deleteCloudHermesFellow,
     deleteDesktopLocalFellow,
-    deleteFellow
+    deleteFellow,
+    saveCloudHermesFellowCapabilities,
+    saveDesktopLocalFellowCapabilities,
+    saveFellowCapabilities,
+    runtimeCacheKey,
+    getFellowRuntimeBinding,
+    saveFellowRuntimeConfig,
+    desktopLocalRuntimeConfig,
+    syncDesktopLocalFellowRuntimeBinding,
+    ensureDesktopLocalFellowRoom,
+    saveDesktopLocalFellowRuntimeControl,
+    saveFellowRuntimeControl
   };
 
   if (typeof module === "object" && module.exports) module.exports = api;

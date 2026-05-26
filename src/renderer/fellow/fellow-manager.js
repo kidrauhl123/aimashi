@@ -313,7 +313,7 @@
       button.type = "button";
       button.className = `contact-row${fellow.key === state.activeContactKey ? " active" : ""}`;
       button.innerHTML = `
-        <span class="avatar fellow-photo" style="${window.miaAvatar.avatarThumbBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></span>
+        <span class="avatar fellow-photo"></span>
         <span class="contact-row-main">
           <strong>${window.miaMarkdown.escapeHtml(fellow.name)}</strong>
           <small>${window.miaMarkdown.escapeHtml(fellowSubtitle(fellow))}</small>
@@ -326,6 +326,12 @@
         renderContacts();
       });
       button.addEventListener("dblclick", () => openFellowChat(fellow.key));
+      window.miaAvatar.applyAvatarMedia(
+        button.querySelector(".fellow-photo"),
+        fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key),
+        fellow.avatarCrop,
+        fellow.color || "#5e5ce6"
+      );
       els.contactList.appendChild(button);
     }
     if (!visibleContacts.length) {
@@ -345,7 +351,7 @@
     els.contactDetail.innerHTML = `
       <article class="contact-profile">
         <header class="contact-profile-head">
-          <button class="contact-profile-avatar" type="button" ${canEditFellow ? 'data-contact-action="edit" title="编辑联系人头像"' : 'title="联系人头像"'} style="${window.miaAvatar.avatarBackgroundStyle(fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key), fellow.avatarCrop, fellow.color || "#5e5ce6")}"></button>
+          <button class="contact-profile-avatar" type="button" ${canEditFellow ? 'data-contact-action="edit" title="编辑联系人头像"' : 'title="联系人头像"'}></button>
           <div class="contact-profile-title">
             <h2>${window.miaMarkdown.escapeHtml(fellow.name || "联系人")}</h2>
             <div class="contact-engine-badge" title="Agent 引擎">
@@ -370,6 +376,12 @@
         ${fellow.canConfigureCapabilities !== false ? renderFellowCapabilitiesPanel(fellow) : ""}
       </article>
     `;
+    window.miaAvatar.applyAvatarMedia(
+      els.contactDetail.querySelector(".contact-profile-avatar"),
+      fellow.avatarImage || window.miaAvatar.avatarAssetForKey(fellow.key),
+      fellow.avatarCrop,
+      fellow.color || "#5e5ce6"
+    );
     els.contactDetail.querySelector('[data-contact-action="message"]')?.addEventListener("click", () => openFellowChat(fellow.key));
     els.contactDetail.querySelectorAll('[data-contact-action="edit"]').forEach((button) => {
       button.addEventListener("click", () => openEditFellowDialog(fellow.key));
@@ -384,30 +396,14 @@
     if (!fellow?.key || !state) return;
     state.savingFellowCapabilities.add(fellow.key);
     try {
-      if (fellow.runtimeKind === "cloud-hermes") {
-        const response = await window.mia.social.saveFellowIdentity(fellow.key, {
-          name: fellow.name || fellow.key,
-          color: fellow.color || "#5e5ce6",
-          avatarImage: fellow.avatarImage || "",
-          avatarCrop: fellow.avatarCrop || null,
-          bio: fellow.bio || fellow.description || "",
-          personaText: fellow.personaText || "",
-          capabilities
-        });
-        if (response && response.ok === false) throw new Error(response.error || "保存云端 Fellow 能力失败");
-        if (window.miaSocial?.moduleState) {
-          const saved = response?.data?.fellow || response?.fellow || { ...fellow, capabilities };
-          window.miaSocial.moduleState.fellows = [
-            { ...saved, key: saved.key || saved.id || fellow.key },
-            ...window.miaSocial.moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== fellow.key)
-          ];
-        }
-      } else {
-        state.runtime = await window.mia.saveFellow({
-          ...fellow,
-          capabilities
-        });
-      }
+      const result = await window.miaFellowCommands.saveFellowCapabilities({
+        state,
+        fellow,
+        capabilities,
+        api: window.mia,
+        social: window.miaSocial
+      });
+      if (result?.runtime) state.runtime = result.runtime;
     } catch (error) {
       window.alert(`保存能力设置失败：${error.message || error}`);
     } finally {

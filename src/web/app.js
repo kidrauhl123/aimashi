@@ -8,6 +8,7 @@ const { computeUnreadForConversation, totalUnreadFromConversations, unreadBadgeH
 const { prepareOutgoingMessage } = window.miaSendPipeline;
 const { SenderKind } = window.miaConversationKinds;
 const sessionHistory = window.miaSessionHistory || {};
+const fellowRuntimeControl = window.miaFellowRuntimeControl || {};
 const engineContracts = window.miaEngineContracts || {};
 const normalizeAgentEngine = engineContracts.normalizeAgentEngine || ((value) => {
   const id = String(value || "hermes").trim().toLowerCase().replace(/_/g, "-");
@@ -201,8 +202,13 @@ function initials(value) {
 }
 
 function isPublicImageSrc(value) {
-  return /^(https?:|data:|\.?\/assets\/)/i.test(String(value || ""));
+  return /^(https?:|data:|\.?\/assets\/|\/api\/files\/)/i.test(String(value || ""));
 }
+
+const avatarMedia = window.miaAvatarMedia || {
+  isVideo: () => false,
+  trimFromCrop: () => ({ start: 0, duration: 3 })
+};
 
 function attachmentKind(file = {}) {
   const type = String(file.mimeType || file.mime || file.type || "").toLowerCase();
@@ -333,6 +339,7 @@ const AVATAR_PRESETS = {
 
 function avatarBackgroundStyle(image, customCrop, fallbackColor) {
   if (!image) return `background-color:${fallbackColor};color:#fff;display:inline-flex;align-items:center;justify-content:center;`;
+  if (avatarMedia.isVideo?.(image)) return `background-color:${fallbackColor};color:#fff;display:inline-flex;align-items:center;justify-content:center;`;
   const preset = AVATAR_PRESETS[image] || null;
   // Treat (50, 50, 1) as "no crop set" so we fall back to the preset crop
   // for human avatars even when the synced conversation didn't carry one.
@@ -349,19 +356,94 @@ function avatarBackgroundStyle(image, customCrop, fallbackColor) {
   return `background-color:transparent;background-image:url('${image}');background-size:${size}%;background-position:${x}% ${y}%;background-repeat:no-repeat;`;
 }
 
+function avatarVideoStyle(crop = {}) {
+  const x = Number.isFinite(Number(crop?.x)) ? Number(crop.x) : 50;
+  const y = Number.isFinite(Number(crop?.y)) ? Number(crop.y) : 50;
+  const zoom = Number.isFinite(Number(crop?.zoom)) ? Number(crop.zoom) : 1;
+  return `object-position:${x}% ${y}%;transform:scale(${zoom});transform-origin:${x}% ${y}%;`;
+}
+
+function avatarVideoHtml(image, crop = {}) {
+  const trim = avatarMedia.trimFromCrop?.(crop) || { start: 0, duration: 3 };
+  return `<video class="avatar-video" src="${escapeHtml(image)}" muted loop autoplay playsinline aria-hidden="true" data-avatar-start="${escapeHtml(trim.start)}" data-avatar-duration="${escapeHtml(trim.duration)}" style="${avatarVideoStyle(crop)}"></video>`;
+}
+
+function avatarHtml({ className = "avatar", image = "", crop = null, color = "#5e5ce6", text = "", attrs = "" } = {}) {
+  const useAvatar = image && isPublicImageSrc(image);
+  if (useAvatar && avatarMedia.isVideo?.(image)) {
+    return `<span class="${escapeHtml(className)}" ${attrs} style="background-color:${escapeHtml(color)};">${avatarVideoHtml(image, crop || {})}</span>`;
+  }
+  const style = useAvatar
+    ? avatarBackgroundStyle(image, crop, color)
+    : `background-color:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
+  return `<span class="${escapeHtml(className)}" ${attrs} style="${style}">${useAvatar ? "" : escapeHtml(text || "")}</span>`;
+}
+
+function avatarHtmlForConversation(item, color, label) {
+  return avatarHtml({
+    className: "avatar",
+    image: item.avatar,
+    crop: item.avatarCrop,
+    color,
+    text: label
+  });
+}
+
+function applyAvatarMedia(el, image, crop = null, color = "#5e5ce6", text = "") {
+  if (!el) return;
+  el.querySelectorAll?.(".avatar-video")?.forEach((node) => node.remove());
+  const useAvatar = image && isPublicImageSrc(image);
+  if (useAvatar && avatarMedia.isVideo?.(image)) {
+    el.style.cssText = `background-color:${color};`;
+    el.textContent = "";
+    el.insertAdjacentHTML("afterbegin", avatarVideoHtml(image, crop || {}));
+    hydrateAvatarVideos(el);
+    return;
+  }
+  if (useAvatar) {
+    el.style.cssText = avatarBackgroundStyle(image, crop, color);
+    el.textContent = "";
+    return;
+  }
+  el.style.cssText = "";
+  el.style.backgroundColor = color;
+  el.style.color = "#fff";
+  el.style.display = "inline-flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.textContent = text || "";
+}
+
+function syncAvatarVideo(video) {
+  const start = Math.max(0, Number(video.dataset.avatarStart || 0) || 0);
+  const duration = Math.max(1, Number(video.dataset.avatarDuration || 3) || 3);
+  const end = start + duration;
+  const seekStart = () => {
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+    const safeStart = Math.min(start, Math.max(video.duration - 0.1, 0));
+    if (Math.abs(video.currentTime - safeStart) > 0.25) video.currentTime = safeStart;
+  };
+  video.addEventListener("loadedmetadata", seekStart);
+  video.addEventListener("timeupdate", () => {
+    if (video.currentTime >= end) seekStart();
+  });
+  video.play?.().catch?.(() => {});
+}
+
+function hydrateAvatarVideos(root = document) {
+  root.querySelectorAll?.("video.avatar-video")?.forEach((video) => {
+    if (video.dataset.avatarHydrated === "true") return;
+    video.dataset.avatarHydrated = "true";
+    syncAvatarVideo(video);
+  });
+}
+
 function renderUserAvatar() {
   if (!els.userAvatar) return;
   const user = state.user || {};
   const color = user.avatarColor || "#111827";
   const image = user.avatarImage || "";
-  if (image && isPublicImageSrc(image)) {
-    els.userAvatar.style.cssText = avatarBackgroundStyle(user.avatarImage, user.avatarCrop, color);
-    els.userAvatar.textContent = "";
-  } else {
-    els.userAvatar.style.cssText = "";
-    els.userAvatar.style.backgroundColor = color;
-    els.userAvatar.textContent = initials(user.username || user.email || "Mia");
-  }
+  applyAvatarMedia(els.userAvatar, image, user.avatarCrop, color, initials(user.username || user.email || "Mia"));
   els.userAvatar.title = user.username ? `账号与同步：${user.username}` : "账号与同步";
 }
 
@@ -893,12 +975,7 @@ function roomDisplayTitle(room) {
     return friendUsernameById(otherId);
   }
   if (room.type === "fellow" || room.id?.startsWith("fellow:")) {
-    // Title = room.name (the session title); fall back to fellow name
-    // resolved from cloud-mirrored fellow definitions.
-    if (room.name) return room.name;
-    const fellowKey = room.decorations?.fellowKey || (room.id?.split(":")[2] || "");
-    const fellow = state.fellows?.find((f) => f.id === fellowKey);
-    return fellow?.name || fellowKey || "对话";
+    return sessionHistory.fellowDisplayTitle(room, state.fellows, "对话");
   }
   return room.name || "未命名群聊";
 }
@@ -934,6 +1011,9 @@ function engineForRuntimeBinding(runtimeKind, binding) {
 }
 
 function runtimeCacheKey(fellowKey, runtimeKind) {
+  if (typeof fellowRuntimeControl.runtimeCacheKey === "function") {
+    return fellowRuntimeControl.runtimeCacheKey(fellowKey, runtimeKind || "cloud-hermes");
+  }
   return `${fellowKey}:${runtimeKind || "cloud-hermes"}`;
 }
 
@@ -968,11 +1048,17 @@ async function ensureFellowRuntime(fellowKey, runtimeKind = "cloud-hermes") {
   if (!fellowKey) return null;
   const key = runtimeCacheKey(fellowKey, runtimeKind);
   if (state.fellowRuntimeCache.has(key)) return state.fellowRuntimeCache.get(key);
+  if (typeof fellowRuntimeControl.getFellowRuntimeBinding !== "function") {
+    state.fellowRuntimeCache.set(key, null);
+    return null;
+  }
   try {
-    const data = await api(`/api/me/fellows/${encodeURIComponent(fellowKey)}/runtime?kind=${encodeURIComponent(runtimeKind)}`);
-    const binding = data?.binding || null;
-    state.fellowRuntimeCache.set(key, binding);
-    return binding;
+    return await fellowRuntimeControl.getFellowRuntimeBinding({
+      api,
+      cache: state.fellowRuntimeCache,
+      fellowKey,
+      runtimeKind
+    });
   } catch (err) {
     console.warn("[web] fellow runtime GET failed:", err);
     state.fellowRuntimeCache.set(key, null);
@@ -1123,19 +1209,23 @@ async function saveWebAiControl(kind, value) {
   };
   const config = { ...(current.config || {}) };
   const engine = engineForRuntimeBinding(runtimeKind, current);
-  if (kind === "model") {
-    const entry = selectEntriesForModel(engine, runtimeKind, config).find((item) => item.value === value);
-    config.model = entry?.model ?? value;
-  }
-  else if (kind === "effort") config.effortLevel = value;
-  else if (kind === "permission") config.permissionMode = value;
+  const modelEntries = kind === "model" ? selectEntriesForModel(engine, runtimeKind, config) : [];
   setModelSwitchStatus("保存中...", true);
   try {
-    const data = await api(`/api/me/fellows/${encodeURIComponent(fellowKey)}/runtime`, {
-      method: "PUT",
-      body: { runtimeKind, enabled: true, config }
+    if (typeof fellowRuntimeControl.saveFellowRuntimeControl !== "function") {
+      throw new Error("Fellow runtime control is unavailable.");
+    }
+    const result = await fellowRuntimeControl.saveFellowRuntimeControl({
+      api,
+      cache: state.fellowRuntimeCache,
+      fellow: { key: fellowKey, id: fellowKey, runtimeKind },
+      fellowKey,
+      runtimeKind,
+      field: kind,
+      value,
+      modelEntries
     });
-    state.fellowRuntimeCache.set(key, data?.binding || { ...current, config });
+    if (result?.binding) state.fellowRuntimeCache.set(key, result.binding);
     renderComposerControls(room);
     setModelSwitchStatus("已更新", true);
   } catch (err) {
@@ -1298,7 +1388,11 @@ function groupTilesCtx() {
 // Pinned items sort to the top regardless of recency, mirroring the
 // ChatGPT-style pin behavior the user asked for.
 function combinedConversationItems() {
-  const room = state.rooms.map((r) => {
+  const sidebarRooms = sessionHistory.sidebarRooms(state.rooms, {
+    activeRoomId: state.activeConversationId,
+    messageCache: state.messageCache
+  });
+  const room = sidebarRooms.map((r) => {
     // id-prefix fallback for cloud deployments that haven't shipped the v7
     // type column yet. Remove once every server is on schema ≥ v7.
     const isDM = r.type === "dm" || r.id?.startsWith("dm:");
@@ -1374,25 +1468,21 @@ function renderConversationList() {
     // Group rooms: paint a mosaic from real member avatars. The tile
     // markup is built into avatarHtml, replacing the single-letter avatar
     // span used for 1-on-1 rows.
-    let avatarHtml = "";
+    let avatarMarkup = "";
     if (it.isGroup) {
       const tiles = Array.isArray(it.memberTiles) ? it.memberTiles : [];
       const tileSpans = tiles.map((tile) => {
         const fallback = tile.color || "#5e5ce6";
-        const useImg = tile.image && (/^(https?:|data:|\.?\/assets\/)/i.test(tile.image));
-        const style = useImg
-          ? avatarBackgroundStyle(tile.image, tile.crop, fallback)
-          : `background-color:${fallback};`;
-        return `<span class="group-avatar-tile" style="${style}"></span>`;
+        return avatarHtml({
+          className: "group-avatar-tile",
+          image: tile.image,
+          crop: tile.crop,
+          color: fallback
+        });
       }).join("");
-      avatarHtml = `<span class="avatar group-avatar" data-count="${tiles.length}">${tileSpans}</span>`;
+      avatarMarkup = `<span class="avatar group-avatar" data-count="${tiles.length}">${tileSpans}</span>`;
     } else {
-      const useAvatar = it.avatar && (/^(https?:|data:|\.?\/assets\/)/i.test(it.avatar));
-      const avatarStyle = useAvatar
-        ? avatarBackgroundStyle(it.avatar, it.avatarCrop, color)
-        : `background-color:${color}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
-      const avatarText = useAvatar ? "" : escapeHtml(avatarLabel);
-      avatarHtml = `<span class="avatar" style="${avatarStyle}">${avatarText}</span>`;
+      avatarMarkup = avatarHtmlForConversation(it, color, avatarLabel);
     }
     // ⋯ menu: workspace conversations + cloud rooms (PATCH/DELETE /api/rooms
     // shipped — see commit 90671e4). Pin uses local storage; rename + delete
@@ -1415,7 +1505,7 @@ function renderConversationList() {
     return `
       <div class="persona-row${it.pinned ? " pinned" : ""}${it.id === state.activeConversationId ? " active" : ""}${unread > 0 ? " has-unread" : ""}">
         <button class="persona" type="button" data-conv-id="${escapeHtml(it.id)}" data-conv-kind="${it.kind}">
-          ${avatarHtml}
+          ${avatarMarkup}
           <span class="persona-main">
             <strong class="persona-name">${it.pinned ? "📌 " : ""}${escapeHtml(it.title)}</strong>
             <span class="persona-preview">${escapeHtml(it.preview)}</span>
@@ -1426,6 +1516,7 @@ function renderConversationList() {
       </div>
     `;
   }).join("");
+  hydrateAvatarVideos(els.conversationList);
 }
 
 // Strip the wrapping <span class="unread-badge"> shared/unread produces so we
@@ -1615,16 +1706,18 @@ function buildRoomMessageArticle(msg, room) {
     ? (state.user?.username?.[0] || "M").toUpperCase()
     : (senderLabel?.[0] || "?").toUpperCase();
   const fallbackColor = isOwn ? "#0162db" : (senderColor || "#5e5ce6");
-  const useAvatar = senderAvatar && (/^(https?:|data:|\.?\/assets\/)/i.test(senderAvatar));
-  const avatarStyle = useAvatar
-    ? avatarBackgroundStyle(senderAvatar, senderCrop, fallbackColor)
-    : `background-color:${fallbackColor}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
-  const avatarText = useAvatar ? "" : escapeHtml(initial);
+  const avatarMarkup = avatarHtml({
+    className: "avatar",
+    image: senderAvatar,
+    crop: senderCrop,
+    color: fallbackColor,
+    text: initial
+  });
   const bodyHtml = spec.bodyMd ? `<div class="bubble">${renderMarkdown(spec.bodyMd)}</div>` : "";
   const attachmentHtml = renderAttachmentChips(spec.attachments || msg.attachments || []);
   return `
     <article class="${cls}">
-      <span class="avatar" style="${avatarStyle}">${avatarText}</span>
+      ${avatarMarkup}
       <div class="message-stack">
         ${senderLabel && !isOwn ? `<span class="message-sender">${escapeHtml(senderLabel)}</span>` : ""}
         ${bodyHtml}
@@ -1651,10 +1744,13 @@ function buildCloudAgentStreamingArticle(room, run) {
   const source = window.miaCloudRoomSource.createCloudRoomSource({ room, messages: [msg], members, ctx });
   const spec = source.listMessages()[0];
   const avatar = spec.avatar || {};
-  const avatarStyle = avatar.image
-    ? avatarBackgroundStyle(avatar.image, avatar.crop, avatar.color || "#5e5ce6")
-    : `background-color:${avatar.color || "#5e5ce6"}; color:#fff; display:inline-flex; align-items:center; justify-content:center;`;
-  const avatarText = avatar.image ? "" : escapeHtml((spec.authorName?.[0] || "?").toUpperCase());
+  const avatarMarkup = avatarHtml({
+    className: "avatar",
+    image: avatar.image,
+    crop: avatar.crop,
+    color: avatar.color || "#5e5ce6",
+    text: (spec.authorName?.[0] || "?").toUpperCase()
+  });
   const textHtml = run.text ? `<div class="bubble">${renderMarkdown(run.text)}</div>` : "";
   const statusHtml = run.status === "running"
     ? `<div class="bubble"><span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span></div>`
@@ -1664,7 +1760,7 @@ function buildCloudAgentStreamingArticle(room, run) {
     : "";
   return `
     <article class="message assistant streaming">
-      <span class="avatar" style="${avatarStyle}">${avatarText}</span>
+      ${avatarMarkup}
       <div class="message-stack">${textHtml}${statusHtml}${toolsHtml}</div>
     </article>
   `;
@@ -1744,21 +1840,13 @@ function renderActiveChat() {
       peerCrop = fellow?.avatarCrop || null;
       peerColor = fellow?.color || "";
     }
-    const useAvatar = peerAvatar && (/^(https?:|data:|\.?\/assets\/)/i.test(peerAvatar));
-    if (useAvatar) {
-      const styleStr = avatarBackgroundStyle(peerAvatar, peerCrop, peerColor || "#5e5ce6");
-      els.activeAvatar.style.cssText = styleStr;
-      els.activeAvatar.textContent = "";
-    } else {
-      els.activeAvatar.style.cssText = "";
-      els.activeAvatar.style.backgroundImage = "";
-      els.activeAvatar.style.backgroundColor = peerColor || (isDM ? "#5e5ce6" : isFellow ? "#ff9f0a" : "#34c759");
-      els.activeAvatar.style.color = "#fff";
-      els.activeAvatar.style.display = "inline-flex";
-      els.activeAvatar.style.alignItems = "center";
-      els.activeAvatar.style.justifyContent = "center";
-      els.activeAvatar.textContent = (title[0] || "?").toUpperCase();
-    }
+    applyAvatarMedia(
+      els.activeAvatar,
+      peerAvatar,
+      peerCrop,
+      peerColor || (isDM ? "#5e5ce6" : isFellow ? "#ff9f0a" : "#34c759"),
+      (title[0] || "?").toUpperCase()
+    );
     els.activeTitle.textContent = title;
     els.activeMeta.textContent = isDM ? "私聊" : isFellow ? "AI 私聊" : "群聊";
     renderSessionMenu();
@@ -1770,6 +1858,7 @@ function renderActiveChat() {
       ? `${messages.map((m) => buildRoomMessageArticle(m, room)).join("")}${streaming}`
       : `<p class="persona-empty">还没有消息。</p>`;
     if (!messages.length && streaming) els.chat.innerHTML = streaming;
+    hydrateAvatarVideos(els.chat);
     if (messages.length || streaming) els.chat.scrollTop = els.chat.scrollHeight;
     setComposerEnabled(true, "输入消息，Enter 发送，Shift+Enter 换行");
     return;

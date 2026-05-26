@@ -447,6 +447,91 @@ test("handleUserMessage routes cloud group search requests to a search-capable f
   }
 });
 
+test("handleUserMessage uses a cloud conductor when a multi-fellow cloud group has no direct route", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "xiaoli", name: "小栗", capabilities: ["chat"] });
+    const group = ctx.socialStore.createRoom({
+      id: "g_cloud_conductor",
+      type: "group",
+      name: "Cloud Group",
+      decorations: {
+        responseMode: "conductor",
+        hostMember: { kind: "fellow", fellowId: "alice" }
+      }
+    });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
+    ctx.socialStore.addRoomMember({ roomId: group.id, memberKind: "fellow", memberRef: "xiaoli", ownerId: ctx.user.id });
+    for (const fellowId of ["alice", "xiaoli"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = createCloudAgentDispatcher({
+      socialStore: ctx.socialStore,
+      messagesStore: ctx.messagesStore,
+      fellowsStore: ctx.fellowsStore,
+      runtimeBindingsStore: ctx.runtimeBindingsStore,
+      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+      workerManager: {
+        async ensureWorker(userId) {
+          return { userId, baseUrl: "http://worker", apiKey: "k" };
+        }
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          if (args.metadataRole === "group-conductor") {
+            assert.equal(args.fellow.id, "alice");
+            assert.match(args.input, /爱丽丝/);
+            assert.match(args.input, /小栗/);
+            assert.match(args.sessionId, /^cloud:[^:]+:conductor:g_cloud_conductor:/);
+            return { runId: "hr_dispatch", content: JSON.stringify({ speak: ["xiaoli"] }), events: [] };
+          }
+          return { runId: "hr_reply", content: "xiaoli reply", events: [] };
+        }
+      },
+      loadPrompts: async () => ({
+        dispatch: "members:\n{{members}}\nrecent:\n{{recent}}\nuser: {{userMessage}}\n输出 JSON：{\"speak\": []}"
+      }),
+      broadcastPersistedEvent() {},
+      broadcastTransientEvent() {}
+    });
+    const message = ctx.messagesStore.appendMessage({
+      roomId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "大家怎么看"
+    });
+
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      roomId: group.id,
+      message
+    });
+
+    assert.equal(reply.sender_ref, "xiaoli");
+    assert.equal(reply.body_md, "xiaoli reply");
+    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
+      ["group-conductor", "alice"],
+      ["reply", "xiaoli"]
+    ]);
+    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
+      "大家怎么看",
+      "xiaoli reply"
+    ]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test("dispatcher skips fellow rooms without enabled cloud-hermes binding", async () => {
   const ctx = setup();
   try {

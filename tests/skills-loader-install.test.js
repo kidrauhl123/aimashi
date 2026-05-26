@@ -76,6 +76,35 @@ test("an installed marketplace skill is deletable (private source)", async () =>
   }
 });
 
+test("installMarketplaceSkill rejects a zip-slip entry and writes nothing outside the skill dir", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
+  try {
+    const loader = makeLoader(home);
+    // adm-zip's addFile normalizes paths, so force a raw traversal entry name.
+    const zip = new AdmZip();
+    zip.addFile("SKILL.md", Buffer.from("---\nname: evil\n---\n# Evil"));
+    zip.addFile("evil.txt", Buffer.from("pwned"));
+    zip.getEntries()[1].entryName = "../../evil.txt";
+    const tampered = zip.toBuffer();
+    if (new AdmZip(tampered).getEntries().some((e) => e.entryName.includes(".."))) {
+      await assert.rejects(loader.installMarketplaceSkill({ id: "evil", zipBuffer: tampered }), /unsafe path/);
+      assert.ok(!fs.existsSync(path.join(path.dirname(home), "evil.txt")), "no file escaped");
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("installMarketplaceSkill rejects an unsafe skill id", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
+  try {
+    const loader = makeLoader(home);
+    await assert.rejects(loader.installMarketplaceSkill({ id: "../escape", zipBuffer: makeZip() }), /invalid skill id/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("installMarketplaceSkill rejects a missing package", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
   try {

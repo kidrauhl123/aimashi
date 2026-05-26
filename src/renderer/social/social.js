@@ -29,6 +29,22 @@
     throw new Error("miaSendPipeline is not loaded");
   }
 
+  function sessionHistoryShared() {
+    if (global.miaSessionHistory) return global.miaSessionHistory;
+    if (typeof require !== "undefined") return require("../../shared/session-history");
+    return {
+      roomType: (room, roomId = "") => {
+        const id = room?.id || roomId || "";
+        if (room?.type) return room.type;
+        if (id.startsWith("dm:")) return "dm";
+        if (id.startsWith("fellow:")) return "fellow";
+        if (id.startsWith("g_") || id.startsWith("g-")) return "group";
+        return "";
+      },
+      sidebarRooms: (rooms) => rooms
+    };
+  }
+
   // Decision: singleton modal — create once, re-populate on open.
   // Avoids leaking DOM nodes on repeated opens.
   let _addFriendModal = null;
@@ -84,6 +100,22 @@
     for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
     const PALETTE = ["#5e5ce6", "#30b0c7", "#34c759", "#ff9f0a", "#ff3b30", "#af52de", "#007aff"];
     return PALETTE[hash % PALETTE.length];
+  }
+
+  function avatarFallbackStyle(avatarHelpers, image, crop, color) {
+    if (!image) return `background-color:${color};`;
+    try {
+      if (typeof avatarHelpers?.avatarThumbBackgroundStyle === "function") {
+        return avatarHelpers.avatarThumbBackgroundStyle(image, crop, color);
+      }
+      if (typeof avatarHelpers?.avatarBackgroundStyle === "function") {
+        return avatarHelpers.avatarBackgroundStyle(image, crop, color);
+      }
+    } catch {
+      // Fall back to a plain image background if the injected avatar helper is
+      // unavailable or throws in a lightweight test/browser context.
+    }
+    return `background-color:transparent;background-image:url('${image}');background-size:cover;background-position:center;background-repeat:no-repeat;`;
   }
 
   function attachmentKind(file = {}) {
@@ -246,14 +278,12 @@
     }) || null;
   }
 
-  function ensuredRoomFromResult(result) {
-    if (!result || result.ok === false) return null;
-    const payload = result.data || result;
-    return payload.room || payload.data?.room || null;
+  function currentState() {
+    return (deps && typeof deps.getState === "function" && deps.getState()) || {};
   }
 
   function localRuntimeFellows() {
-    const state = (deps && typeof deps.getState === "function" && deps.getState()) || {};
+    const state = currentState();
     const runtime = state.runtime || {};
     const candidates = [
       ...(Array.isArray(runtime.fellows) ? runtime.fellows : []),
@@ -272,73 +302,17 @@
     return fellows;
   }
 
-  function normalizeAgentEngine(value) {
-    const normalizer = window.miaEngineContracts?.normalizeAgentEngine;
-    if (typeof normalizer === "function") return normalizer(value);
-    const id = String(value || "hermes").trim().toLowerCase().replace(/_/g, "-");
-    if (id === "claude" || id === "claude-code") return "claude-code";
-    if (id === "codex" || id === "openai-codex") return "codex";
-    return "hermes";
-  }
-
-  function localHermesModelEntries(runtime = {}) {
-    const entries = typeof window.miaModelSettings?.connectedModelEntries === "function"
-      ? window.miaModelSettings.connectedModelEntries(runtime)
-      : [];
-    return (Array.isArray(entries) ? entries : [])
-      .map((entry) => ({
-        value: String(entry.model || entry.id || "").trim(),
-        label: String(entry.label || entry.model || entry.id || "Local Model").trim(),
-        model: String(entry.model || "").trim(),
-        provider: String(entry.provider || "").trim(),
-        providerLabel: String(entry.providerLabel || "").trim()
-      }))
-      .filter((entry) => entry.value);
-  }
-
-  function externalModelEntries(engine) {
-    const entries = typeof window.miaEngineOptions?.externalModelEntries === "function"
-      ? window.miaEngineOptions.externalModelEntries(engine)
-      : [];
-    return (Array.isArray(entries) ? entries : [])
-      .map((entry) => ({
-        value: String(entry.model || entry.id || "").trim(),
-        label: String(entry.label || entry.model || entry.id || "Default").trim(),
-        model: String(entry.model || "").trim(),
-        provider: String(entry.provider || engine).trim(),
-        providerLabel: String(entry.providerLabel || "").trim()
-      }))
-      .filter((entry) => entry.value || entry.model === "");
-  }
-
-  function desktopLocalRuntimeConfig(fellow) {
-    const state = (deps && typeof deps.getState === "function" && deps.getState()) || {};
-    const runtime = state.runtime || {};
-    const engine = normalizeAgentEngine(fellow?.agentEngine || fellow?.agent_engine || "hermes");
-    const engineConfig = fellow?.engineConfig || fellow?.engine_config || {};
-    const config = { agentEngine: engine };
-    if (engine === "claude-code" || engine === "codex") {
-      config.model = String(engineConfig.model || "").trim();
-      config.effortLevel = String(engineConfig.effortLevel || "medium").trim();
-      config.permissionMode = String(engineConfig.permissionMode || "default").trim();
-      config.modelEntries = externalModelEntries(engine);
-      return config;
-    }
-    config.model = String(runtime.model?.model || "").trim();
-    config.effortLevel = String(runtime.effort?.level || "medium").trim();
-    config.permissionMode = String(runtime.permissions?.mode || "ask").trim();
-    config.modelEntries = localHermesModelEntries(runtime);
-    return config;
-  }
-
   async function syncLocalFellowRuntimeBinding(api, fellow) {
     const fellowKey = String(fellow?.key || fellow?.id || "").trim();
-    if (!fellowKey || !api || typeof api.saveFellowRuntime !== "function") return;
+    if (!fellowKey || !window.miaFellowCommands?.syncDesktopLocalFellowRuntimeBinding) return;
     try {
-      await api.saveFellowRuntime(fellowKey, {
-        runtimeKind: "desktop-local",
-        enabled: true,
-        config: desktopLocalRuntimeConfig(fellow)
+      await window.miaFellowCommands.syncDesktopLocalFellowRuntimeBinding({
+        api,
+        state: currentState(),
+        fellow,
+        engineContracts: window.miaEngineContracts,
+        modelSettings: window.miaModelSettings,
+        engineOptions: window.miaEngineOptions
       });
     } catch (error) {
       console.warn("[social] sync fellow runtime failed", fellowKey, error);
@@ -347,24 +321,24 @@
 
   async function syncLocalFellowRuntimeBindings() {
     const api = window.mia?.social;
-    if (!api || typeof api.saveFellowRuntime !== "function") return;
+    if (!api || !window.miaFellowCommands?.syncDesktopLocalFellowRuntimeBinding) return;
     for (const fellow of localRuntimeFellows()) {
       await syncLocalFellowRuntimeBinding(api, fellow);
     }
   }
 
   async function ensureLocalFellowRooms(api) {
-    if (!api || typeof api.ensureFellowRoom !== "function") return;
+    if (!api || !window.miaFellowCommands?.ensureDesktopLocalFellowRoom) return;
     for (const fellow of localRuntimeFellows()) {
       try {
-        const result = await api.ensureFellowRoom(fellow.key, {
-          title: fellow.name || fellow.displayName || fellow.key,
-          runtimeKind: "desktop-local"
+        await window.miaFellowCommands.ensureDesktopLocalFellowRoom({
+          api,
+          state: currentState(),
+          fellow,
+          engineContracts: window.miaEngineContracts,
+          modelSettings: window.miaModelSettings,
+          engineOptions: window.miaEngineOptions
         });
-        await syncLocalFellowRuntimeBinding(api, fellow);
-        if (result && result.ok === false) {
-          throw new Error(result.error || result.message || result.data?.error || "unknown ensure failure");
-        }
       } catch (error) {
         console.warn("[social] ensure fellow room failed", fellow.key, error);
       }
@@ -373,16 +347,18 @@
 
   async function ensureFellowRoom(fellow) {
     const fellowKey = String(fellow?.key || fellow?.id || "").trim();
-    if (!fellowKey || !window.mia?.social?.ensureFellowRoom) return null;
+    if (!fellowKey || !window.miaFellowCommands?.ensureDesktopLocalFellowRoom) return null;
     try {
-      const result = await window.mia.social.ensureFellowRoom(fellowKey, {
-        title: fellow.name || fellow.displayName || fellowKey,
-        runtimeKind: "desktop-local"
+      const result = await window.miaFellowCommands.ensureDesktopLocalFellowRoom({
+        api: window.mia?.social,
+        state: currentState(),
+        fellow: { ...fellow, key: fellowKey },
+        engineContracts: window.miaEngineContracts,
+        modelSettings: window.miaModelSettings,
+        engineOptions: window.miaEngineOptions,
+        onRoom: upsertRoom
       });
-      if (result && result.ok === false) {
-        throw new Error(result.error || result.message || result.data?.error || "unknown ensure failure");
-      }
-      const room = upsertRoom(ensuredRoomFromResult(result));
+      const room = result.room || null;
       if (room) _schedulePersistSnapshot();
       return room;
     } catch (error) {
@@ -392,12 +368,7 @@
   }
 
   function roomTypeFor(room, roomId = "") {
-    if (room?.type) return room.type;
-    const id = room?.id || roomId || "";
-    if (id.startsWith("dm:")) return "dm";
-    if (id.startsWith("fellow:")) return "fellow";
-    if (id.startsWith("g_") || id.startsWith("g-")) return "group";
-    return null;
+    return sessionHistoryShared().roomType(room, roomId) || null;
   }
 
   function sendPipelineMembersForRoom(roomType, members) {
@@ -892,7 +863,11 @@
   // ── renderSidebarRows ─────────────────────────────────────────────────────
 
   function renderSidebarRows() {
-    return moduleState.rooms.map((room) => {
+    const sidebarRooms = sessionHistoryShared().sidebarRooms(moduleState.rooms, {
+      activeRoomId: moduleState.activeRoomId,
+      messageCache: moduleState.messageCache
+    });
+    return sidebarRooms.map((room) => {
       const cacheEntry = moduleState.messageCache.get(room.id);
       const lastMsg = cacheEntry && cacheEntry.messages.length
         ? cacheEntry.messages[cacheEntry.messages.length - 1]
@@ -979,6 +954,7 @@
       }
       const streaming = _buildCloudAgentStreamingArticle(roomId, color, members);
       if (streaming) containerEl.appendChild(streaming);
+      window.miaAvatar?.hydrateAvatarVideos?.(containerEl);
       applyScroll();
       if (!_roomMembersCache.has(roomId)) {
         _fetchAndCacheRoomMembers(roomId);
@@ -993,6 +969,7 @@
     }
     const streaming = _buildCloudAgentStreamingArticle(roomId, color);
     if (streaming) containerEl.appendChild(streaming);
+    window.miaAvatar?.hydrateAvatarVideos?.(containerEl);
     applyScroll();
   }
 
@@ -1031,10 +1008,17 @@
     const avatar = (spec && spec.avatar) || { image: "", crop: null, color: "" };
     const avatarColor = avatar.color || accentColor || "#5e5ce6";
     const avatarHelpers = window.miaAvatar;
-    const avatarStyle = (avatarHelpers && typeof avatarHelpers.avatarThumbBackgroundStyle === "function")
-      ? avatarHelpers.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatarColor)
-      : `background-color:${avatarColor};`;
     const avatarLetter = avatar.image ? "" : ((authorName || "?")[0] || "?").toUpperCase();
+    const avatarHtml = avatarHelpers?.avatarHtml
+      ? avatarHelpers.avatarHtml({
+        className: "avatar message-avatar",
+        image: avatar.image,
+        crop: avatar.crop,
+        color: avatarColor,
+        text: avatarLetter,
+        attrs: `data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" title="${escapeHtml(authorName || "")}"`
+      })
+      : `<div class="avatar message-avatar" data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" style="${escapeHtml(avatarFallbackStyle(avatarHelpers, avatar.image, avatar.crop, avatarColor))}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>`;
     const cache = moduleState.messageCache.get(moduleState.activeRoomId);
     const messageIndex = cache ? cache.messages.findIndex((m) => m.id === msg.id) : -1;
     const bodyHtml = _renderMsgBody((spec ? spec.bodyMd : msg.body_md) || "");
@@ -1054,7 +1038,7 @@
     // left-click → contact card, right-click → dropdown. Private chat and
     // group chat share one avatar-interaction path (一视同仁).
     article.innerHTML = `
-      <div class="avatar message-avatar" data-sender-kind="${escapeHtml(msg.sender_kind || "")}" data-sender-ref="${escapeHtml(msg.sender_ref || "")}" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>
+      ${avatarHtml}
       <div class="message-stack">
         ${bubbleHtml}
         ${attachmentHtml}
@@ -1083,10 +1067,17 @@
     const avatar = (spec && spec.avatar) || { image: "", crop: null, color: "" };
     const avatarColor = avatar.color || accentColor || "#5e5ce6";
     const avatarHelpers = window.miaAvatar;
-    const avatarStyle = (avatarHelpers && typeof avatarHelpers.avatarThumbBackgroundStyle === "function")
-      ? avatarHelpers.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatarColor)
-      : `background-color:${avatarColor};`;
     const avatarLetter = avatar.image ? "" : ((authorName || "?")[0] || "?").toUpperCase();
+    const avatarHtml = avatarHelpers?.avatarHtml
+      ? avatarHelpers.avatarHtml({
+        className: "avatar message-avatar",
+        image: avatar.image,
+        crop: avatar.crop,
+        color: avatarColor,
+        text: avatarLetter,
+        attrs: `data-sender-kind="fellow" data-sender-ref="${escapeHtml(fellowKey)}" title="${escapeHtml(authorName || "")}"`
+      })
+      : `<div class="avatar message-avatar" data-sender-kind="fellow" data-sender-ref="${escapeHtml(fellowKey)}" style="${escapeHtml(avatarFallbackStyle(avatarHelpers, avatar.image, avatar.crop, avatarColor))}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>`;
     const bodyHtml = run.text ? _renderMsgBody(run.text) : "";
     const isGroupRoom = roomTypeFor(room, roomId) === "group";
     const typingText = isGroupRoom
@@ -1101,7 +1092,7 @@
     const article = document.createElement("article");
     article.className = "message assistant streaming";
     article.innerHTML = `
-      <div class="avatar message-avatar" data-sender-kind="fellow" data-sender-ref="${escapeHtml(fellowKey)}" style="background-color:${escapeHtml(avatarColor)};${avatarStyle}" title="${escapeHtml(authorName || "")}">${escapeHtml(avatarLetter)}</div>
+      ${avatarHtml}
       <div class="message-stack">
         ${bodyHtml ? `<div class="bubble">${bodyHtml}</div>` : ""}
         ${statusHtml ? `<div class="bubble">${statusHtml}</div>` : ""}
@@ -1251,6 +1242,7 @@
       : _buildMessageArticle(msg, color);
     if (article) {
       chatEl.appendChild(article);
+      window.miaAvatar?.hydrateAvatarVideos?.(article);
       if (stick || nearBottom) chatEl.scrollTop = chatEl.scrollHeight;
     }
   }

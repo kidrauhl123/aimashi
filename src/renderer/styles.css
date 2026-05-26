@@ -252,12 +252,22 @@ body.window-blurred .traffic-spacer:hover .traffic-light.green {
 
 .profile-avatar,
 .avatar {
+  position: relative;
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   color: #fff;
   font-weight: 430;
   overflow: hidden;
+}
+
+.avatar-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
 }
 
 .rail-avatar {
@@ -1203,6 +1213,8 @@ body.topbar-click-capture .topbar {
 }
 
 .contact-profile-avatar {
+  position: relative;
+  overflow: hidden;
   width: 96px;
   height: 96px;
   border: 1px solid var(--line);
@@ -1239,9 +1251,9 @@ body.topbar-click-capture .topbar {
   max-width: 100%;
   min-height: 40px;
   padding: 5px 10px 5px 5px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--field);
   line-height: 1;
 }
 
@@ -1319,9 +1331,9 @@ body.topbar-click-capture .topbar {
 .contact-note {
   min-width: 0;
   padding: 12px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: var(--field);
 }
 
 .contact-note strong {
@@ -1347,9 +1359,9 @@ body.topbar-click-capture .topbar {
   gap: 12px;
   min-width: 0;
   padding: 12px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: var(--field);
 }
 
 .contact-capabilities > header {
@@ -1415,7 +1427,7 @@ body.topbar-click-capture .topbar {
   align-items: start;
   min-width: 0;
   padding: 7px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 7px;
   background: var(--surface);
 }
@@ -1451,8 +1463,9 @@ body.topbar-click-capture .topbar {
 
 .capability-empty {
   padding: 9px;
-  border: 1px dashed var(--line);
+  border: 0;
   border-radius: 7px;
+  background: var(--surface);
 }
 
 .detail-empty {
@@ -2835,25 +2848,26 @@ body.topbar-click-capture .topbar {
 }
 
 .primary {
-  border-color: rgb(var(--accent-rgb) / 0.38);
-  background: transparent;
-  color: var(--accent);
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
 }
 
 .secondary {
-  border-color: var(--line);
-  background: transparent;
+  border-color: transparent;
+  background: var(--field);
   color: var(--text);
 }
 
 .primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: transparent;
+  border-color: transparent;
+  background: var(--accent);
+  filter: brightness(1.08);
 }
 
 .secondary:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  background: var(--hover-background);
+  border-color: transparent;
+  background: var(--line);
 }
 
 .primary:disabled,
@@ -2863,12 +2877,13 @@ body.topbar-click-capture .topbar {
 }
 
 .secondary.danger {
-  border-color: rgba(209, 67, 67, 0.26);
+  border-color: transparent;
+  background: rgba(209, 67, 67, 0.10);
   color: var(--danger);
 }
 
 .secondary.danger:hover:not(:disabled) {
-  background: rgba(209, 67, 67, 0.08);
+  background: rgba(209, 67, 67, 0.16);
 }
 
 .settings-modal {
@@ -2969,7 +2984,7 @@ body.topbar-click-capture .topbar {
   border-radius: 10px;
   outline: 0;
   padding: 10px 12px;
-  background: var(--surface);
+  background-color: var(--surface);
   color: var(--text);
 }
 
@@ -3024,6 +3039,8 @@ body.topbar-click-capture .topbar {
 }
 
 .avatar-crop-preview {
+  position: relative;
+  overflow: hidden;
   width: 82px;
   height: 82px;
   border-radius: 50%;
@@ -3289,6 +3306,108 @@ body.topbar-click-capture .topbar {
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+.avatar-trim-controls {
+  display: block;
+  width: min(320px, calc(100vw - 96px));
+  justify-self: center;
+}
+
+.avatar-trim-controls.hidden {
+  display: none;
+}
+
+.avatar-trim-timeline {
+  --trim-start: 0%;
+  --trim-end: 60%;
+  position: relative;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 9px;
+  background: #151719;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.38), 0 8px 20px rgba(12, 14, 18, 0.14);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.avatar-trim-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+.avatar-trim-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(9, 10, 12, 0.72);
+  pointer-events: none;
+}
+
+.avatar-trim-mask-left {
+  left: 0;
+  width: var(--trim-start);
+}
+
+.avatar-trim-mask-right {
+  left: var(--trim-end);
+  right: 0;
+}
+
+.avatar-trim-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--trim-start);
+  width: calc(var(--trim-end) - var(--trim-start));
+  min-width: 20px;
+  border-right: 3px solid var(--accent);
+  border-left: 3px solid var(--accent);
+  background: rgb(var(--accent-rgb) / 0.16);
+  cursor: grab;
+}
+
+.avatar-trim-selection:active {
+  cursor: grabbing;
+}
+
+.avatar-trim-handle {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 7px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.34);
+  cursor: ew-resize;
+}
+
+.avatar-trim-handle-start {
+  left: -5px;
+}
+
+.avatar-trim-handle-end {
+  right: -5px;
+}
+
+.avatar-trim-label {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.46);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  line-height: 1.3;
+  pointer-events: none;
 }
 
 .avatar-crop-stage:active {
@@ -3582,8 +3701,7 @@ body.topbar-click-capture .topbar {
 
 .settings-content input:focus,
 .settings-content select:focus {
-  border-color: rgb(var(--accent-rgb) / 0.42);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12);
+  border-color: var(--line-strong);
 }
 
 .form-save-status {
@@ -3780,8 +3898,7 @@ body.topbar-click-capture .topbar {
 }
 
 .cloud-login-grid input:focus {
-  border-color: rgb(var(--accent-rgb) / 0.42);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12);
+  border-color: var(--line-strong);
 }
 
 .connection-qr {
@@ -3847,8 +3964,7 @@ body.topbar-click-capture .topbar {
 }
 
 .mobile-relay-url-field input:focus {
-  border-color: rgb(var(--accent-rgb) / 0.42);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12);
+  border-color: var(--line-strong);
 }
 
 .pairing-link {
@@ -3989,7 +4105,7 @@ textarea {
   border-radius: 10px;
   padding: 10px 11px;
   color: var(--text);
-  background: var(--surface);
+  background-color: var(--surface);
   outline: none;
 }
 
@@ -3998,11 +4114,27 @@ textarea {
   resize: vertical;
 }
 
+/* Native selects: hide the OS arrow and draw a custom chevron inset from the
+   right edge so it never sits flush against the border. background-image only,
+   so any background-COLOR override keeps the chevron — never use the background
+   shorthand on a select. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+:root[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23aaa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.12);
+  border-color: var(--line-strong);
 }
 
 .search-box input:focus,

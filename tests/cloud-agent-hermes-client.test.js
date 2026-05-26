@@ -143,6 +143,34 @@ test("Hermes runs client sends Fellow headers and returns final text", async () 
   ]);
 });
 
+test("Hermes runs client accepts an isolated session id for conductor-style calls", async () => {
+  const calls = [];
+  const fakeFetch = async (url, options = {}) => {
+    calls.push({ url: String(url), headers: options.headers || {}, body: options.body || "" });
+    if (String(url).endsWith("/v1/runs")) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ run_id: "run_conductor" }) };
+    }
+    return { ok: true, status: 200, text: async () => "data: {\"type\":\"run.completed\",\"content\":\"{}\"}\n\n" };
+  };
+
+  const client = createHermesRunsClient({ fetch: fakeFetch });
+  await client.runChat({
+    baseUrl: "http://worker",
+    userId: "u1",
+    fellow: { id: "alice", name: "Alice" },
+    roomId: "g_1",
+    sessionId: "cloud:u1:conductor:g_1:m_1",
+    metadataRole: "group-conductor",
+    input: "choose"
+  });
+
+  const body = JSON.parse(calls[0].body);
+  assert.equal(body.session_id, "cloud:u1:conductor:g_1:m_1");
+  assert.equal(body.metadata.room_id, "g_1");
+  assert.equal(body.metadata.role, "group-conductor");
+  assert.equal(calls[0].headers["X-Hermes-Session-Key"], "cloud:u1:conductor:g_1:m_1");
+});
+
 test("docker worker mode starts one isolated container per user", async () => {
   const execCalls = [];
   const fakeExecFile = async (bin, args) => {

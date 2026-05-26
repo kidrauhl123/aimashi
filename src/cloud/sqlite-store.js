@@ -543,9 +543,9 @@ function createCloudStore(options = {}) {
     const sets = [];
     const values = [];
     if (typeof patch.avatarImage === "string") {
-      // Cap to 1MB to keep DB rows reasonable; bigger images should be
-      // uploaded as /api/files and referenced by URL instead.
-      const trimmed = patch.avatarImage.slice(0, 1_500_000);
+      // Cap profile avatar payloads so animated GIF / short video avatars
+      // can sync without letting profile rows grow without bound.
+      const trimmed = patch.avatarImage.slice(0, 8_000_000);
       sets.push("avatar_image = ?");
       values.push(trimmed);
     }

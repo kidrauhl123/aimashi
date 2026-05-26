@@ -44,7 +44,7 @@ function loadCard() {
   };
   const ctx = vm.createContext({ window, globalThis: window, document, console, setTimeout });
   vm.runInContext(src, ctx);
-  return { card: window.miaContactCard, body };
+  return { card: window.miaContactCard, body, window };
 }
 
 function ctxWith(ownerId, meId) {
@@ -97,7 +97,8 @@ test("fellow owned by another user renders remote-only card despite same local k
   card.attach(ctxWith("alice", "bob"));
   card.openCard({ kind: "fellow", ref: "codex", roomId: "g_1", anchor: null });
   const html = lastCardHtml(body);
-  assert.match(html, /不在你的本地 fellow 列表里/);
+  assert.match(html, /不属于你/);
+  assert.doesNotMatch(html, /本地 fellow/);
   assert.doesNotMatch(html, /data-fellow-field/);
   assert.doesNotMatch(html, /edit-fellow/);
 });
@@ -120,4 +121,34 @@ test("cloud fellow I own renders editable controls instead of a separate cloud-o
   assert.match(html, /Mia Cloud/);
   assert.match(html, /data-fellow-field="model"/);
   assert.match(html, /data-card-action="edit-fellow"/);
+});
+
+test("owned cloud fellow card reads runtime binding before exposing controls", () => {
+  const { card, window } = loadCard();
+  const calls = [];
+  window.miaFellowCommands = {
+    getFellowRuntimeBinding: async (args) => {
+      calls.push(args);
+      return {
+        fellowId: "mia",
+        runtimeKind: "cloud-hermes",
+        config: { model: "gpt-5.3", effortLevel: "high", permissionMode: "auto" }
+      };
+    }
+  };
+
+  card.attach(ctxWithCloudOwnedFellow());
+  card.openCard({ kind: "fellow", ref: "mia", roomId: "fellow:bob:mia", anchor: null });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].fellowKey, "mia");
+  assert.equal(calls[0].runtimeKind, "cloud-hermes");
+});
+
+test("fellow contact-card runtime edits go through fellow command adapter", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "social", "contact-card.js"), "utf8");
+  assert.match(source, /global\.miaFellowCommands\?\.saveFellowRuntimeControl\?\.\(\{/);
+  assert.doesNotMatch(source, /global\.mia\?\.social\?\.saveFellowRuntime/);
+  assert.doesNotMatch(source, /global\.mia\.saveModel\(/);
+  assert.doesNotMatch(source, /global\.mia\.saveFellowEngine\(/);
 });

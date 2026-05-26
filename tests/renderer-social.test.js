@@ -30,6 +30,7 @@ function loadSocial() {
   });
   const mockWindow = {
     mia: {},
+    miaFellowCommands: require("../src/renderer/fellow/fellow-commands.js"),
     miaSendPipeline: require("../src/shared/send-pipeline.js"),
     miaMarkdown: {
       escapeHtml: (v) => String(v || "").replace(/&/g, "&amp;").replace(/</g, "&lt;"),

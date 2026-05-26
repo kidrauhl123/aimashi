@@ -13,6 +13,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { shell } = require("electron");
 const AdmZip = require("adm-zip");
+const { isSafeId, isSafeEntryName, assertInside, MAX_FILES, MAX_UNCOMPRESSED_BYTES } = require("../shared/skill-safety.js");
 
 function cleanYamlScalar(value) {
   return String(value || "").trim().replace(/^['"]|['"]$/g, "");
@@ -225,11 +226,25 @@ function createSkillsLoader(deps = {}) {
     if (!id || !zipBuffer) {
       throw new Error("installMarketplaceSkill: id and zipBuffer required");
     }
-    const safeId = String(id).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 80) || "skill";
-    const skillDir = path.join(runtimePaths().home, "skills", safeId);
+    if (!isSafeId(id)) throw new Error("installMarketplaceSkill: invalid skill id");
+    const skillDir = path.join(runtimePaths().home, "skills", String(id));
+    const zip = new AdmZip(Buffer.from(zipBuffer));
+    const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
+    if (entries.length > MAX_FILES) throw new Error("package has too many files");
+    let uncompressed = 0;
+    for (const entry of entries) {
+      if (!isSafeEntryName(entry.entryName)) throw new Error(`unsafe path in package: ${entry.entryName}`);
+      uncompressed += Number(entry.header?.size || 0);
+      if (uncompressed > MAX_UNCOMPRESSED_BYTES) throw new Error("package uncompressed size too large");
+    }
+    // Clean + extract entry-by-entry, asserting each target stays inside skillDir (zip-slip guard).
     fs.rmSync(skillDir, { recursive: true, force: true });
     fs.mkdirSync(skillDir, { recursive: true });
-    new AdmZip(Buffer.from(zipBuffer)).extractAllTo(skillDir, true);
+    for (const entry of entries) {
+      const target = assertInside(skillDir, path.join(skillDir, entry.entryName));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, entry.getData());
+    }
     return loadLocalSkills();
   }
 

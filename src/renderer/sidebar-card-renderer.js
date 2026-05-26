@@ -38,6 +38,11 @@
   }
 
   function applyAvatarStyle(el, image, crop, color) {
+    const mediaHelper = global.miaAvatar?.applyAvatarMedia;
+    if (typeof mediaHelper === "function") {
+      mediaHelper(el, image, crop, color || "#5e5ce6");
+      return;
+    }
     const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
     let style = "";
     if (typeof helper === "function" && image) {

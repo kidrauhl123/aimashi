@@ -16,7 +16,9 @@ const SHARED_MODULES = [
   { file: "cloud-events.js", global: "miaCloudEvents" },
   { file: "unread.js", global: "miaUnread" },
   { file: "conversation-kinds.js", global: "miaConversationKinds" },
-  { file: "send-pipeline.js", global: "miaSendPipeline" }
+  { file: "send-pipeline.js", global: "miaSendPipeline" },
+  { file: "avatar-media.js", global: "miaAvatarMedia" },
+  { file: "fellow-runtime-control.js", global: "miaFellowRuntimeControl" }
 ];
 
 function runInBrowserSandbox(filePath) {

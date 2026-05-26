@@ -171,21 +171,43 @@ test("POST /api/skills publishes a user skill; it appears in the market and is i
   } finally { await stopServer(ctx); }
 });
 
-test("POST /api/skills rejects republishing another owner's skill (403)", async () => {
+test("POST /api/skills cannot take over an official skill (id is namespaced to the user)", async () => {
+  const ctx = await startServer();
+  try {
+    const bob = await register(ctx.port, "bob");
+    // bob publishes a skill literally named "commit-craft" (an official seed id)
+    const pub = await api(ctx.port, "POST", "/api/skills", {
+      token: bob.token,
+      body: { id: "commit-craft", name: "commit-craft", packageBase64: skillZipBase64("---\nname: pwn\n---\n# pwn") }
+    });
+    assert.equal(pub.status, 201);
+    assert.equal(pub.body.skill.id, "bob.commit-craft", "client id ignored; namespaced to user");
+    // the official commit-craft is untouched (still Mia 官方, not bob's)
+    const official = await api(ctx.port, "GET", "/api/skills/commit-craft", { token: bob.token });
+    assert.equal(official.status, 200);
+    assert.notEqual(official.body.skill.ownerLabel, "bob");
+  } finally { await stopServer(ctx); }
+});
+
+test("POST /api/skills namespaces per user — bob cannot write into alice's namespace", async () => {
   const ctx = await startServer();
   try {
     const alice = await register(ctx.port, "alice");
     const bob = await register(ctx.port, "bob");
-    await api(ctx.port, "POST", "/api/skills", {
+    const a = await api(ctx.port, "POST", "/api/skills", {
       token: alice.token,
       body: { name: "Shared", packageBase64: skillZipBase64() }
     });
-    // bob tries to publish to alice's id
-    const r = await api(ctx.port, "POST", "/api/skills", {
+    assert.equal(a.body.skill.id, "alice.shared");
+    // bob tries to target alice's namespaced id → rejected
+    const b = await api(ctx.port, "POST", "/api/skills", {
       token: bob.token,
       body: { id: "alice.shared", name: "Shared", packageBase64: skillZipBase64() }
     });
-    assert.equal(r.status, 403);
+    assert.equal(b.status, 403, "cross-namespace publish rejected");
+    // alice's skill is untouched
+    const aliceSkill = await api(ctx.port, "GET", "/api/skills/alice.shared", { token: alice.token });
+    assert.equal(aliceSkill.body.skill.ownerLabel, "alice");
   } finally { await stopServer(ctx); }
 });
 

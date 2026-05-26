@@ -19,6 +19,7 @@
   let _popover = null;
   let _onOutside = null;
   let _onEsc = null;
+  const fellowRuntimeBindingCache = new Map();
 
   function attach(internalCtx) { _ctx = internalCtx; }
 
@@ -91,6 +92,69 @@
     };
   }
 
+  function runtimeCacheKey(fellowKey, runtimeKind) {
+    return global.miaFellowCommands?.runtimeCacheKey?.(fellowKey, runtimeKind)
+      || `${fellowKey}:${runtimeKind || "cloud-hermes"}`;
+  }
+
+  function bindingForFellow(fellowKey, runtimeKind) {
+    return fellowRuntimeBindingCache.get(runtimeCacheKey(fellowKey, runtimeKind)) || null;
+  }
+
+  function ensureOption(select, value, label) {
+    if (!select || value == null) return;
+    const wanted = String(value);
+    const existing = Array.from(select.options || []).find((option) => String(option.value) === wanted);
+    if (!existing && typeof document?.createElement === "function") {
+      const option = document.createElement("option");
+      option.value = wanted;
+      option.textContent = label || wanted;
+      select.appendChild(option);
+    }
+    select.value = wanted;
+  }
+
+  function applyRuntimeBindingToCard(card, binding) {
+    const config = binding?.config || {};
+    if (!card?.querySelector) return;
+    if (config.model) {
+      const select = card.querySelector('[data-fellow-field="model"]');
+      ensureOption(select, config.model, config.model);
+      const label = card.querySelector(".model-current-label");
+      if (label) label.textContent = select?.selectedOptions?.[0]?.textContent || config.model;
+    }
+    if (config.effortLevel) {
+      const select = card.querySelector('[data-fellow-field="effortLevel"]');
+      ensureOption(select, config.effortLevel, config.effortLevel);
+      const label = card.querySelector(".effort-label");
+      if (label) label.textContent = select?.selectedOptions?.[0]?.textContent || config.effortLevel;
+    }
+    if (config.permissionMode) {
+      const select = card.querySelector('[data-fellow-field="permissionMode"]');
+      ensureOption(select, config.permissionMode, config.permissionMode);
+      const label = card.querySelector(".permission-label");
+      if (label) label.textContent = select?.selectedOptions?.[0]?.textContent || config.permissionMode;
+    }
+  }
+
+  function hydrateFellowRuntimeBinding(card, fellow, runtimeKind) {
+    const fellowKey = String(fellow?.key || fellow?.id || "").trim();
+    if (!fellowKey || runtimeKind !== "cloud-hermes") return;
+    if (typeof global.miaFellowCommands?.getFellowRuntimeBinding !== "function") return;
+    global.miaFellowCommands.getFellowRuntimeBinding({
+      api: global.mia,
+      cache: fellowRuntimeBindingCache,
+      fellowKey,
+      runtimeKind
+    }).then((binding) => {
+      if (!binding) return;
+      fellowRuntimeBindingCache.set(runtimeCacheKey(fellowKey, runtimeKind), binding);
+      if (_popover === card) applyRuntimeBindingToCard(card, binding);
+    }).catch((error) => {
+      console.warn?.("[contact-card] fellow runtime binding load failed:", error?.message || error);
+    });
+  }
+
   // Fellow card with live engineConfig selectors (model / effort / permission)
   // that mirror the topbar composer-bottom controls in private chat.
   function renderFellowCard(args) {
@@ -127,7 +191,7 @@
             <span class="contact-card-kind">远端</span>
           </div>
         </div>
-        <p class="contact-card-empty">这位 AI 不在你的本地 fellow 列表里，只能看到名字。</p>
+        <p class="contact-card-empty">这位 Fellow 不属于你，只能看到名字。</p>
         <div class="contact-card-actions">
           <button type="button" data-card-action="close" class="button-primary">关闭</button>
         </div>
@@ -144,9 +208,13 @@
     const runtime = _ctx?.deps?.getState?.()?.runtime || {};
     const runtimeKind = local.runtimeKind || "desktop-local";
     const engine = local.agentEngine || local.agent_engine || "hermes";
-    const config = local.engineConfig || local.engine_config || {};
     const isExternal = engine === "claude-code" || engine === "codex";
     const isCloudHermes = runtimeKind === "cloud-hermes";
+    const fellowKey = String(local.key || local.id || ref || "").trim();
+    const runtimeBinding = isCloudHermes ? bindingForFellow(fellowKey, runtimeKind) : null;
+    const config = isCloudHermes
+      ? { ...(local.engineConfig || local.engine_config || {}), ...(runtimeBinding?.config || {}) }
+      : (local.engineConfig || local.engine_config || {});
 
     // Reuse the same entry sources the topbar composer-bottom uses so the
     // dropdown contents (and labels / logos) match private chat exactly.
@@ -267,48 +335,13 @@
 
     async function persistField(field, value) {
       try {
-        if (isCloudHermes) {
-          const update = {};
-          if (field === "model") {
-            const entry = modelEntries.find((m) => m.id === value || m.model === value);
-            update.model = entry?.model || value;
-          } else {
-            update[field] = value;
-          }
-          await global.mia?.social?.saveFellowRuntime?.(local.key, {
-            runtimeKind: "cloud-hermes",
-            enabled: true,
-            config: { ...config, ...update },
-          });
-          return;
-        }
-        if (field === "model" && !isExternal) {
-          // Hermes: model is runtime-global. saveModel mirrors the topbar
-          // path so we keep one truth.
-          const entry = modelEntries.find((m) => m.id === value);
-          if (!entry) return;
-          await global.mia.saveModel({
-            provider: entry.provider,
-            model: entry.model,
-            apiKeyEnv: entry.apiKeyEnv,
-            baseUrl: entry.baseUrl,
-            apiMode: entry.apiMode,
-            providerLabel: entry.providerLabel,
-            authType: entry.authType,
-          });
-          return;
-        }
-        const update = {};
-        if (field === "model") {
-          const entry = modelEntries.find((m) => m.id === value);
-          update.model = entry?.model || "";
-        } else {
-          update[field] = value;
-        }
-        await global.mia.saveFellowEngine({
-          key: local.key,
-          agentEngine: engine,
-          engineConfig: update,
+        await global.miaFellowCommands?.saveFellowRuntimeControl?.({
+          api: global.mia,
+          fellow: local,
+          runtimeKind,
+          field,
+          value,
+          modelEntries
         });
       } catch (err) {
         alert("保存失败：" + (err?.message || err));
@@ -323,6 +356,7 @@
       if (labelSpan) labelSpan.textContent = newLabel;
       persistField(sel.dataset.fellowField, sel.value);
     });
+    if (isCloudHermes) hydrateFellowRuntimeBinding(card, local, runtimeKind);
     card.addEventListener("click", (event) => {
       const btn = event.target.closest("[data-card-action]");
       if (!btn) return;

@@ -79,17 +79,17 @@
       petJobPanelOpen: false,
       fellowAvatarDraft: {
         image: "",
-        crop: { x: 50, y: 50, zoom: 1 }
+        crop: { x: 50, y: 50, zoom: 1, start: 0, duration: 3 }
       },
       profileAvatarDraft: {
         image: "",
-        crop: { x: 50, y: 50, zoom: 1 }
+        crop: { x: 50, y: 50, zoom: 1, start: 0, duration: 3 }
       },
       avatarCropEditor: {
         open: false,
         target: "fellow",
         image: "",
-        crop: { x: 50, y: 50, zoom: 1 },
+        crop: { x: 50, y: 50, zoom: 1, start: 0, duration: 3 },
         dragging: false,
         lastX: 0,
         lastY: 0

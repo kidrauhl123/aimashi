@@ -177,6 +177,7 @@ function createTasksStore(filePath) {
       finishedAt: run.finishedAt || null,
       status: run.status,
       outputMessageId: run.outputMessageId || null,
+      outputText: run.outputText || "",
       error: run.error
     };
     task.runs.push(runEntry);

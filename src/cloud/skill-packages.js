@@ -9,6 +9,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const AdmZip = require("adm-zip");
+const { isSafeEntryName, MAX_FILES, MAX_UNCOMPRESSED_BYTES } = require("../shared/skill-safety.js");
 
 function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
@@ -43,10 +44,16 @@ function packageDir(srcDir, destZipPath, entryName = "SKILL.md") {
 function packageFromZip(zipBuffer, destZipPath, entryName = "SKILL.md") {
   const buf = Buffer.from(zipBuffer);
   const zip = new AdmZip(buf);
-  const files = zip.getEntries().filter((entry) => !entry.isDirectory).map((entry) => entry.entryName);
-  const entryPath = files.includes(entryName)
-    ? entryName
-    : files.find((name) => name.endsWith("SKILL.md"));
+  const fileEntries = zip.getEntries().filter((entry) => !entry.isDirectory);
+  if (fileEntries.length > MAX_FILES) throw new Error("package has too many files");
+  let uncompressed = 0;
+  for (const entry of fileEntries) {
+    if (!isSafeEntryName(entry.entryName)) throw new Error(`unsafe path in package: ${entry.entryName}`);
+    uncompressed += Number(entry.header?.size || 0);
+    if (uncompressed > MAX_UNCOMPRESSED_BYTES) throw new Error("package uncompressed size too large");
+  }
+  const files = fileEntries.map((entry) => entry.entryName);
+  const entryPath = files.includes(entryName) ? entryName : files.find((name) => name.endsWith("SKILL.md"));
   if (!entryPath) throw new Error("package must contain a SKILL.md");
   fs.mkdirSync(path.dirname(destZipPath), { recursive: true });
   fs.writeFileSync(destZipPath, buf);

@@ -29,7 +29,11 @@
     for (const tile of list) {
       const span = document.createElement("span");
       span.className = "group-avatar-tile";
-      span.style.cssText = tileStyle(tile.image, tile.crop, tile.color);
+      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
+        global.miaAvatar.applyAvatarMedia(span, tile.image, tile.crop, tile.color || "#5e5ce6");
+      } else {
+        span.style.cssText = tileStyle(tile.image, tile.crop, tile.color);
+      }
       el.appendChild(span);
     }
   }

@@ -21,6 +21,9 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
         sessionId: task.sessionId,
         text: task.prompt,
         displayText: task.prompt,
+        // Run independently of the interactive single-flight abort controller so
+        // foreground/web chat (or an overlapping task) can't abort this run.
+        background: true,
         meta: { taskId: task.id, taskRunId: runId, firedAt }
       });
       // Identify the message id of the assistant reply we just appended.
@@ -29,18 +32,26 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       const messages = result?.session?.messages || [];
       const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
       const outputMessageId = result?.assistantMessageId || lastAssistant?.id || null;
+      // Persist the reply text on the run itself. The task store is written only
+      // by the daemon, so this copy is race-free — unlike the chat session, whose
+      // cross-process writes can drop the appended message (known issue).
+      const outputText = String(lastAssistant?.content || "");
       const run = safeRecordRun(store, task.id, {
         id: runId,
         firedAt,
         finishedAt: Date.now(),
         status: "ok",
-        outputMessageId
+        outputMessageId,
+        outputText
       });
       emit("finished", {
         taskId: task.id,
         runId: run?.id || runId,
         sessionId: task.sessionId,
+        fellowId: task.fellowId,
         messageId: outputMessageId,
+        outputText,
+        createdAt: lastAssistant?.createdAt || new Date(firedAt).toISOString(),
         status: "ok"
       });
       return run;
