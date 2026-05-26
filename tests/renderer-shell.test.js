@@ -141,16 +141,17 @@ test("desktop avatar picker supports video avatars with one trim row", () => {
   assert.match(avatarSource, /updateAvatarVideoElement/);
   assert.match(avatarSource, /function hydrateAvatarMedia/);
   assert.match(avatarSource, /data-avatar-media="1"/);
-  assert.match(avatarSource, /avatarVideoLoopEpochs/);
+  assert.doesNotMatch(avatarSource, /avatarVideoTargetTime/);
+  assert.doesNotMatch(avatarSource, /avatarVideoLoopEpochs/);
+  assert.doesNotMatch(avatarSource, /\bdrift\b/);
   assert.match(avatarSource, /classList\.add\("media-avatar"\)/);
   assert.match(avatarSource, /removeAvatarChildrenExcept\(el, video\)/);
   assert.match(avatarSource, /background-color:transparent/);
   assert.doesNotMatch(avatarSource, /const style = `background-color:\$\{escapeHtml\(color\)\};`/);
-  assert.match(avatarSource, /video\.loop = false/);
-  assert.doesNotMatch(avatarSource, /muted loop autoplay/);
+  assert.match(avatarSource, /video\.loop = true/);
+  assert.doesNotMatch(styleSource, /\.avatar-video\.ready/);
   assert.match(styleSource, /\.avatar-image,/);
   assert.match(styleSource, /\.profile-avatar\.media-avatar/);
-  assert.match(styleSource, /\.avatar-video\.ready/);
   assert.match(styleSource, /\.profile-avatar\.video-avatar/);
   assert.match(styleSource, /\.avatar,\n\.fellow-photo\s*\{[\s\S]*?border:\s*0;/);
   assert.match(styleSource, /\.contact-profile-avatar\s*\{[\s\S]*?border:\s*0;[\s\S]*?box-shadow:\s*none;/);
@@ -168,43 +169,59 @@ test("desktop avatar helpers tolerate null crop values", () => {
   assert.doesNotThrow(() => context.window.miaAvatar.avatarBackgroundStyle("data:image/gif;base64,abc", null, "#34c759"));
 });
 
-test("desktop avatar videos share loop timing across rebuilt elements", () => {
+test("desktop avatar video crop updates do not restart playback unless trim changes", () => {
   const avatarSource = fs.readFileSync(path.join(root, "src/renderer/helpers/avatar-helpers.js"), "utf8");
   const mediaSource = fs.readFileSync(path.join(root, "src/shared/avatar-media.js"), "utf8");
   const context = vm.createContext({
     window: {},
     console,
-    performance: { now: () => 1234 },
     setTimeout
   });
   context.globalThis = context.window;
   vm.runInContext(mediaSource, context, { filename: "src/shared/avatar-media.js" });
   vm.runInContext(avatarSource, context, { filename: "src/renderer/helpers/avatar-helpers.js" });
 
-  const makeVideo = () => ({
+  const seeks = [];
+  const removed = [];
+  let currentTime = 2.4;
+  const video = {
     dataset: {},
-    classList: { add() {}, remove() {} },
+    classList: {
+      add() {},
+      remove(name) { removed.push(name); }
+    },
     attrs: {},
-    readyState: 0,
+    readyState: 2,
     duration: 10,
-    currentTime: 0,
+    get currentTime() { return currentTime; },
+    set currentTime(value) {
+      seeks.push(value);
+      currentTime = value;
+    },
     getAttribute(name) { return this.attrs[name] || null; },
     setAttribute(name, value) { this.attrs[name] = String(value); },
     removeAttribute(name) { delete this.attrs[name]; },
     addEventListener() {},
     play() { return { catch() {} }; }
-  });
-  const crop = { x: 45, y: 55, zoom: 1.2, start: 1, duration: 2 };
-  const first = makeVideo();
-  const second = makeVideo();
+  };
+  const src = "data:video/mp4;base64,abc";
 
-  context.window.miaAvatar.updateAvatarVideoElement(first, "data:video/mp4;base64,abc", crop);
-  context.window.miaAvatar.updateAvatarVideoElement(second, "data:video/mp4;base64,abc", crop);
+  context.window.miaAvatar.updateAvatarVideoElement(video, src, { x: 45, y: 55, zoom: 1.2, start: 1, duration: 2 });
+  seeks.length = 0;
+  removed.length = 0;
 
-  assert.equal(first.dataset.avatarLoopKey, second.dataset.avatarLoopKey);
-  assert.equal(first.dataset.avatarLoopEpoch, second.dataset.avatarLoopEpoch);
-  assert.equal(first.dataset.avatarStart, "1");
-  assert.equal(first.dataset.avatarDuration, "2");
+  context.window.miaAvatar.updateAvatarVideoElement(video, src, { x: 50, y: 40, zoom: 1.6, start: 1, duration: 2 });
+
+  assert.deepEqual(seeks, []);
+  assert.deepEqual(removed, []);
+  assert.equal(video.dataset.avatarStart, "1");
+  assert.equal(video.dataset.avatarDuration, "2");
+
+  context.window.miaAvatar.updateAvatarVideoElement(video, src, { x: 50, y: 40, zoom: 1.6, start: 1.5, duration: 2 });
+
+  assert.deepEqual(removed, []);
+  assert.equal(seeks.length, 1);
+  assert.equal(seeks[0], 1.5);
 });
 
 test("private chat async replies are anchored to the submit session", () => {

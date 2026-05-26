@@ -87,7 +87,10 @@
       <article class="skill-card${skill.id === state.selectedSkillId ? " featured" : ""}" data-skill-select="${escapeHtml(skill.id)}">
         <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
         <div class="skill-card-head">
-          <strong>${escapeHtml(window.miaSkillHelpers.skillDisplayName(skill))}</strong>
+          <div class="skill-card-titlerow">
+            <strong>${escapeHtml(window.miaSkillHelpers.skillDisplayName(skill))}</strong>
+            <button class="skill-card-action" type="button" data-skill-use="${escapeHtml(skill.id)}">使用</button>
+          </div>
           <p>${escapeHtml(window.miaSkillHelpers.skillSummaryZh(skill))}</p>
         </div>
         <span class="skill-card-source">${escapeHtml(skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill))}</span>
@@ -156,6 +159,43 @@
         openSkillContextMenu(card.dataset.skillSelect, event.clientX, event.clientY);
       });
     });
+    els.skillCardGrid.querySelectorAll("[data-skill-use]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openUseSkillPicker(button.dataset.skillUse, event.clientX, event.clientY);
+      });
+    });
+  }
+
+  // "使用" → pick a Fellow → enable the skill on it and open that chat.
+  function openUseSkillPicker(skillId, x, y) {
+    document.querySelector(".skill-use-picker")?.remove();
+    const fellows = window.miaFellowManager?.allOwnedFellows?.() || [];
+    const picker = document.createElement("div");
+    picker.className = "skill-use-picker";
+    picker.innerHTML = fellows.length
+      ? `<div class="skill-use-picker-label">用哪个 Fellow 使用？</div>` +
+        fellows.map((fellow) => `<button type="button" data-use-fellow="${escapeHtml(fellow.key)}">${escapeHtml(fellow.name || fellow.key)}</button>`).join("")
+      : `<div class="skill-use-picker-label">还没有可用的 Fellow</div>`;
+    document.body.appendChild(picker);
+    const width = picker.offsetWidth || 200;
+    const height = picker.offsetHeight || 120;
+    picker.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
+    picker.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
+    const close = (event) => {
+      if (event && picker.contains(event.target)) return;
+      picker.remove();
+      document.removeEventListener("mousedown", close, true);
+    };
+    picker.querySelectorAll("[data-use-fellow]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        picker.remove();
+        document.removeEventListener("mousedown", close, true);
+        await window.miaFellowManager?.useSkillOnFellow?.(button.dataset.useFellow, skillId);
+      });
+    });
+    setTimeout(() => document.addEventListener("mousedown", close, true), 0);
   }
 
   function renderSkillPreview() {

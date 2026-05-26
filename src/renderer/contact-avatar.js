@@ -7,16 +7,8 @@
     const avatar = contact && contact.avatar ? contact.avatar : { image: "", crop: null, color: "" };
     const color = avatar.color || "#5e5ce6";
     if (avatar.image) {
-      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
-        global.miaAvatar.applyAvatarMedia(el, avatar.image, avatar.crop, color);
-        return el;
-      }
-      const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
-      let style = "";
-      if (typeof helper === "function") style = helper(avatar.image, avatar.crop, color);
-      if (!style) style = `background-image:url('${avatar.image}');background-color:${color};background-size:cover;background-position:center;`;
-      el.style.cssText = style;
-      el.textContent = "";
+      global.miaAvatar.paintAvatar(el, { image: avatar.image, crop: avatar.crop, color });
+      return el;
     } else {
       const letter = ((contact?.displayName || "")[0] || "?").toUpperCase();
       el.style.cssText = `background-color:${color};color:#fff;display:inline-flex;align-items:center;justify-content:center;`;

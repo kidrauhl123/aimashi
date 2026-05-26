@@ -42,7 +42,6 @@
   const AVATAR_MIN_ZOOM = 1;
   const DEFAULT_AVATAR_CROP = { x: 50, y: 50, zoom: 1 };
   const DEFAULT_PRESET_AVATAR_CROP = { x: 50, y: 13.5, zoom: 1.72 };
-  const avatarVideoLoopEpochs = new Map();
 
   const avatarPresetGroupTabs = [
     { key: "human", label: "人形" },
@@ -214,99 +213,35 @@
     });
   }
 
-  function avatarClockNow() {
-    if (typeof performance !== "undefined" && typeof performance.now === "function") {
-      return performance.now();
-    }
-    return Date.now();
+  function avatarTrimKey(trim = {}) {
+    const normalized = avatarMedia().normalizeTrim(trim);
+    return `${normalized.start.toFixed(2)}:${normalized.duration.toFixed(2)}`;
   }
 
-  function avatarLoopHash(value) {
-    let hash = 0;
-    const text = String(value || "");
-    for (let i = 0; i < text.length; i += 1) {
-      hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-    }
-    return hash.toString(36);
-  }
-
-  function avatarVideoLoopKey(image, crop = {}) {
-    const src = avatarImageSrc(image) || image || "";
-    const c = normalizeCrop(crop);
-    const trim = avatarMedia().trimFromCrop(c);
-    return [
-      avatarLoopHash(src),
-      c.x.toFixed(2),
-      c.y.toFixed(2),
-      c.zoom.toFixed(3),
-      trim.start.toFixed(2),
-      trim.duration.toFixed(2)
-    ].join("\u001f");
-  }
-
-  function avatarVideoLoopEpoch(key) {
-    const normalizedKey = String(key || "");
-    if (!avatarVideoLoopEpochs.has(normalizedKey)) {
-      avatarVideoLoopEpochs.set(normalizedKey, avatarClockNow());
-    }
-    return avatarVideoLoopEpochs.get(normalizedKey);
-  }
-
-  function avatarVideoTargetTime(video) {
+  function seekAvatarVideoToStart(video) {
     const trim = avatarTrimForVideo(video);
-    const duration = Math.max(Number(trim.duration) || avatarMedia().DEFAULT_TRIM_DURATION || 3, 0.1);
-    const epoch = Number(video?.dataset?.avatarLoopEpoch);
-    const startedAt = Number.isFinite(epoch) ? epoch : avatarClockNow();
-    const elapsed = Math.max(0, (avatarClockNow() - startedAt) / 1000);
-    return trim.start + (elapsed % duration);
-  }
-
-  function showAvatarVideo(video) {
-    if (!video) return;
-    const schedule = typeof requestAnimationFrame === "function"
-      ? requestAnimationFrame
-      : (fn) => setTimeout(fn, 0);
-    if (typeof video.requestVideoFrameCallback === "function") {
-      video.requestVideoFrameCallback(() => schedule(() => video.classList.add("ready")));
-      return;
+    if (!Number.isFinite(video.duration) || video.duration <= 0) return false;
+    const safeStart = Math.min(trim.start, Math.max(video.duration - 0.1, 0));
+    if (Math.abs(video.currentTime - safeStart) <= 0.25) return false;
+    try {
+      video.currentTime = safeStart;
+    } catch {
+      return false;
     }
-    schedule(() => video.classList.add("ready"));
+    return true;
   }
 
   function syncAvatarVideoLoop(video) {
     if (!video || video.dataset.avatarLoopReady === "true") return;
     video.dataset.avatarLoopReady = "true";
-    const seekStart = () => {
-      const trim = avatarTrimForVideo(video);
-      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
-      const target = avatarVideoTargetTime(video);
-      const safeTarget = Math.min(target, Math.max(video.duration - 0.1, 0));
-      if (Math.abs(video.currentTime - safeTarget) > 0.08) {
-        video.addEventListener("seeked", () => showAvatarVideo(video), { once: true });
-        try {
-          video.currentTime = safeTarget;
-        } catch {
-          showAvatarVideo(video);
-        }
-        return;
-      }
-      showAvatarVideo(video);
-    };
+    const seekStart = () => seekAvatarVideoToStart(video);
     video.addEventListener("loadedmetadata", seekStart);
     video.addEventListener("timeupdate", () => {
       const trim = avatarTrimForVideo(video);
       const end = trim.start + trim.duration;
-      const target = avatarVideoTargetTime(video);
-      const drift = Math.abs(video.currentTime - target);
-      if (video.currentTime < trim.start - 0.15 || video.currentTime >= end || drift > 0.45) seekStart();
+      if (video.currentTime >= end) seekStart();
     });
-    video.addEventListener("ended", () => {
-      seekStart();
-      video.play?.().catch?.(() => {});
-    });
-    video.addEventListener("canplay", () => {
-      video.play?.().catch?.(() => {});
-    });
+    video.addEventListener("canplay", () => video.play?.().catch?.(() => {}));
     if (video.readyState >= 1) seekStart();
   }
 
@@ -314,33 +249,23 @@
     const src = avatarImageSrc(image) || image || "";
     const c = normalizeCrop(crop);
     const trim = avatarMedia().trimFromCrop(c);
-    const loopKey = avatarVideoLoopKey(src, c);
-    const changed = video.getAttribute("src") !== src || video.dataset.avatarLoopKey !== loopKey;
-    if (changed) {
-      video.classList.remove("ready");
+    const trimKey = avatarTrimKey(trim);
+    const sourceChanged = video.getAttribute("src") !== src;
+    const trimChanged = video.dataset.avatarTrimKey !== trimKey;
+    if (sourceChanged) {
       video.setAttribute("src", src);
     }
-    video.loop = false;
-    video.removeAttribute("loop");
+    video.loop = true;
     video.preload = "auto";
+    video.setAttribute("loop", "");
     video.setAttribute("preload", "auto");
     video.setAttribute("style", videoObjectStyle(c));
     video.dataset.avatarStart = String(trim.start);
     video.dataset.avatarDuration = String(trim.duration);
-    video.dataset.avatarLoopKey = loopKey;
-    video.dataset.avatarLoopEpoch = String(avatarVideoLoopEpoch(loopKey));
+    video.dataset.avatarTrimKey = trimKey;
     syncAvatarVideoLoop(video);
-    if (video.readyState >= 1) {
-      video.classList.remove("ready");
-      const trimTarget = Math.min(avatarVideoTargetTime(video), Math.max(video.duration - 0.1, 0));
-      try {
-        if (Number.isFinite(trimTarget) && Math.abs(video.currentTime - trimTarget) > 0.08) {
-          video.currentTime = trimTarget;
-        }
-      } catch {
-        // Ignore browser seek failures; the loop synchronizer will retry.
-      }
-      showAvatarVideo(video);
+    if (trimChanged && !sourceChanged && video.readyState >= 1) {
+      seekAvatarVideoToStart(video);
     }
     video.play?.().catch?.(() => {});
   }
@@ -351,17 +276,56 @@
     video.className = "avatar-video";
     video.setAttribute("src", src);
     video.muted = true;
-    video.loop = false;
+    video.loop = true;
     video.autoplay = true;
     video.playsInline = true;
     video.preload = "auto";
     video.setAttribute("muted", "");
+    video.setAttribute("loop", "");
     video.setAttribute("autoplay", "");
     video.setAttribute("playsinline", "");
     video.setAttribute("preload", "auto");
     video.setAttribute("aria-hidden", "true");
     updateAvatarVideoElement(video, src, crop);
     return video;
+  }
+
+  // Lists and panels (sidebar cards, contact list/detail, chat bubbles, group
+  // tiles) rebuild their containers wholesale (innerHTML = "") on every render.
+  // A fresh <video> reloads its source, flashes a blank frame, and restarts the
+  // trim loop — so frequent renders (the 2s runtime poll, every new message)
+  // make video avatars flicker and never play their set duration. Persistent
+  // single-slot avatars (chat top bar, user avatar, edit preview) never showed
+  // this because applyAvatarMedia reuses their own child <video> in place.
+  //
+  // To make every call site behave the same, park each avatar <video> here by
+  // src. A wholesale rebuild detaches the old node but this Map keeps it alive,
+  // so the next applyAvatarMedia for that src adopts the live element — same
+  // decoded frames and playback position — instead of mounting a fresh one.
+  // We only ever hand back a currently-detached node, so a src shown in several
+  // slots at once is never stolen from a visible slot.
+  const parkedAvatarVideos = new Map();
+
+  function registerAvatarVideo(src, video) {
+    if (!src || !video) return;
+    let bucket = parkedAvatarVideos.get(src);
+    if (!bucket) {
+      bucket = new Set();
+      parkedAvatarVideos.set(src, bucket);
+    }
+    bucket.add(video);
+    // Bound growth: keep every attached node plus a couple of detached spares.
+    const detached = [...bucket].filter((node) => node.isConnected === false);
+    for (const stale of detached.slice(0, Math.max(0, detached.length - 2))) bucket.delete(stale);
+  }
+
+  function adoptParkedAvatarVideo(src) {
+    const bucket = src && parkedAvatarVideos.get(src);
+    if (!bucket) return null;
+    for (const video of bucket) {
+      if (video.isConnected === false) return video;
+    }
+    return null;
   }
 
   function updateAvatarImageElement(imageEl, image, crop = {}) {
@@ -396,7 +360,8 @@
       el.style.backgroundColor = "transparent";
       removeAvatarImages(el);
       const videos = Array.from(el.querySelectorAll?.(":scope > .avatar-video") || []);
-      const video = videos[0] || createAvatarVideoElement(src, crop);
+      const video = videos[0] || adoptParkedAvatarVideo(src) || createAvatarVideoElement(src, crop);
+      registerAvatarVideo(src, video);
       videos.slice(1).forEach((node) => node.remove());
       if (!options.preserveChildren) removeAvatarChildrenExcept(el, video);
       updateAvatarVideoElement(video, src, crop);
@@ -423,6 +388,17 @@
     removeAvatarImages(el);
     if (!options.preserveChildren) el.textContent = fallbackText || "";
     el.setAttribute("style", avatarThumbBackgroundStyle(image, crop, color));
+  }
+
+  // Single entry point for painting a resolved avatar descriptor
+  // ({ image, crop, color }) into an existing element. Every list / card / tile
+  // funnels through here instead of each repeating an "applyAvatarMedia, else
+  // fall back to a background-style string" block. applyAvatarMedia already
+  // covers all three cases (video, image, empty → solid color + optional
+  // letter), so this also routes them through the shared video-reuse pool.
+  function paintAvatar(el, avatar = {}, options = {}) {
+    if (!el) return;
+    applyAvatarMedia(el, avatar.image || "", avatar.crop, avatar.color || "#5e5ce6", options.fallbackText || "", options);
   }
 
   function avatarMediaAttrs(image = "", crop = {}, color = "#5e5ce6", text = "") {
@@ -550,6 +526,7 @@
     createAvatarVideoElement,
     updateAvatarVideoElement,
     applyAvatarMedia,
+    paintAvatar,
     avatarHtml,
     hydrateAvatarMedia,
     hydrateAvatarVideos,

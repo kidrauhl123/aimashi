@@ -21,6 +21,17 @@ const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..");
 
+function extractCreateMenuItems(html, menuId) {
+  const menuMatch = html.match(new RegExp(`<div id="${menuId}"[^>]*>([\\s\\S]*?)</div>\\s*</header>`));
+  assert.ok(menuMatch, `${menuId} menu must exist`);
+  return [...menuMatch[1].matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map((match) => {
+    const body = match[2];
+    const label = (body.match(/<span class="create-menu-label">([\s\S]*?)<\/span>/) || [])[1]?.trim() || "";
+    const svg = (body.match(/<svg[\s\S]*?<\/svg>/) || [])[0]?.replace(/\s+/g, " ").trim() || "";
+    return { label, svg };
+  });
+}
+
 test("src/web/index.html loads shared/unread.js before app.js", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
   const unreadIdx = html.indexOf("shared/unread.js");
@@ -69,6 +80,22 @@ test("src/web exposes cloud-only fellow creation from the sidebar plus menu", ()
   assert.match(source, /avatarCrop:\s*draft\.avatarCrop/);
   assert.doesNotMatch(source, /id="webFellowRuntimeLocation"/);
   assert.doesNotMatch(source, /desktop-local[\s\S]{0,160}openCreateFellowDialog/);
+});
+
+test("src/web sidebar plus menu matches the desktop menu order, labels, and icons", () => {
+  const desktopHtml = fs.readFileSync(path.join(ROOT, "src/renderer/index.html"), "utf8");
+  const webHtml = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const desktopItems = extractCreateMenuItems(desktopHtml, "fellowCreateMenu");
+  const webItems = extractCreateMenuItems(webHtml, "conversationCreateMenu");
+
+  assert.deepEqual(
+    webItems.map((item) => item.label),
+    desktopItems.map((item) => item.label)
+  );
+  assert.deepEqual(
+    webItems.map((item) => item.svg),
+    desktopItems.map((item) => item.svg)
+  );
 });
 
 test("src/web/index.html uses the signed-in user avatar in the rail", () => {
@@ -254,6 +281,7 @@ test("src/web avatar media does not use accent backgrounds or avatar borders", (
   assert.match(css, /\.rail-avatar:hover,[\s\S]*?box-shadow:\s*none;/);
   assert.match(css, /\.avatar,\n\.profile-avatar\s*\{[\s\S]*?border:\s*0;/);
   assert.match(css, /\.avatar,\n\.profile-avatar\s*\{[\s\S]*?background-color:\s*transparent;/);
+  assert.match(css, /\.avatar-crop-preview\s*\{[\s\S]*?border:\s*0;[\s\S]*?background-color:\s*transparent;[\s\S]*?box-shadow:\s*none;/);
 });
 
 test("src/web/app.js renders web bubbles through desktop markdown", () => {

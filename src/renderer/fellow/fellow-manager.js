@@ -132,6 +132,19 @@
     requestAnimationFrame(() => els.chatInput?.focus());
   }
 
+  // "使用" a skill from the skills page: enable it on the chosen Fellow (so the
+  // engine actually gets it, via buildEnabledSkillsContext) and open that chat.
+  async function useSkillOnFellow(fellowKey, skillId) {
+    if (!fellowKey || !skillId || !state) return;
+    const fellow = allOwnedFellows().find((item) => item.key === fellowKey);
+    if (!fellow) return;
+    const caps = fellowCapabilities(fellow);
+    if (!caps.enabledSkills.includes(skillId)) {
+      await saveFellowCapabilities(fellow, toggleCapabilityId(caps, skillId, "enabledSkills", "disabledSkills", true));
+    }
+    await openFellowChat(fellowKey);
+  }
+
   function defaultFellowCapabilities() {
     return {
       inheritEngineDefaults: true,
@@ -533,6 +546,7 @@
     sortableConversationTime,
     sortMessageCardsForSidebar,
     allOwnedFellows,
+    useSkillOnFellow,
     contactSessionSummary,
     contactPetLabel,
     openFellowChat,

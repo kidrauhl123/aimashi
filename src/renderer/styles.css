@@ -275,14 +275,6 @@ body.window-blurred .traffic-spacer:hover .traffic-light.green {
   display: block;
 }
 
-.avatar-video {
-  opacity: 0;
-}
-
-.avatar-video.ready {
-  opacity: 1;
-}
-
 .avatar.media-avatar,
 .fellow-photo.media-avatar,
 .profile-avatar.media-avatar,
@@ -293,8 +285,10 @@ body.window-blurred .traffic-spacer:hover .traffic-light.green {
 .profile-avatar.video-avatar,
 .contact-avatar.video-avatar,
 .contact-profile-avatar.video-avatar {
+  border: 0;
   border-color: transparent;
   background-color: transparent;
+  box-shadow: none;
 }
 
 .rail-avatar {

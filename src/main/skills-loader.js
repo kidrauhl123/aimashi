@@ -452,6 +452,33 @@ function createSkillsLoader(deps = {}) {
     };
   }
 
+  // Build a prompt block injecting the FULL content of the skills a Fellow has
+  // enabled (fellow.capabilities.enabledSkills). Injected into every turn so the
+  // agent actually has these skills regardless of engine-native skill loading —
+  // this is what makes the per-Fellow skill selection functional. Returns "" if
+  // the Fellow has no enabled skills.
+  function buildEnabledSkillsContext(fellow) {
+    const caps = fellow && typeof fellow.capabilities === "object" && fellow.capabilities ? fellow.capabilities : {};
+    const ids = Array.isArray(caps.enabledSkills) ? caps.enabledSkills : [];
+    if (!ids.length) return "";
+    const blocks = [];
+    const seen = new Set();
+    for (const id of ids) {
+      const key = String(id || "").trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const found = resolveLocalSkill(key);
+      if (!found) continue;
+      blocks.push(`=== Skill: ${found.skill?.name || key} ===\n${String(found.raw || "").trim()}\n=== End Skill ===`);
+    }
+    if (!blocks.length) return "";
+    return [
+      "当前 Fellow 启用了以下 Skill。哪个与用户请求相关就严格按其指南执行，不相关则忽略：",
+      "",
+      blocks.join("\n\n")
+    ].join("\n");
+  }
+
   function expandLeadingSkillCommand(text, { mode = "inline" } = {}) {
     const trimmed = String(text || "");
     const match = trimmed.match(/^\s*\/([A-Za-z0-9_\/-]+)(?:[\s:]+([\s\S]+))?$/);
@@ -512,6 +539,7 @@ function createSkillsLoader(deps = {}) {
     openLocalSkillDirectory,
     installMarketplaceSkill,
     packageLocalSkill,
+    buildEnabledSkillsContext,
     installMarketplacePlugin,
     // Used by chat-engine adapters
     expandLeadingSkillCommand,

@@ -48,22 +48,10 @@
     node.style.zIndex = "1000";
   }
 
-  function avatarStyleFor(avatar) {
-    if (avatar?.image) {
-      const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
-      if (helper) return helper(avatar.image, avatar.crop, avatar.color || "#5e5ce6");
-    }
-    return `background-color:${avatar?.color || "#5e5ce6"};`;
-  }
-
   function paintContactCardAvatar(card, avatar) {
     const avatarEl = card?.querySelector?.(".contact-card-avatar");
     if (!avatarEl) return;
-    if (avatar?.image && typeof global.miaAvatar?.applyAvatarMedia === "function") {
-      global.miaAvatar.applyAvatarMedia(avatarEl, avatar.image, avatar.crop, avatar.color || "#5e5ce6");
-      return;
-    }
-    avatarEl.style.cssText = avatarStyleFor(avatar);
+    global.miaAvatar.paintAvatar(avatarEl, avatar || {});
   }
 
   function localFellow(ref) {

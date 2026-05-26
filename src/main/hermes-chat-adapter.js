@@ -32,6 +32,7 @@ function createHermesChatAdapter(deps = {}) {
   const nowSeconds = deps.nowSeconds || defaultNowSeconds;
   const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
   const responseModel = deps.responseModel || "hermes-agent";
+  const buildEnabledSkillsContext = deps.buildEnabledSkillsContext || (() => "");
 
   function slashCommandResponse({ id, content }) {
     return {
@@ -82,10 +83,17 @@ function createHermesChatAdapter(deps = {}) {
     } catch (error) {
       appendEngineLog(`Scheduler MCP context write failed: ${error?.message || error}`);
     }
+    // Inject the Fellow's enabled skills into the user turn so Hermes uses them.
+    const enabledSkills = buildEnabledSkillsContext(fellow);
+    const runMessages = enabledSkills && lastUserMessage
+      ? messages.map((m) => (m === lastUserMessage
+          ? { ...m, text: `${enabledSkills}\n\n${m.text != null ? m.text : (m.content || "")}` }
+          : m))
+      : messages;
     const runBody = buildRunPayload({
       fellow,
       sessionId,
-      messages,
+      messages: runMessages,
       model: runtimeConfig?.model,
       effortLevel: runtimeConfig?.effortLevel,
       permissionMode: runtimeConfig?.permissionMode

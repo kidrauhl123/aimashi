@@ -182,13 +182,7 @@
 
       const avatarEl = document.createElement("span");
       avatarEl.className = "member-avatar";
-      if (entry.image && typeof window.miaAvatar?.applyAvatarMedia === "function") {
-        window.miaAvatar.applyAvatarMedia(avatarEl, entry.image, entry.crop, entry.color);
-      } else if (entry.image && typeof window.miaAvatar?.avatarThumbBackgroundStyle === "function") {
-        avatarEl.style.cssText = window.miaAvatar.avatarThumbBackgroundStyle(entry.image, entry.crop, entry.color);
-      } else {
-        avatarEl.style.background = entry.color;
-      }
+      window.miaAvatar.paintAvatar(avatarEl, entry);
 
       const nameEl = document.createElement("span");
       nameEl.className = "member-name";

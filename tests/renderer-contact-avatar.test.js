@@ -19,7 +19,16 @@ function loadHelper() {
     };
     return el;
   };
-  const window = { miaAvatar: { avatarThumbBackgroundStyle: (img, crop, color) => `background-image:url(${img});background-color:${color};` } };
+  const avatarThumbBackgroundStyle = (img, crop, color) => `background-image:url(${img});background-color:${color};`;
+  const window = {
+    miaAvatar: {
+      avatarThumbBackgroundStyle,
+      // renderAvatar now delegates image/video painting to the shared entry
+      // point; the real one mounts an <img>/<video>, here we just reflect it
+      // into cssText so the test can assert the delegation happened.
+      paintAvatar: (el, avatar) => { el.style.cssText = avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatar.color); }
+    }
+  };
   const ctx = vm.createContext({ window, globalThis: window, document: { createElement: () => mockEl() }, console });
   vm.runInContext(src, ctx);
   return window.miaContactAvatar;

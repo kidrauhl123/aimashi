@@ -171,6 +171,7 @@ function createCodexChatAdapter(deps = {}) {
   const shellCommandPath = requireDependency(deps, "shellCommandPath");
   const lastUserPrompt = requireDependency(deps, "lastUserPrompt");
   const expandLeadingSkillCommand = requireDependency(deps, "expandLeadingSkillCommand");
+  const buildEnabledSkillsContext = deps.buildEnabledSkillsContext || (() => "");
   const injectGroupContextForSdk = requireDependency(deps, "injectGroupContextForSdk");
   const readFellowPersona = requireDependency(deps, "readFellowPersona");
   const codexSdk = requireDependency(deps, "codexSdk");
@@ -198,7 +199,9 @@ function createCodexChatAdapter(deps = {}) {
     } catch {
       // Non-fatal; scheduler MCP context missing means tool works without context defaults
     }
-    const userText = expandLeadingSkillCommand(lastUser, { mode: "inline" }) || lastUser;
+    const userText = [buildEnabledSkillsContext(fellow), expandLeadingSkillCommand(lastUser, { mode: "inline" }) || lastUser]
+      .filter(Boolean)
+      .join("\n\n");
     const persona = !externalSessionId
       ? readFellowPersona(fellow.key, fellow.name, fellow.bio).trim()
       : "";

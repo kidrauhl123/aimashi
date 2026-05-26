@@ -38,18 +38,7 @@
   }
 
   function applyAvatarStyle(el, image, crop, color) {
-    const mediaHelper = global.miaAvatar?.applyAvatarMedia;
-    if (typeof mediaHelper === "function") {
-      mediaHelper(el, image, crop, color || "#5e5ce6");
-      return;
-    }
-    const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
-    let style = "";
-    if (typeof helper === "function" && image) {
-      style = helper(image, crop, color || "#5e5ce6");
-    }
-    if (!style || !style.trim()) style = `background-color:${color || "#5e5ce6"};`;
-    el.style.cssText = style;
+    global.miaAvatar.paintAvatar(el, { image, crop, color });
   }
 
   function buildSideHtml({ time, pinned, unread, muted }) {

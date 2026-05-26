@@ -39,13 +39,7 @@
     const custom = room?.decorations?.avatar;
     if (custom && custom.image) {
       slot.className = "avatar";
-      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
-        global.miaAvatar.applyAvatarMedia(slot, custom.image, custom.crop, "#5e5ce6");
-      } else {
-        const style = global.miaAvatar?.avatarThumbBackgroundStyle?.(custom.image, custom.crop, "#5e5ce6")
-          || `background-image:url('${custom.image}');background-size:cover;background-position:center;`;
-        slot.style.cssText = style;
-      }
+      global.miaAvatar.paintAvatar(slot, { image: custom.image, crop: custom.crop, color: "#5e5ce6" });
       slot.removeAttribute("data-count");
       return;
     }
@@ -136,14 +130,7 @@
         label = userNameFor(member, friends, self);
         avatar = { image: "", crop: null, color: "#5e5ce6" };
       }
-      if (avatar.image && typeof global.miaAvatar?.applyAvatarMedia === "function") {
-        global.miaAvatar.applyAvatarMedia(avatarEl, avatar.image, avatar.crop, avatar.color);
-      } else {
-        const style = avatar.image
-          ? global.miaAvatar.avatarThumbBackgroundStyle(avatar.image, avatar.crop, avatar.color)
-          : `background-color:${avatar.color};`;
-        avatarEl.style.cssText = style || `background-color:${avatar.color};`;
-      }
+      global.miaAvatar.paintAvatar(avatarEl, avatar);
       const nameEl = document.createElement("span");
       nameEl.className = "group-info-member-name";
       nameEl.textContent = label;

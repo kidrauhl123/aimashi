@@ -47,6 +47,7 @@ function createClaudeCodeChatAdapter(deps = {}) {
   const shellCommandPath = requireDependency(deps, "shellCommandPath");
   const lastUserPrompt = requireDependency(deps, "lastUserPrompt");
   const expandLeadingSkillCommand = requireDependency(deps, "expandLeadingSkillCommand");
+  const buildEnabledSkillsContext = deps.buildEnabledSkillsContext || (() => "");
   const injectGroupContextForSdk = requireDependency(deps, "injectGroupContextForSdk");
   const readFellowPersona = requireDependency(deps, "readFellowPersona");
   const claudeAgentSdk = requireDependency(deps, "claudeAgentSdk");
@@ -75,7 +76,9 @@ function createClaudeCodeChatAdapter(deps = {}) {
     } catch (error) {
       appendEngineLog(`Scheduler MCP context write failed: ${error?.message || error}`);
     }
-    const prompt = expandLeadingSkillCommand(lastUser, { mode: "native" }) || lastUser;
+    const prompt = [buildEnabledSkillsContext(fellow), expandLeadingSkillCommand(lastUser, { mode: "native" }) || lastUser]
+      .filter(Boolean)
+      .join("\n\n");
     const promptWithGroup = group && group.contextBlock
       ? injectGroupContextForSdk(prompt, group.contextBlock)
       : prompt;

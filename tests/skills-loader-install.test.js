@@ -105,6 +105,26 @@ test("installMarketplaceSkill rejects an unsafe skill id", async () => {
   }
 });
 
+test("buildEnabledSkillsContext injects enabled skills' content, empty when none", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
+  try {
+    const loader = makeLoader(home);
+    await loader.installMarketplaceSkill({ id: "demo-skill", zipBuffer: makeZip() });
+
+    const none = loader.buildEnabledSkillsContext({ capabilities: { enabledSkills: [] } });
+    assert.equal(none, "");
+
+    const ctx = loader.buildEnabledSkillsContext({ capabilities: { enabledSkills: ["demo-skill"] } });
+    assert.match(ctx, /Skill: demo-skill/);
+    assert.match(ctx, /# Demo Skill/);
+
+    // unknown ids are skipped
+    assert.equal(loader.buildEnabledSkillsContext({ capabilities: { enabledSkills: ["nope"] } }), "");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("installMarketplaceSkill rejects a missing package", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
   try {

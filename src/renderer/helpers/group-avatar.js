@@ -11,14 +11,6 @@
 (function (global) {
   "use strict";
 
-  function tileStyle(image, crop, color) {
-    const helper = global.miaAvatar?.avatarThumbBackgroundStyle;
-    const fallback = `background-color:${color || "#5e5ce6"};`;
-    if (typeof helper !== "function" || !image) return fallback;
-    const style = helper(image, crop, color || "#5e5ce6");
-    return style && style.trim() ? style : fallback;
-  }
-
   function applyGroupAvatar(el, tiles) {
     if (!el) return;
     el.textContent = "";
@@ -29,14 +21,10 @@
     for (const tile of list) {
       const span = document.createElement("span");
       span.className = "group-avatar-tile";
-      if (typeof global.miaAvatar?.applyAvatarMedia === "function") {
-        global.miaAvatar.applyAvatarMedia(span, tile.image, tile.crop, tile.color || "#5e5ce6");
-      } else {
-        span.style.cssText = tileStyle(tile.image, tile.crop, tile.color);
-      }
+      global.miaAvatar.paintAvatar(span, tile);
       el.appendChild(span);
     }
   }
 
-  global.miaGroupAvatar = { applyGroupAvatar, tileStyle };
+  global.miaGroupAvatar = { applyGroupAvatar };
 })(typeof window !== "undefined" ? window : globalThis);
