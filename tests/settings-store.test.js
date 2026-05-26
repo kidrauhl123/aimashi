@@ -58,6 +58,14 @@ test("appearanceSettings merges saved appearance over defaults", (t) => {
   });
 });
 
+test("appearanceSettings falls back from removed font presets", (t) => {
+  const { runtime, store } = setup(t);
+  fs.mkdirSync(path.dirname(runtime.appearanceSettings), { recursive: true });
+  fs.writeFileSync(runtime.appearanceSettings, JSON.stringify({ fontPreset: "mono" }));
+
+  assert.equal(store.appearanceSettings().fontPreset, "system");
+});
+
 test("writeAppearanceSettings validates choices, colors, and boolean toggles", (t) => {
   const { runtime, store } = setup(t);
 
@@ -75,7 +83,7 @@ test("writeAppearanceSettings validates choices, colors, and boolean toggles", (
 
   assert.deepEqual(next, {
     theme: "light",
-    fontPreset: "mono",
+    fontPreset: "system",
     accentColor: "#aabbcc",
     userBubbleColor: "#dedcff",
     showHoverBackground: false,
@@ -85,6 +93,21 @@ test("writeAppearanceSettings validates choices, colors, and boolean toggles", (
     selectionStyle: "solid"
   });
   assert.deepEqual(readJson(runtime.appearanceSettings, {}), next);
+});
+
+test("writeAppearanceSettings accepts the serif font preset", (t) => {
+  const { store } = setup(t);
+
+  const next = store.writeAppearanceSettings({ fontPreset: "serif" });
+
+  assert.equal(next.fontPreset, "serif");
+});
+
+test("writeAppearanceSettings rejects removed font presets", (t) => {
+  const { store } = setup(t);
+
+  assert.equal(store.writeAppearanceSettings({ fontPreset: "sf-pro" }).fontPreset, "system");
+  assert.equal(store.writeAppearanceSettings({ fontPreset: "mono" }).fontPreset, "system");
 });
 
 test("userProfile merges saved profile over defaults", (t) => {

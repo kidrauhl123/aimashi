@@ -46,11 +46,11 @@
   }
 
   function normalizeListStyle(value) {
-    return value === "flush" ? "flush" : DEFAULT_LIST_STYLE;
+    return value === "card" || value === "flush" ? value : DEFAULT_LIST_STYLE;
   }
 
   function normalizeSelectionStyle(value) {
-    return value === "solid" ? "solid" : DEFAULT_SELECTION_STYLE;
+    return value === "soft" || value === "solid" ? value : DEFAULT_SELECTION_STYLE;
   }
 
   function hexToRgb(value) {

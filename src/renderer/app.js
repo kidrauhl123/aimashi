@@ -387,9 +387,8 @@ const providerLabels = {
 
 const fontPresets = {
   system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  "sf-pro": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif',
   pingfang: '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-  mono: '"SF Mono", "Cascadia Code", Menlo, Consolas, monospace'
+  serif: 'ui-serif, "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif'
 };
 
 const DEFAULT_ACCENT_COLOR = "#0162db";

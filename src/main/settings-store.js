@@ -15,6 +15,13 @@ const path = require("node:path");
 
 const { normalizePermissionMode, permissionModeLabel } = require("../permission-modes");
 
+const APPEARANCE_FONT_PRESETS = ["system", "pingfang", "serif"];
+
+function normalizeAppearanceFontPreset(value) {
+  const preset = String(value || "").trim();
+  return APPEARANCE_FONT_PRESETS.includes(preset) ? preset : "system";
+}
+
 function createSettingsStore(deps = {}) {
   const {
     runtimePaths,
@@ -89,7 +96,9 @@ function createSettingsStore(deps = {}) {
   function appearanceSettings() {
     const p = runtimePaths();
     const saved = readJson(p.appearanceSettings, {});
-    return { ...defaultAppearanceSettings(), ...saved };
+    const next = { ...defaultAppearanceSettings(), ...saved };
+    next.fontPreset = normalizeAppearanceFontPreset(next.fontPreset);
+    return next;
   }
 
   function writeAppearanceSettings(settings = {}) {
@@ -107,7 +116,7 @@ function createSettingsStore(deps = {}) {
     const validHex = (value, fallback) => /^#[0-9a-fA-F]{6}$/.test(value) ? value.toLowerCase() : fallback;
     const next = {
       theme: ["light", "dark"].includes(theme) ? theme : "light",
-      fontPreset: ["system", "sf-pro", "pingfang", "mono"].includes(fontPreset) ? fontPreset : "system",
+      fontPreset: normalizeAppearanceFontPreset(fontPreset),
       accentColor: validHex(accentColor, "#5e5ce6"),
       userBubbleColor: validHex(userBubbleColor, "#dedcff"),
       showHoverBackground,

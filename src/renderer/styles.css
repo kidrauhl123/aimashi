@@ -3902,16 +3902,12 @@ body.topbar-click-capture .topbar {
   color: rgb(255 255 255 / 0.76);
 }
 
-.font-choice[data-font-preset="sf-pro"] {
-  font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
 .font-choice[data-font-preset="pingfang"] {
   font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
 }
 
-.font-choice[data-font-preset="mono"] {
-  font-family: "SF Mono", Menlo, Consolas, monospace;
+.font-choice[data-font-preset="serif"] {
+  font-family: ui-serif, "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
 }
 
 .accent-picker {
