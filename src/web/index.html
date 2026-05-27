@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#0c0f0e">
+    <meta name="theme-color" content="#f7f4ff">
     <meta name="apple-mobile-web-app-title" content="Mia">
     <meta
       name="description"
@@ -20,236 +20,235 @@
 
     <header class="landing-nav">
       <a class="landing-brand" href="/" aria-label="Mia 首页">
-        <span class="landing-brand-mark" aria-hidden="true">M</span>
+        <span class="brand-mark" aria-hidden="true">M</span>
         <span>Mia</span>
       </a>
       <nav class="landing-nav-links" aria-label="Mia website">
-        <a href="#story">工作流</a>
-        <a href="#system">系统</a>
-        <a href="#trust">信任边界</a>
+        <a href="#product">产品</a>
+        <a href="#workflow">工作流</a>
+        <a href="#trust">信任</a>
         <a href="#download">下载</a>
       </nav>
       <a class="landing-nav-action" href="/app/">打开 Mia Web</a>
     </header>
 
     <main class="landing-page">
-      <section id="product" class="landing-hero" aria-labelledby="landingTitle">
-        <div class="landing-hero-copy" data-reveal>
-          <h1 id="landingTitle">Mia Agent Workspace</h1>
-          <p class="landing-lede">
-            把你桌面上的 Claude Code、Codex、Hermes 和自定义 Fellow 变成一个可协作、可控权、可追踪的 Agent 工作台。
+      <section id="product" class="hero-section" aria-labelledby="landingTitle">
+        <div class="hero-copy" data-reveal>
+          <p class="hero-kicker">Mia Agent Workspace</p>
+          <h1 id="landingTitle">AI Fellow 的桌面工作台。</h1>
+          <p class="hero-lede">
+            用一个 GUI 管理 Fellow、云端房间、权限和本机工具调用。
           </p>
-          <div class="landing-actions">
+          <div class="hero-actions">
             <a class="landing-primary" href="/downloads/mia-macos-arm64-latest.dmg" download="Mia-macOS-Apple-Silicon.dmg">
               下载 macOS Apple Silicon
             </a>
             <a class="landing-secondary" href="/app/">打开 Mia Web</a>
           </div>
-          <dl class="landing-signal" aria-label="Mia runtime signals">
-            <div>
-              <dt>Local</dt>
-              <dd>工具和账号留在你的桌面</dd>
-            </div>
-            <div>
-              <dt>Cloud</dt>
-              <dd>房间、消息和协作状态同步</dd>
-            </div>
-            <div>
-              <dt>Control</dt>
-              <dd>敏感动作先问，再执行</dd>
-            </div>
-          </dl>
         </div>
 
-        <div class="landing-stage" aria-label="Mia 产品界面预览" data-parallax>
-          <div class="stage-grid" aria-hidden="true"></div>
-          <section class="workspace-window" aria-label="Agent workspace">
-            <div class="window-topbar">
-              <span></span>
-              <span></span>
-              <span></span>
-              <strong>Agent workspace</strong>
+        <div class="product-scene" aria-label="Mia 产品界面预览" data-parallax data-reveal>
+          <div class="signal-mesh" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <section class="product-window" aria-label="Mia desktop workspace">
+            <div class="window-toolbar">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <strong>Mia Workspace</strong>
+              <b data-stage-status>Bridge online</b>
             </div>
-            <div class="workspace-shell">
-              <aside class="workspace-rail" aria-label="Mia navigation">
-                <span class="rail-mark" aria-hidden="true">M</span>
-                <b></b>
-                <b></b>
-                <b></b>
+            <div class="app-shell-preview">
+              <aside class="app-rail" aria-label="Mia navigation preview">
+                <span class="rail-logo">M</span>
+                <i></i>
+                <i></i>
+                <i></i>
               </aside>
-              <section class="fellow-list" aria-label="Fellow list">
-                <article class="fellow-row active">
-                  <i></i>
+              <section class="room-list" aria-label="Fellow list preview">
+                <article class="room-item active">
+                  <span></span>
                   <div>
                     <strong>空铃</strong>
-                    <span>Owner desktop online</span>
+                    <small>Owner desktop online</small>
                   </div>
                 </article>
-                <article class="fellow-row">
-                  <i></i>
+                <article class="room-item">
+                  <span></span>
                   <div>
                     <strong>Hermes</strong>
-                    <span>Cloud runtime ready</span>
+                    <small>Cloud runtime ready</small>
                   </div>
                 </article>
-                <article class="fellow-row">
-                  <i></i>
+                <article class="room-item">
+                  <span></span>
                   <div>
                     <strong>Codex</strong>
-                    <span>Local CLI bridge</span>
+                    <small>Local bridge</small>
                   </div>
                 </article>
               </section>
-              <section class="chat-surface" aria-label="Agent chat preview">
-                <div class="chat-head">
+              <section class="chat-preview" aria-label="Mia chat preview">
+                <div class="chat-preview-head">
                   <div>
                     <strong data-stage-title>权限确认</strong>
-                    <span data-stage-subtitle>Claude Sonnet 4.6 · Ask before shell</span>
+                    <small data-stage-subtitle>Claude Sonnet 4.6 / Codex</small>
                   </div>
-                  <b data-stage-status>Bridge online</b>
+                  <span>Ask</span>
                 </div>
-                <div class="message-stack">
-                  <p class="chat-bubble">帮我把发布前检查跑完，失败项先列出来。</p>
-                  <p class="chat-bubble own">我会读取仓库状态、跑测试，并在执行高风险命令前等待确认。</p>
+                <div class="chat-bubbles">
+                  <p>帮我检查发布前还有哪些风险。</p>
+                  <p class="own">我会先读取仓库状态；涉及命令执行前会等待确认。</p>
                 </div>
-                <div class="run-console" aria-label="Run preview">
-                  <div><span>route</span><b>@kongling via owner desktop</b></div>
-                  <div><span>engine</span><b>codex · medium reasoning</b></div>
-                  <div><span>permission</span><b data-stage-permission>ask before shell</b></div>
+                <div class="permission-sheet">
+                  <span>Permission request</span>
+                  <strong data-stage-permission>ask before shell</strong>
+                  <div>
+                    <button type="button">允许本次</button>
+                    <button type="button">拒绝</button>
+                  </div>
                 </div>
               </section>
             </div>
           </section>
 
-          <aside class="routing-panel" aria-label="Mia routing panel">
-            <strong>Fellow routing</strong>
-            <p>云端房间可以召唤 Fellow，但执行权仍回到拥有者桌面。</p>
-            <div class="routing-line"><span>room</span><b>#release</b></div>
-            <div class="routing-line"><span>owner</span><b>Mac Studio</b></div>
+          <aside class="floating-card sync-card" aria-label="Cloud sync preview">
+            <span>Cloud room</span>
+            <strong>#release</strong>
+            <small>消息、成员和 Fellow 提及保持同步。</small>
+          </aside>
+          <aside class="floating-card bridge-card" aria-label="Local bridge preview">
+            <span>Local bridge</span>
+            <strong>Mac online</strong>
+            <small>工具调用回到 owner desktop。</small>
           </aside>
         </div>
       </section>
 
-      <section id="story" class="landing-scroll-story" aria-label="Mia scroll animation stages">
-        <article class="landing-scroll-step is-active" data-scroll-stage="1" data-stage-target="select" data-reveal>
-          <span>01</span>
-          <strong>选择 Fellow</strong>
-          <p>身份、模型、权限模式和在线状态在执行前清楚可见。</p>
+      <section class="visual-strip" aria-label="Mia visual product states">
+        <article class="visual-card fellow-card" data-reveal>
+          <span>Fellow</span>
+          <strong>空铃</strong>
+          <div class="mini-profile" aria-hidden="true">
+            <i></i>
+            <b></b>
+            <b></b>
+          </div>
         </article>
-        <article class="landing-scroll-step" data-scroll-stage="2" data-stage-target="route" data-reveal>
-          <span>02</span>
-          <strong>路由任务</strong>
-          <p>群聊提到 Fellow 后，云端只负责同步，真正的工具调用回到 owner desktop。</p>
+        <article class="visual-card permission-card" data-reveal>
+          <span>Permission</span>
+          <strong>Ask before shell</strong>
+          <div class="mini-permission" aria-hidden="true">
+            <i></i>
+            <i></i>
+          </div>
         </article>
-        <article class="landing-scroll-step" data-scroll-stage="3" data-stage-target="approve" data-reveal>
-          <span>03</span>
-          <strong>确认权限</strong>
-          <p>读文件、跑命令、调用本地工具之前，Mia 把风险动作变成明确的确认界面。</p>
-        </article>
-        <article class="landing-scroll-step" data-scroll-stage="4" data-stage-target="reply" data-reveal>
-          <span>04</span>
-          <strong>同步结果</strong>
-          <p>回复回到同一个房间，桌面端和 Web 端看到一致的上下文。</p>
+        <article class="visual-card room-card" data-reveal>
+          <span>Cloud room</span>
+          <strong>#release</strong>
+          <div class="mini-room" aria-hidden="true">
+            <i></i>
+            <i></i>
+            <i></i>
+          </div>
         </article>
       </section>
 
-      <section id="system" class="system-section" aria-labelledby="systemTitle">
+      <section id="workflow" class="workflow-section" aria-label="Mia workflow stages">
+        <article class="workflow-step is-active" data-scroll-stage="1" data-stage-target="select" data-reveal>
+          <span>01</span>
+          <strong>选择 Fellow</strong>
+          <p>身份、模型、权限一眼可见。</p>
+        </article>
+        <article class="workflow-step" data-scroll-stage="2" data-stage-target="route" data-reveal>
+          <span>02</span>
+          <strong>路由任务</strong>
+          <p>云端请求回到 owner desktop。</p>
+        </article>
+        <article class="workflow-step" data-scroll-stage="3" data-stage-target="approve" data-reveal>
+          <span>03</span>
+          <strong>确认权限</strong>
+          <p>敏感动作执行前先问。</p>
+        </article>
+        <article class="workflow-step" data-scroll-stage="4" data-stage-target="reply" data-reveal>
+          <span>04</span>
+          <strong>同步结果</strong>
+          <p>桌面端和 Web 端同步上下文。</p>
+        </article>
+      </section>
+
+      <section id="system" class="feature-section" aria-labelledby="systemTitle">
         <div class="section-copy" data-reveal>
-          <h2 id="systemTitle">不是另一个聊天页，而是 Agent 的操作系统界面。</h2>
-          <p>
-            Mia 把 Fellow、技能、模型、权限、云端房间和桌面桥接做成同一个工作表面，让用户知道每个 Agent 在哪里、能做什么、何时需要授权。
-          </p>
+          <p class="section-kicker">Product surface</p>
+          <h2 id="systemTitle">不是聊天窗口套壳。</h2>
+          <p>Fellow、技能、模型、权限、云端房间和桌面桥接都在同一套 GUI 里。</p>
         </div>
-
-        <div class="system-layout">
-          <article class="system-command" data-reveal>
-            <h3>Local-first agent control</h3>
-            <p>Claude Code 和 Codex 保持在你的 PATH、账号和文件系统里运行。云端可以传递请求，但不能伪装成本机。</p>
-            <pre aria-label="Local agent route"><code>$ mia route @kongling --engine codex
-runtime: owner-desktop
-permission: ask-before-shell
-reply: cloud-room-message</code></pre>
+        <div class="feature-grid">
+          <article data-reveal>
+            <span>Local-first</span>
+            <strong>本机工具留在本机</strong>
+            <p>Claude Code 和 Codex 继续使用你的 PATH、账号和文件系统。</p>
           </article>
-
-          <div class="system-column">
-            <article class="system-unit" data-reveal>
-              <h3>Cloud rooms when you need them</h3>
-              <p>DM、群聊、远程 Fellow 提及和消息序列由云端保持一致，协作不再散落在多个窗口里。</p>
-              <div class="unit-meter"><span style="--meter: 74%"></span></div>
-            </article>
-            <article class="system-unit" data-reveal>
-              <h3>Skills, pets, memory</h3>
-              <p>技能、桌宠、头像、记忆和模型配置都围绕 Fellow 管理，而不是藏在命令行参数里。</p>
-              <ul class="skill-strip" aria-label="Mia surfaces">
-                <li>Skills</li>
-                <li>Pets</li>
-                <li>Memory</li>
-                <li>Model</li>
-              </ul>
-            </article>
-          </div>
+          <article data-reveal>
+            <span>Cloud rooms</span>
+            <strong>协作状态可同步</strong>
+            <p>DM、群聊、消息序列和 Fellow 提及由云端保持一致。</p>
+          </article>
+          <article data-reveal>
+            <span>Fellow memory</span>
+            <strong>身份和技能可管理</strong>
+            <p>技能、桌宠、头像、记忆和模型配置围绕 Fellow 管理。</p>
+          </article>
         </div>
       </section>
 
       <section id="trust" class="trust-section" aria-labelledby="trustTitle">
-        <div class="trust-map" data-reveal aria-label="Mia trust architecture">
-          <div class="trust-node local">
-            <span>Desktop</span>
-            <strong>Local bridge</strong>
-          </div>
-          <div class="trust-connector"></div>
-          <div class="trust-node cloud">
-            <span>Cloud</span>
-            <strong>Rooms and sync</strong>
-          </div>
-          <div class="trust-connector"></div>
-          <div class="trust-node agents">
-            <span>Agents</span>
-            <strong>Hermes / Codex / Claude Code</strong>
-          </div>
+        <div class="section-copy" data-reveal>
+          <p class="section-kicker">Trust boundary</p>
+          <h2 id="trustTitle">远程协作可以轻，执行边界必须清楚。</h2>
         </div>
-        <div class="trust-copy" data-reveal>
-          <h2 id="trustTitle">信任边界要看得见。</h2>
-          <div class="trust-list">
-            <article>
-              <strong>Hermes packaged. Claude Code and Codex stay yours.</strong>
-              <span>内置运行时负责可控的默认体验；你自己的 CLI Agent 仍由本机环境和账号控制。</span>
-            </article>
-            <article>
-              <strong>权限先问，再执行</strong>
-              <span>敏感动作不被藏进流式回复里，用户能看到任务计划、命令意图和执行位置。</span>
-            </article>
-            <article>
-              <strong>Bridge 在线才调用你的 Fellow</strong>
-              <span>远程请求只有在 owner desktop 在线并绑定时才会进入本机执行路径。</span>
-            </article>
-          </div>
+        <div class="trust-list">
+          <article data-reveal>
+            <strong>Hermes packaged. Claude Code and Codex stay yours.</strong>
+            <span>内置运行时负责默认体验；你自己的 CLI Agent 仍由本机环境和账号控制。</span>
+          </article>
+          <article data-reveal>
+            <strong>权限先问，再执行</strong>
+            <span>用户能看到任务计划、命令意图和执行位置，而不是只看流式回复。</span>
+          </article>
+          <article data-reveal>
+            <strong>Bridge 在线才调用你的 Fellow</strong>
+            <span>远程请求只有在 owner desktop 在线并绑定时才会进入本机执行路径。</span>
+          </article>
         </div>
       </section>
 
       <section id="download" class="download-section" aria-labelledby="downloadTitle">
         <div class="download-copy" data-reveal>
+          <p class="section-kicker">Get started</p>
           <h2 id="downloadTitle">先把桌面工作台装起来。</h2>
           <p>当前提供 macOS Apple Silicon 版本。Mia Web 可直接进入云端房间，完整本机 Agent 能力由桌面端提供。</p>
-          <div class="download-actions">
+          <div class="hero-actions">
             <a class="landing-primary" href="/downloads/mia-macos-arm64-latest.dmg" download="Mia-macOS-Apple-Silicon.dmg">
               下载 Apple Silicon
             </a>
             <a class="landing-secondary" href="/app/">打开 Mia Web</a>
           </div>
         </div>
-        <div class="download-grid" data-reveal>
-          <article class="download-card available">
+        <div class="download-cards" data-reveal>
+          <article class="available">
             <span>Available</span>
             <strong>macOS Apple Silicon</strong>
             <small>M 系列芯片 Mac，推荐安装。</small>
           </article>
-          <article class="download-card disabled">
+          <article>
             <span>Coming soon</span>
             <strong>macOS Intel</strong>
             <small>即将支持。</small>
           </article>
-          <article class="download-card disabled">
+          <article>
             <span>Coming soon</span>
             <strong>Windows</strong>
             <small>即将支持。</small>

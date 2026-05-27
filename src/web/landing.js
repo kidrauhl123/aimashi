@@ -1,7 +1,7 @@
 (function () {
   const root = document.documentElement;
   const body = document.body;
-  const story = document.querySelector(".landing-scroll-story");
+  const story = document.querySelector(".workflow-section");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const stageSteps = Array.from(document.querySelectorAll("[data-stage-target]"));
   const revealItems = Array.from(document.querySelectorAll("[data-reveal]"));
@@ -25,7 +25,7 @@
     },
     approve: {
       title: "权限确认",
-      subtitle: "Claude Sonnet 4.6 · Ask before shell",
+      subtitle: "Claude Sonnet 4.6 / Codex",
       status: "Bridge online",
       permission: "ask before shell"
     },
@@ -69,8 +69,8 @@
 
   function updateScrollStageFromPosition() {
     if (!story || stageSteps.length === 0) return;
-    const start = story.offsetTop - window.innerHeight * 0.36;
-    const end = story.offsetTop + story.offsetHeight + window.innerHeight * 0.62;
+    const start = story.offsetTop - window.innerHeight * 0.48;
+    const end = story.offsetTop + story.offsetHeight + window.innerHeight * 0.42;
     const range = Math.max(1, end - start);
     const progress = Math.min(0.999, Math.max(0, (window.scrollY - start) / range));
     const index = Math.min(stageSteps.length - 1, Math.floor(progress * stageSteps.length));
@@ -78,7 +78,7 @@
   }
 
   function setupStageObserver() {
-    if (!("IntersectionObserver" in window)) {
+    if (!story || !("IntersectionObserver" in window)) {
       updateScrollStageFromPosition();
       return;
     }
@@ -87,7 +87,7 @@
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) updateScrollStageFromPosition();
       },
-      { rootMargin: "-28% 0px -48% 0px", threshold: [0.2, 0.45, 0.7] }
+      { rootMargin: "-24% 0px -46% 0px", threshold: [0.2, 0.45, 0.7] }
     );
 
     observer.observe(story);
