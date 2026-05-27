@@ -152,19 +152,11 @@
     if (!state || !els || !els.composerSkills) return;
     const skills = state.composerActiveSkills || [];
     els.composerSkills.classList.toggle("hidden", skills.length === 0);
-    els.composerSkills.innerHTML = skills.map((skill) => `
-      <div class="composer-skill" title="${window.miaMarkdown.escapeHtml(skill.name || skill.id)}">
-        <span class="composer-skill-name">${window.miaMarkdown.escapeHtml(skill.name || skill.id)}</span>
-        <button type="button" data-skill-remove="${window.miaMarkdown.escapeHtml(skill.id)}" title="移除技能" aria-label="移除技能">×</button>
-      </div>
-    `).join("");
-    els.composerSkills.querySelectorAll("[data-skill-remove]").forEach((button) => {
-      button.addEventListener("click", () => {
-        state.composerActiveSkills = (state.composerActiveSkills || []).filter((item) => item.id !== button.dataset.skillRemove);
-        renderComposerSkills();
-        els.chatInput?.focus();
-      });
-    });
+    // Last chip is the Backspace target; "selected" highlights it before delete.
+    els.composerSkills.innerHTML = skills.map((skill, index) => {
+      const selected = state.composerSkillSelected && index === skills.length - 1;
+      return `<span class="composer-skill${selected ? " selected" : ""}" title="${window.miaMarkdown.escapeHtml(skill.name || skill.id)}">${window.miaMarkdown.escapeHtml(skill.name || skill.id)}</span>`;
+    }).join("");
   }
 
   function addComposerSkill(skill) {
@@ -173,8 +165,32 @@
     if (!state.composerActiveSkills.some((item) => item.id === skill.id)) {
       state.composerActiveSkills = [...state.composerActiveSkills, { id: String(skill.id), name: skill.name || skill.id }];
     }
+    state.composerSkillSelected = false;
     renderComposerSkills();
     els.chatInput?.focus();
+  }
+
+  // Backspace at the very start of an empty selection: first press selects the
+  // last chip, second press deletes it. Any other key clears the selection.
+  function handleComposerSkillBackspace(event) {
+    if (!state || !els?.chatInput) return;
+    const skills = state.composerActiveSkills || [];
+    if (event.key === "Backspace" && els.chatInput.selectionStart === 0 && els.chatInput.selectionEnd === 0 && skills.length) {
+      event.preventDefault();
+      if (state.composerSkillSelected) {
+        state.composerActiveSkills = skills.slice(0, -1);
+        state.composerSkillSelected = false;
+      } else {
+        state.composerSkillSelected = true;
+      }
+      renderComposerSkills();
+      return true;
+    }
+    if (state.composerSkillSelected && event.key !== "Backspace") {
+      state.composerSkillSelected = false;
+      renderComposerSkills();
+    }
+    return false;
   }
 
   function closeComposerAddMenu() {
@@ -440,6 +456,7 @@
     renderComposerAttachments,
     renderComposerSkills,
     addComposerSkill,
+    handleComposerSkillBackspace,
     closeComposerAddMenu,
     composerSkillMenuItem,
     targetIsSkillPickerZone,

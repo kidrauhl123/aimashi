@@ -3729,6 +3729,7 @@ els.modelForm.addEventListener("submit", async (event) => {
 
 els.chatInput.addEventListener("keydown", (event) => {
   if (window.miaMessageHelpers.isComposerComposing(event)) return;
+  if (window.miaComposer.handleComposerSkillBackspace(event)) return;
   if (state.slashMenuOpen) {
     const commands = window.miaComposer.filteredSlashCommands();
     if (event.key === "ArrowDown") {
