@@ -166,6 +166,7 @@ const els = {
   composerAddMenu: document.getElementById("composerAddMenu"),
   composerReply: document.getElementById("composerReply"),
   composerAttachments: document.getElementById("composerAttachments"),
+  composerSkills: document.getElementById("composerSkills"),
   composerAttachmentInput: document.getElementById("composerAttachmentInput"),
   slashCommandMenu: document.getElementById("slashCommandMenu"),
   skillPicker: document.getElementById("skillPicker"),
@@ -4141,7 +4142,8 @@ els.chatForm.addEventListener("submit", async (event) => {
       fellowKey: submitPersonaKey,
       personaKey: submitPersonaKey,
       sessionId: submitSessionId,
-      messages: history
+      messages: history,
+      activeSkillIds: (state.composerActiveSkills || []).map((skill) => skill.id)
     });
     const responseMessage = response.choices?.[0]?.message || {};
     const responseAttachments = Array.isArray(responseMessage.attachments) ? responseMessage.attachments : [];

@@ -146,6 +146,37 @@
     });
   }
 
+  // Composer skill chips: skills temporarily attached to the next message(s)
+  // via 「使用」 on the skills page. Removable; cleared by the user.
+  function renderComposerSkills() {
+    if (!state || !els || !els.composerSkills) return;
+    const skills = state.composerActiveSkills || [];
+    els.composerSkills.classList.toggle("hidden", skills.length === 0);
+    els.composerSkills.innerHTML = skills.map((skill) => `
+      <div class="composer-skill" title="${window.miaMarkdown.escapeHtml(skill.name || skill.id)}">
+        <span class="composer-skill-name">${window.miaMarkdown.escapeHtml(skill.name || skill.id)}</span>
+        <button type="button" data-skill-remove="${window.miaMarkdown.escapeHtml(skill.id)}" title="移除技能" aria-label="移除技能">×</button>
+      </div>
+    `).join("");
+    els.composerSkills.querySelectorAll("[data-skill-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.composerActiveSkills = (state.composerActiveSkills || []).filter((item) => item.id !== button.dataset.skillRemove);
+        renderComposerSkills();
+        els.chatInput?.focus();
+      });
+    });
+  }
+
+  function addComposerSkill(skill) {
+    if (!state || !skill || !skill.id) return;
+    state.composerActiveSkills = state.composerActiveSkills || [];
+    if (!state.composerActiveSkills.some((item) => item.id === skill.id)) {
+      state.composerActiveSkills = [...state.composerActiveSkills, { id: String(skill.id), name: skill.name || skill.id }];
+    }
+    renderComposerSkills();
+    els.chatInput?.focus();
+  }
+
   function closeComposerAddMenu() {
     if (!state || !state.composerAddMenuOpen) return;
     state.composerAddMenuOpen = false;
@@ -407,6 +438,8 @@
     renderSlashCommandMenu,
     renderComposerAddMenu,
     renderComposerAttachments,
+    renderComposerSkills,
+    addComposerSkill,
     closeComposerAddMenu,
     composerSkillMenuItem,
     targetIsSkillPickerZone,

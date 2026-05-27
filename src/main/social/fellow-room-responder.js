@@ -17,6 +17,12 @@ function normalizeMessages(result) {
   return [];
 }
 
+function normalizeRooms(result) {
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.rooms)) return result.rooms;
+  return [];
+}
+
 function fellowIdForRoom(room, members, currentUserId) {
   const decorated = room?.decorations?.fellowKey || room?.decorations?.fellowId || room?.fellowKey;
   if (decorated) return String(decorated);
@@ -47,6 +53,7 @@ function normalizeRuntimeBinding(result) {
 function createMainFellowRoomResponder({
   getCurrentUserId,
   getRoomDetails,
+  listRooms = async () => [],
   listRecentMessages,
   getFellowRuntime = async () => null,
   responder,
@@ -78,7 +85,13 @@ function createMainFellowRoomResponder({
         details = await getRoomDetails(roomId);
       } catch (error) {
         log(`[main-fellow-room-responder] get room failed: ${error?.message || error}`);
-        return;
+        try {
+          const room = normalizeRooms(await listRooms()).find((candidate) => candidate?.id === roomId);
+          if (room) details = { room, members: [] };
+        } catch (listError) {
+          log(`[main-fellow-room-responder] list rooms fallback failed: ${listError?.message || listError}`);
+        }
+        if (!details) return;
       }
 
       const room = details?.room || details;

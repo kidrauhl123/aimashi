@@ -75,6 +75,30 @@ test("falls back to stable fellow room id suffix when details omit fellow metada
   assert.equal(calls.respond[0].fellowId, "alice");
 });
 
+test("falls back to room list metadata when room details are too slow", async () => {
+  const { responder, calls } = setup({
+    getRoomDetails: async () => {
+      throw new Error("The operation was aborted due to timeout");
+    },
+    listRooms: async () => ([
+      {
+        id: "fellow:u_1:session_1",
+        type: "fellow",
+        decorations: { fellowKey: "alice", runtimeKind: "desktop-local" }
+      }
+    ])
+  });
+
+  await responder.handleRoomMessageAppended({
+    roomId: "fellow:u_1:session_1",
+    message: { id: "m_1", seq: 2, sender_kind: "user", sender_ref: "u_1", body_md: "你好" }
+  });
+
+  assert.equal(calls.respond.length, 1);
+  assert.equal(calls.respond[0].fellowId, "alice");
+  assert.match(calls.log.join("\n"), /get room failed/);
+});
+
 test("ignores non-user messages and unowned fellow rooms", async () => {
   const first = setup();
   await first.responder.handleRoomMessageAppended({

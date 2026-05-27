@@ -336,7 +336,12 @@
     imageEl.setAttribute("alt", "");
     imageEl.setAttribute("aria-hidden", "true");
     imageEl.draggable = false;
-    imageEl.setAttribute("style", videoObjectStyle(normalizeCrop(crop)));
+    // Resolve the crop the same way the CSS-background path does: a known preset
+    // image with a neutral crop gets the preset's tuned face crop. Without this
+    // an uncropped preset (e.g. the seeded Mia fellow's fallback avatar) renders
+    // full-frame here while thumbnails render it face-cropped — the same image
+    // framed two ways. avatarCropForImage is a no-op for non-preset images.
+    imageEl.setAttribute("style", videoObjectStyle(normalizeCrop(avatarCropForImage(image, crop))));
   }
 
   function createAvatarImageElement(image, crop = {}) {

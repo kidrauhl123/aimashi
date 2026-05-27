@@ -257,6 +257,12 @@ function parseJson(value, fallback) {
   }
 }
 
+function roomMemberOwnerPublic(user) {
+  if (!user) return null;
+  const { avatarImage, avatarCrop, avatarColor, ...identity } = user;
+  return identity;
+}
+
 function normalizeOrigin(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -1482,7 +1488,7 @@ async function handleRequest(req, res, context) {
       // M1: enrich fellow members with owner public user so renderer shows username
       const enriched = members.map((m) => {
         if (m.member_kind === "fellow" && m.owner_id) {
-          return { ...m, owner: context.cloudStore.getUserPublic(m.owner_id) };
+          return { ...m, owner: roomMemberOwnerPublic(context.cloudStore.getUserPublic(m.owner_id)) };
         }
         return m;
       });

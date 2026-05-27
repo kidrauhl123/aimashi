@@ -450,6 +450,38 @@ test("GET /api/rooms/:id returns room + members", async () => {
   } finally { await stopServer(ctx); }
 });
 
+test("GET /api/rooms/:id returns fellow owner without profile avatar payloads", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const avatarImage = "data:image/gif;base64," + "A".repeat(200_000);
+    const profile = await api(ctx.port, "PATCH", "/api/me/profile", {
+      token: alice.token,
+      body: {
+        avatarImage,
+        avatarCrop: { x: 1, y: 2, zoom: 3 },
+        avatarColor: "#111827"
+      }
+    });
+    assert.equal(profile.status, 200);
+
+    const ensured = await api(ctx.port, "PUT", "/api/me/fellows/bot/room", {
+      token: alice.token,
+      body: { title: "Bot", runtimeKind: "desktop-local" }
+    });
+    assert.equal(ensured.status, 200);
+
+    const detail = await api(ctx.port, "GET", "/api/rooms/" + ensured.body.room.id, { token: alice.token });
+    assert.equal(detail.status, 200);
+    const fellowMember = detail.body.members.find((member) => member.member_kind === "fellow");
+    assert.equal(fellowMember.owner.id, alice.user.id);
+    assert.equal(fellowMember.owner.username, alice.user.username);
+    assert.equal(Object.prototype.hasOwnProperty.call(fellowMember.owner, "avatarImage"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(fellowMember.owner, "avatarCrop"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(fellowMember.owner, "avatarColor"), false);
+  } finally { await stopServer(ctx); }
+});
+
 function openEventsWs(port, token) {
   const ws = new WebSocket(
     "ws://127.0.0.1:" + port + "/api/events",

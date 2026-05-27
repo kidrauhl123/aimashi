@@ -2373,6 +2373,44 @@ body.topbar-click-capture .topbar {
   scrollbar-width: none;
 }
 
+.composer-skills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 0;
+}
+
+.composer-skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 450;
+}
+
+.composer-skill button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.composer-skill button:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
 .composer-attachments::-webkit-scrollbar {
   display: none;
 }

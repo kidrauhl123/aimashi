@@ -1442,7 +1442,7 @@ function fellowWithRuntimeConfig(fellow, runtimeConfig = {}) {
   };
 }
 
-async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false, background = false, allowSlashCommands = true, runtimeConfig = null }) {
+async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, utility = false, background = false, allowSlashCommands = true, runtimeConfig = null, activeSkillIds = [] }) {
   utility = Boolean(utility);
   let abortController;
   if (group || utility || background) {
@@ -1468,7 +1468,18 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, group, web
     const key = fellowKey || personaKey;
     const { fellow } = requireFellow(manifest, key, "还没有可用的 fellow，请先在引导里创建一个再发起对话。");
     const turnRuntimeConfig = normalizeTurnRuntimeConfig(runtimeConfig);
-    const fellowForTurn = fellowWithRuntimeConfig(fellow, turnRuntimeConfig);
+    let fellowForTurn = fellowWithRuntimeConfig(fellow, turnRuntimeConfig);
+    // Composer "使用" chips: temporarily enable these skills for this turn only.
+    if (Array.isArray(activeSkillIds) && activeSkillIds.length) {
+      const caps = fellowForTurn.capabilities || {};
+      fellowForTurn = {
+        ...fellowForTurn,
+        capabilities: {
+          ...caps,
+          enabledSkills: [...new Set([...(caps.enabledSkills || []), ...activeSkillIds.map((id) => String(id))])]
+        }
+      };
+    }
     const chatEngine = resolveChatEngineAdapter(fellowForTurn);
     const agentEngine = chatEngine.id;
     const shouldNotifyPet = !utility && !String(sessionId || "").startsWith("title:");
@@ -1848,6 +1859,10 @@ const mainGroupConductor = createMainGroupConductor({
 const mainFellowRoomResponder = createMainFellowRoomResponder({
   getCurrentUserId: () => settingsStore.cloudSettings().user?.id || "",
   getRoomDetails: (roomId) => socialApi.getRoom(roomId),
+  listRooms: async () => {
+    const data = await socialApi.listRooms();
+    return data?.rooms || [];
+  },
   listRecentMessages: async (roomId, sinceSeq, limit) => {
     const data = await socialApi.listRoomMessages(roomId, sinceSeq, limit);
     return data?.messages || [];

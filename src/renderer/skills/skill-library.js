@@ -163,9 +163,31 @@
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openUseSkillPicker(button.dataset.skillUse, event.clientX, event.clientY);
+        useSkillInComposer(button.dataset.skillUse, event.clientX, event.clientY);
       });
     });
+  }
+
+  // Attach the skill as a composer chip and open that Fellow's chat (Marvis-style).
+  function attachSkillToComposer(fellowKey, skillId) {
+    const skill = (state.skillLibrary.skills || []).find((item) => item.id === skillId);
+    const name = skill ? window.miaSkillHelpers.skillDisplayName(skill) : skillId;
+    window.miaFellowManager?.openFellowChat?.(fellowKey);
+    window.miaComposer?.addComposerSkill?.({ id: skillId, name });
+  }
+
+  // 「使用」: jump to the current chat with the skill chipped on; if no chat is
+  // active and there are multiple Fellows, pop a picker.
+  function useSkillInComposer(skillId, x, y) {
+    const fellows = window.miaFellowManager?.allOwnedFellows?.() || [];
+    if (!fellows.length) { window.alert("还没有可用的 Fellow，请先创建一个再使用技能。"); return; }
+    if (state.activeKey && fellows.some((f) => f.key === state.activeKey)) {
+      attachSkillToComposer(state.activeKey, skillId);
+    } else if (fellows.length === 1) {
+      attachSkillToComposer(fellows[0].key, skillId);
+    } else {
+      openUseSkillPicker(skillId, x, y);
+    }
   }
 
   // "使用" → pick a Fellow → enable the skill on it and open that chat.
@@ -189,10 +211,10 @@
       document.removeEventListener("mousedown", close, true);
     };
     picker.querySelectorAll("[data-use-fellow]").forEach((button) => {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", () => {
         picker.remove();
         document.removeEventListener("mousedown", close, true);
-        await window.miaFellowManager?.useSkillOnFellow?.(button.dataset.useFellow, skillId);
+        attachSkillToComposer(button.dataset.useFellow, skillId);
       });
     });
     setTimeout(() => document.addEventListener("mousedown", close, true), 0);
