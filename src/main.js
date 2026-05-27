@@ -46,6 +46,7 @@ const { createTasksEventBus } = require("./main/tasks-events.js");
 const { createTasksRoutes } = require("./main/tasks-routes.js");
 const { createSocialApi } = require("./main/social/social-api.js");
 const { registerSocialIpc } = require("./main/social/social-ipc.js");
+const { openConversationMessageCache } = require("./main/social/conversation-message-cache.js");
 const {
   createLocalFellowResponder,
   shouldHandleLocalCloudConversationAi
@@ -1925,10 +1926,22 @@ cloudEventSocketRuntime = createCloudEventsClient({
   appendCloudLog,
   fellowRuntimeDispatcher: mainFellowRuntimeDispatcher
 });
+// Desktop-local message cache (TG-style local-first render + delta sync). If
+// node:sqlite is unavailable for any reason, degrade to no cache — the IPC layer
+// treats a null cache as "always fetch from cloud" (previous behavior).
+const conversationMessageCache = (() => {
+  try {
+    return openConversationMessageCache(path.join(runtimePaths().home, "conversation-cache.db"));
+  } catch (error) {
+    appendCloudLog(`[social] conversation message cache unavailable: ${error?.message || error}`);
+    return null;
+  }
+})();
 registerSocialIpc({
   ipcMain,
   socialApi,
   fellowRuntimeDispatcher: mainFellowRuntimeDispatcher,
+  messageCache: conversationMessageCache,
   log: (line) => appendCloudLog(line)
 });
 ipcMain.handle(IpcChannel.SocialMyUsername, () => {

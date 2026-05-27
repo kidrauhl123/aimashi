@@ -1479,8 +1479,22 @@ async function openSkillDirectory(skillId) {
   }
 }
 
+// Messages of the conversation currently open in #chat — sourced from the
+// active cloud conversation's cache (index-aligned with what social renders,
+// so message-index lookups stay correct). Normalized to the {role, content}
+// shape index-based consumers (reply / copy) expect.
 function messagesForActive() {
-  return activeSession().messages;
+  const social = window.miaSocial;
+  const conversationId = social?.getActiveConversationId?.();
+  if (!conversationId) return [];
+  const cache = social?.moduleState?.messageCache?.get(conversationId);
+  return (cache?.messages || []).map((message) => ({
+    ...message,
+    role: message.sender_kind === SenderKind.Fellow
+      ? "assistant"
+      : (message.sender_kind === SenderKind.System ? "system" : "user"),
+    content: message.body_md || ""
+  }));
 }
 
 function renderEngineDetection(runtime) {
@@ -2508,7 +2522,6 @@ async function initializeRuntime() {
       });
     }
   }
-  await trackStartupTask("加载会话", loadChatSessions);
   render();
   setTimeout(() => {
     Promise.allSettled([
@@ -3844,7 +3857,7 @@ els.chat.addEventListener("click", async (event) => {
         commandName: "/resume",
         args: [sessionIdToResume],
         context: {
-          sessionId: activeSession()?.id || "",
+          sessionId: window.miaSocial?.getActiveConversationId?.() || "",
           fellow
         }
       });

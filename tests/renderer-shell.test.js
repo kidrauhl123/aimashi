@@ -268,7 +268,7 @@ test("creating or messaging a fellow opens its conversation through the unified 
   assert.match(appSource, /window\.miaSocial\.ensureFellowConversation\(fellow\)/);
   assert.match(appSource, /window\.miaSocial\.setActiveConversationId\(conversation\.id\)/);
   assert.match(appSource, /if \(savedKey\) await openFellowConversation\(savedKey\);/);
-  assert.match(fellowManagerSource, /window\.miaOpenFellowConversation\(fellowKey\)/);
+  assert.match(fellowManagerSource, /window\.miaOpenFellowConversation\??\.?\(fellowKey\)/);
 });
 
 test("contacts merge local fellows with owned cloud fellows", () => {

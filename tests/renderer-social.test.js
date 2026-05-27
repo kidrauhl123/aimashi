@@ -1031,3 +1031,38 @@ test("handleCloudEvent fellow reply clears transient cloud agent stream", () => 
   });
   assert.equal(s.moduleState.cloudAgentRunsByConversation.has("fellow:u_a:mia"), false);
 });
+
+test("handleCloudEvent preserves transient run trace when final fellow message lacks trace_json", () => {
+  const s = loadSocial();
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_started",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", fellowId: "mia" },
+  });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", event: { type: "reasoning_delta", text: "检查文件" } },
+  });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", event: { type: "tool_call_started", id: "tool_1", name: "shell", preview: "wc -l package.json" } },
+  });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", event: { type: "tool_call_completed", id: "tool_1", name: "shell" } },
+  });
+
+  s.handleCloudEvent({
+    type: "conversation.message_appended",
+    payload: {
+      conversationId: "fellow:u_a:mia",
+      message: { id: "m1", seq: 1, sender_kind: "fellow", sender_ref: "mia", body_md: "done" },
+    },
+  });
+
+  const cached = s.moduleState.messageCache.get("fellow:u_a:mia").messages[0];
+  assert.equal(cached.trace.reasoning, "检查文件");
+  assert.equal(cached.trace.tools[0].name, "shell");
+  assert.equal(cached.trace.tools[0].status, "completed");
+  assert.equal(s.moduleState.cloudAgentRunsByConversation.has("fellow:u_a:mia"), false);
+});

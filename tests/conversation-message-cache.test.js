@@ -1,0 +1,149 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { test } = require("node:test");
+
+const { openConversationMessageCache } = require("../src/main/social/conversation-message-cache.js");
+
+function tempCache() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mia-msg-cache-"));
+  return { dir, dbPath: path.join(dir, "conversation-cache.db") };
+}
+
+function msg(seq, overrides = {}) {
+  return {
+    id: overrides.id || `m${seq}`,
+    seq,
+    sender_kind: "user",
+    sender_ref: "u1",
+    body_md: `body ${seq}`,
+    created_at: `2026-05-27T00:00:${String(seq).padStart(2, "0")}Z`,
+    ...overrides
+  };
+}
+
+test("upsert then getRecentMessages returns oldest→newest and tracks maxSeq", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(3), msg(1), msg(2)]); // out of order on purpose
+    const rows = cache.getRecentMessages("c1", 50);
+    assert.deepEqual(rows.map((m) => m.seq), [1, 2, 3], "render order is ascending by seq");
+    assert.equal(cache.getMaxSeq("c1"), 3);
+    assert.equal(cache.getMaxSeq("unknown"), 0);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("getRecentMessages caps to the newest N", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(1), msg(2), msg(3), msg(4), msg(5)]);
+    const rows = cache.getRecentMessages("c1", 2);
+    assert.deepEqual(rows.map((m) => m.seq), [4, 5], "keeps the two newest, in ascending order");
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("re-upsert of same id updates in place (no duplicate row), enabling delta merge", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(1, { body_md: "old" })]);
+    cache.upsertMessages("c1", [msg(1, { body_md: "edited" }), msg(2)]); // delta arrives
+    const rows = cache.getRecentMessages("c1", 50);
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((m) => m.seq === 1).body_md, "edited");
+    assert.equal(cache.getMaxSeq("c1"), 2);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("transient translation field is not persisted, but other payload fields survive", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(1, {
+      translation: { status: "done", text: "hi" },
+      trace_json: "{\"reasoning\":\"x\"}",
+      attachments: [{ name: "a.png" }]
+    })]);
+    const [row] = cache.getRecentMessages("c1", 50);
+    assert.equal(row.translation, undefined, "client-only translation dropped");
+    assert.equal(row.trace_json, "{\"reasoning\":\"x\"}", "trace survives via payload JSON");
+    assert.deepEqual(row.attachments, [{ name: "a.png" }], "unknown fields ride along in payload");
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("messages without id or finite seq are skipped", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    const written = cache.upsertMessages("c1", [
+      msg(1),
+      { id: "", seq: 2 },
+      { id: "x", seq: NaN },
+      { id: "y" }
+    ]);
+    assert.equal(written, 1);
+    assert.deepEqual(cache.getRecentMessages("c1", 50).map((m) => m.id), ["m1"]);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pruneConversation keeps only the newest N", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(1), msg(2), msg(3), msg(4), msg(5)]);
+    cache.pruneConversation("c1", 2);
+    assert.deepEqual(cache.getRecentMessages("c1", 50).map((m) => m.seq), [4, 5]);
+    assert.equal(cache.getMaxSeq("c1"), 5);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deleteConversation removes only that conversation", () => {
+  const { dir, dbPath } = tempCache();
+  const cache = openConversationMessageCache(dbPath);
+  try {
+    cache.upsertMessages("c1", [msg(1)]);
+    cache.upsertMessages("c2", [msg(1)]);
+    cache.deleteConversation("c1");
+    assert.deepEqual(cache.getRecentMessages("c1", 50), []);
+    assert.equal(cache.getRecentMessages("c2", 50).length, 1);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cache persists across reopen (cold-start render survives restart)", () => {
+  const { dir, dbPath } = tempCache();
+  let cache = openConversationMessageCache(dbPath);
+  cache.upsertMessages("c1", [msg(1), msg(2)]);
+  cache.close();
+  cache = openConversationMessageCache(dbPath);
+  try {
+    assert.deepEqual(cache.getRecentMessages("c1", 50).map((m) => m.seq), [1, 2]);
+    assert.equal(cache.getMaxSeq("c1"), 2);
+  } finally {
+    cache.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

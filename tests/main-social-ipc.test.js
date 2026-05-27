@@ -48,3 +48,33 @@ test("posting a conversation message dispatches the returned user message to mai
     message
   }]);
 });
+
+test("listing conversation messages writes through to the local cache; cached read returns them", async () => {
+  const ipcMain = fakeIpcMain();
+  const upserts = [];
+  const fakeCache = {
+    upsertMessages: (conversationId, messages) => upserts.push({ conversationId, messages }),
+    getRecentMessages: (conversationId) => (conversationId === "dm:a:b" ? [{ id: "m1", seq: 1 }] : [])
+  };
+  registerSocialIpc({
+    ipcMain,
+    socialApi: {
+      listConversationMessages: async () => ({ messages: [{ id: "m1", seq: 1 }, { id: "m2", seq: 2 }] })
+    },
+    messageCache: fakeCache
+  });
+
+  const listed = await ipcMain.handlers.get(IpcChannel.SocialListConversationMessages)(null, "dm:a:b", 0, 100);
+  assert.equal(listed.ok, true);
+  assert.deepEqual(upserts, [{ conversationId: "dm:a:b", messages: [{ id: "m1", seq: 1 }, { id: "m2", seq: 2 }] }]);
+
+  const cached = await ipcMain.handlers.get(IpcChannel.SocialGetCachedMessages)(null, "dm:a:b", 50);
+  assert.deepEqual(cached, { ok: true, data: { messages: [{ id: "m1", seq: 1 }] } });
+});
+
+test("cached read returns empty envelope when no cache is wired", async () => {
+  const ipcMain = fakeIpcMain();
+  registerSocialIpc({ ipcMain, socialApi: {} });
+  const cached = await ipcMain.handlers.get(IpcChannel.SocialGetCachedMessages)(null, "dm:a:b", 50);
+  assert.deepEqual(cached, { ok: true, data: { messages: [] } });
+});

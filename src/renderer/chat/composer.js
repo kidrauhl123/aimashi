@@ -65,7 +65,7 @@
       commandName: invocation.command,
       commandPath: invocation.item.path,
       args: invocation.args,
-      context: { sessionId: activeSession()?.id || "" }
+      context: { sessionId: window.miaSocial?.getActiveConversationId?.() || "" }
     });
     if (result?.type !== "custom" || !String(result.content || "").trim()) return text;
     return String(result.content || "").trim();

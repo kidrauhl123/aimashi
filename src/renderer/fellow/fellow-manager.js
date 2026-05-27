@@ -116,20 +116,9 @@
 
   async function openFellowChat(fellowKey) {
     if (!fellowKey || !state || !els) return;
-    if (typeof window.miaOpenFellowConversation === "function") {
-      await window.miaOpenFellowConversation(fellowKey);
-      return;
-    }
-    state.activeKey = fellowKey;
-    state.activeContactKey = fellowKey;
-    const latest = sessionsForPersona(fellowKey)[0];
-    state.activeSessionIdByPersona[fellowKey] = latest?.id;
-    state.activeView = "chat";
-    state.sessionMenuOpen = false;
-    window.miaSessionReadState.markPersonaRead(fellowKey);
-    showNarrowContent();
-    render();
-    requestAnimationFrame(() => els.chatInput?.focus());
+    // Cloud-only: opening a fellow chat always routes through the cloud
+    // conversation opener (always present).
+    await window.miaOpenFellowConversation?.(fellowKey);
   }
 
   // "使用" a skill from the skills page: enable it on the chosen Fellow (so the

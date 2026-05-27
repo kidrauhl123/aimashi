@@ -303,6 +303,39 @@
     return { reasoning, tools };
   }
 
+  function tracePayloadFromRun(run) {
+    if (!run || typeof run !== "object") return null;
+    const reasoning = String(run.reasoning || "").trim();
+    const tools = Array.isArray(run.tools)
+      ? run.tools.map((tool, idx) => {
+        if (!tool || typeof tool !== "object") return null;
+        const name = String(tool.name || "").trim();
+        if (!name) return null;
+        return {
+          id: String(tool.id || `tool_${idx}`),
+          name,
+          preview: String(tool.preview || ""),
+          status: normalizeToolStatus(tool.status),
+          duration: typeof tool.duration === "number" ? tool.duration : null,
+          error: Boolean(tool.error)
+        };
+      }).filter(Boolean)
+      : [];
+    if (!reasoning && !tools.length) return null;
+    return {
+      ...(reasoning ? { reasoning } : {}),
+      ...(tools.length ? { tools } : {})
+    };
+  }
+
+  function messageWithFallbackRunTrace(conversationId, message) {
+    const { SenderKind } = conversationKinds();
+    if (!message || message.sender_kind !== SenderKind.Fellow) return message;
+    if (parseTraceJson(message.trace_json || message.trace)) return message;
+    const trace = tracePayloadFromRun(moduleState.cloudAgentRunsByConversation.get(conversationId));
+    return trace ? { ...message, trace } : message;
+  }
+
   function renderTraceFor({ reasoning, tools, content, expanded, scopeKey }) {
     const renderer = global.miaTraceBlocks;
     if (!renderer || typeof renderer.renderTraceBlocks !== "function") return "";
@@ -871,19 +904,20 @@
     if (type === "conversation.message_appended") {
       const { conversationId, message } = payload || {};
       if (!conversationId || !message) return;
+      const cachedMessage = messageWithFallbackRunTrace(conversationId, message);
       if (!moduleState.messageCache.has(conversationId)) {
         moduleState.messageCache.set(conversationId, { messages: [], maxSeq: 0 });
       }
       const entry = moduleState.messageCache.get(conversationId);
       // De-dup by id
-      const fresh = !entry.messages.find((m) => m.id === message.id);
+      const fresh = !entry.messages.find((m) => m.id === cachedMessage.id);
       if (fresh) {
-        entry.messages.push(message);
+        entry.messages.push(cachedMessage);
         entry.messages.sort((a, b) => a.seq - b.seq);
       }
-      if (message.seq > entry.maxSeq) entry.maxSeq = message.seq;
+      if (cachedMessage.seq > entry.maxSeq) entry.maxSeq = cachedMessage.seq;
       const { SenderKind } = conversationKinds();
-      if (message.sender_kind === SenderKind.Fellow) {
+      if (cachedMessage.sender_kind === SenderKind.Fellow) {
         moduleState.cloudAgentRunsByConversation.delete(conversationId);
         // First fellow reply in an untitled conversation → auto-title it.
         if (deps && typeof deps.maybeGenerateConversationTitle === "function") {
