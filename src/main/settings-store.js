@@ -73,6 +73,56 @@ function createSettingsStore(deps = {}) {
     };
   }
 
+  function defaultWindowSettings() {
+    return {
+      bounds: null,
+      maximized: false
+    };
+  }
+
+  function normalizeWindowBounds(bounds) {
+    if (!bounds || typeof bounds !== "object") return null;
+    const width = Number(bounds.width);
+    const height = Number(bounds.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    const next = {
+      width: Math.round(width),
+      height: Math.round(height)
+    };
+    const x = Number(bounds.x);
+    const y = Number(bounds.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      next.x = Math.round(x);
+      next.y = Math.round(y);
+    }
+    return next;
+  }
+
+  function windowSettings() {
+    const p = runtimePaths();
+    const saved = readJson(p.windowSettings, {});
+    return {
+      bounds: normalizeWindowBounds(saved.bounds),
+      maximized: Boolean(saved.maximized)
+    };
+  }
+
+  function writeWindowSettings(settings = {}) {
+    const p = runtimePaths();
+    const current = windowSettings();
+    const next = {
+      bounds: Object.prototype.hasOwnProperty.call(settings, "bounds")
+        ? normalizeWindowBounds(settings.bounds)
+        : current.bounds,
+      maximized: Object.prototype.hasOwnProperty.call(settings, "maximized")
+        ? Boolean(settings.maximized)
+        : current.maximized
+    };
+    fs.mkdirSync(path.dirname(p.windowSettings), { recursive: true });
+    fs.writeFileSync(p.windowSettings, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+    return next;
+  }
+
   function userProfile() {
     const p = runtimePaths();
     return { ...defaultUserProfile(), ...readJson(p.userProfile, {}) };
@@ -382,6 +432,9 @@ function createSettingsStore(deps = {}) {
     defaultModelSettings,
     defaultUserProfile,
     defaultAppearanceSettings,
+    defaultWindowSettings,
+    windowSettings,
+    writeWindowSettings,
     userProfile,
     writeUserProfile,
     appearanceSettings,

@@ -25,7 +25,8 @@ function setup(t, overrides = {}) {
     permissionSettings: path.join(home, "mia-permissions.json"),
     daemonSettings: path.join(home, "mia-daemon.json"),
     relaySettings: path.join(home, "mia-relay.json"),
-    cloudSettings: path.join(home, "mia-cloud.json")
+    cloudSettings: path.join(home, "mia-cloud.json"),
+    windowSettings: path.join(home, "mia-window.json")
   };
   const writes = [];
   const store = createSettingsStore({
@@ -108,6 +109,23 @@ test("writeAppearanceSettings rejects removed font presets", (t) => {
 
   assert.equal(store.writeAppearanceSettings({ fontPreset: "sf-pro" }).fontPreset, "system");
   assert.equal(store.writeAppearanceSettings({ fontPreset: "mono" }).fontPreset, "system");
+});
+
+test("windowSettings reads and writes normalized bounds", (t) => {
+  const { runtime, store } = setup(t);
+
+  assert.deepEqual(store.windowSettings(), store.defaultWindowSettings());
+
+  const next = store.writeWindowSettings({
+    bounds: { x: 12.4, y: 20.8, width: 1039.7, height: 700.2 },
+    maximized: true
+  });
+
+  assert.deepEqual(next, {
+    bounds: { x: 12, y: 21, width: 1040, height: 700 },
+    maximized: true
+  });
+  assert.deepEqual(readJson(runtime.windowSettings, {}), next);
 });
 
 test("userProfile merges saved profile over defaults", (t) => {

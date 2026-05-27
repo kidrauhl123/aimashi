@@ -1595,50 +1595,10 @@ function renderSessionMenu() {
     renderCloudConversationSessionMenu(cloudConversation);
     return;
   }
-  if (state.runtime?.cloud?.enabled) {
-    els.newSession?.classList.add("hidden");
-    els.sessionList.innerHTML = "";
-    updateCurrentSessionTitle("新对话");
-    return;
-  }
-  els.newSession?.classList.remove("hidden");
-  const sessions = sessionsForPersona();
-  const current = activeSession();
-  const activeId = current.id;
-  updateCurrentSessionTitle(current.title || "新对话");
+  // Cloud-only: with no active conversation the menu is empty.
+  els.newSession?.classList.add("hidden");
   els.sessionList.innerHTML = "";
-  for (const session of sessions) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = `session-row${session.id === activeId ? " active" : ""}`;
-    row.innerHTML = `
-      <span>
-        <strong>${window.miaMarkdown.escapeHtml(session.title || "新对话")}</strong>
-        <small>${window.miaMarkdown.escapeHtml(new Date(session.updatedAt || session.createdAt || Date.now()).toLocaleString())}</small>
-      </span>
-      <em title="重命名" data-session-edit="${window.miaMarkdown.escapeHtml(session.id)}">${window.miaMarkdown.iconParkIcon("edit", "session-row-edit-icon")}</em>
-    `;
-    row.addEventListener("click", async (event) => {
-      const editTarget = event.target.closest("[data-session-edit]");
-      if (editTarget) {
-        event.stopPropagation();
-        const title = window.prompt("重命名这个会话", session.title || "新对话");
-        if (!title || !title.trim()) return;
-        state.chatStore = await window.mia.renameChatSession({
-          personaKey: state.activeKey,
-          sessionId: session.id,
-          title
-        });
-      } else {
-        state.activeSessionIdByPersona[state.activeKey] = session.id;
-        state.sessionMenuOpen = false;
-        state.forceScrollToBottom = true;
-        state.replyDraft = null;
-      }
-      render();
-    });
-    els.sessionList.appendChild(row);
-  }
+  updateCurrentSessionTitle("新对话");
 }
 
 function activeCloudConversationForSessionMenu() {
@@ -1737,25 +1697,6 @@ function updateCurrentSessionTitle(title) {
   els.currentSessionTitle.textContent = next;
   els.currentSessionTitle.classList.remove("title-updated");
   requestAnimationFrame(() => els.currentSessionTitle.classList.add("title-updated"));
-}
-
-async function maybeGenerateTitleForSession(session) {
-  if (!session || session.titleGenerated || !hasSuccessfulExchange(session) || state.generatingTitleIds.has(session.id)) return;
-  state.generatingTitleIds.add(session.id);
-  try {
-    const result = await window.mia.generateSessionTitle({
-      personaKey: session.personaKey || state.activeKey,
-      sessionId: `title:${session.id}`,
-      messages: (session.messages || []).filter((message) => !message.transient).slice(0, 4)
-    });
-    session.title = result.title || session.title || "新对话";
-    session.titleGenerated = true;
-    session.updatedAt = nowIso();
-    await persistSessionQuietly(session);
-    renderSessionMenu();
-  } finally {
-    state.generatingTitleIds.delete(session.id);
-  }
 }
 
 // Cloud fellow conversations are created named "新对话". Once the fellow has
@@ -2330,14 +2271,8 @@ async function createNewSessionForActive() {
     await createNewCloudSessionForActive(cloudConversation);
     return;
   }
-  pruneEmptyDrafts(state.activeKey);
-  state.chatStore = await window.mia.createChatSession({ personaKey: state.activeKey });
-  const latest = sessionsForPersona(state.activeKey)[0];
-  state.activeSessionIdByPersona[state.activeKey] = latest?.id;
-  state.sessionMenuOpen = false;
-  state.replyDraft = null;
-  state.forceScrollToBottom = true;
-  render();
+  // Cloud-only: 新对话 only applies to an active fellow conversation (handled
+  // above). With no active fellow conversation there is nothing to create.
 }
 
 async function createNewCloudSessionForActive(conversation) {
@@ -2400,17 +2335,11 @@ async function openFellowConversation(fellowKey) {
     }
   }
 
-  state.activeKey = key;
-  if (window.miaSocial) window.miaSocial.setActiveConversationId(null);
-  if (!Array.isArray(state.chatStore.sessions[key]) || !state.chatStore.sessions[key].length) {
-    state.chatStore = await window.mia.createChatSession({ personaKey: key });
-  }
-  const latest = sessionsForPersona(key)[0];
-  state.activeSessionIdByPersona[key] = latest?.id;
-  window.miaSessionReadState.markPersonaRead(key);
-  state.forceScrollToBottom = true;
+  // Cloud-only: reaching here means the cloud conversation couldn't be opened
+  // (e.g. an expired session — handled by the auth-expired flow). Re-render so
+  // the shell reflects the real state instead of silently creating a dead local
+  // session that masks the failure.
   render();
-  requestAnimationFrame(() => els.chatInput?.focus());
 }
 
 window.miaOpenFellowConversation = openFellowConversation;
@@ -3167,7 +3096,7 @@ els.installEngine?.addEventListener("click", async () => {
     await window.miaLoaders.loadModelCatalog();
     render();
   } catch (error) {
-    appendChat("assistant", `Install failed: ${error.message}`);
+    window.alert(`安装失败：${error.message}`);
   } finally {
     els.installEngine.disabled = false;
     els.installEngine.textContent = "Install Engine";
@@ -3180,7 +3109,7 @@ els.startEngine?.addEventListener("click", async () => {
     state.runtime = await window.mia.startEngine();
     render();
   } catch (error) {
-    appendChat("assistant", `Start failed: ${error.message}`);
+    window.alert(`启动失败：${error.message}`);
     await refreshRuntime();
   } finally {
     els.startEngine.disabled = false;
@@ -3217,7 +3146,7 @@ els.codexLogin.addEventListener("click", async () => {
     });
     render();
   } catch (error) {
-    appendChat("assistant", `OAuth login failed: ${error.message}`);
+    window.alert(`登录失败：${error.message}`);
     await refreshRuntime();
   }
 });

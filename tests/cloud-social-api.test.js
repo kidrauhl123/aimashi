@@ -715,13 +715,24 @@ test("POST /messages/as-fellow allows owner to post on behalf of own fellow", as
     });
     const r = await api(ctx.port, "POST", "/api/conversations/" + grp.body.conversation.id + "/messages/as-fellow", {
       token: alice.token,
-      body: { fellowId: "codex", bodyMd: "Hello from Codex" }
+      body: {
+        fellowId: "codex",
+        bodyMd: "Hello from Codex",
+        trace: {
+          reasoning: "检查上下文",
+          tools: [{ id: "tool_1", name: "shell", preview: "pwd", status: "completed" }]
+        }
+      }
     });
     assert.equal(r.status, 201);
     assert.equal(r.body.message.sender_kind, "fellow");
     assert.equal(r.body.message.sender_ref, "codex");
     assert.equal(r.body.message.sender_owner_id, alice.user.id);
     assert.equal(r.body.message.body_md, "Hello from Codex");
+    assert.deepEqual(JSON.parse(r.body.message.trace_json), {
+      reasoning: "检查上下文",
+      tools: [{ id: "tool_1", name: "shell", preview: "pwd", status: "completed", duration: null, error: false }]
+    });
   } finally { await stopServer(ctx); }
 });
 

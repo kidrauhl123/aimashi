@@ -175,3 +175,25 @@ test("appendMessage round-trips selected skill chips on the message", () => {
     assert.equal(emptySkills.skills_json, null);
   } finally { teardown(ctx); }
 });
+
+test("appendMessage round-trips assistant trace data", () => {
+  const ctx = setup();
+  try {
+    const message = ctx.messages.appendMessage({
+      conversationId: "r-msg",
+      senderKind: "fellow",
+      senderRef: "codex",
+      senderOwnerId: ctx.alice.id,
+      bodyMd: "done",
+      trace: {
+        reasoning: "检查输入",
+        tools: [{ id: "tool_1", name: "shell", preview: "ls", status: "completed", duration: 1.2 }]
+      }
+    });
+
+    assert.deepEqual(JSON.parse(message.trace_json), {
+      reasoning: "检查输入",
+      tools: [{ id: "tool_1", name: "shell", preview: "ls", status: "completed", duration: 1.2, error: false }]
+    });
+  } finally { teardown(ctx); }
+});

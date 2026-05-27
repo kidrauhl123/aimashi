@@ -37,6 +37,7 @@ const { createFellowManifest } = require("./main/fellow-manifest.js");
 const { createFellowService } = require("./main/fellow-service.js");
 const { createRuntimePaths } = require("./main/runtime-paths.js");
 const { createSettingsStore } = require("./main/settings-store.js");
+const { createWindowStateManager } = require("./main/window-state.js");
 const { createSkillsLoader } = require("./main/skills-loader.js");
 const { createTasksStore } = require("./main/tasks-store.js");
 const { createScheduler } = require("./main/scheduler.js");
@@ -249,6 +250,7 @@ settingsStore = createSettingsStore({
   MIA_CLOUD_DEFAULT_URL,
   normalizeAvatarCrop: (crop) => normalizeAvatarCrop(crop)
 });
+const windowStateManager = createWindowStateManager({ settingsStore, screen });
 
 const fellowManifestModule = createFellowManifest({
   runtimePaths,
@@ -1543,9 +1545,9 @@ function stopChat() {
 }
 
 function createWindow() {
+  const initialWindow = windowStateManager.initialWindowState();
   const win = new BrowserWindow({
-    width: 1120,
-    height: 760,
+    ...initialWindow.bounds,
     minWidth: 420,
     minHeight: 560,
     title: "Mia",
@@ -1560,6 +1562,8 @@ function createWindow() {
   if (process.platform === "darwin" && typeof win.setWindowButtonVisibility === "function") {
     win.setWindowButtonVisibility(false);
   }
+  if (initialWindow.maximized) win.maximize();
+  windowStateManager.attachWindowStatePersistence(win);
   const sendWindowEvent = (channel, payload) => {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   };

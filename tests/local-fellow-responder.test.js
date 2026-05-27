@@ -108,6 +108,38 @@ test("respond emits a transient conversation run start before the local engine c
   assert.match(calls.cloudEvents[0].runId, /^local_/);
 });
 
+test("respond streams local engine trace events through cloud run events and saves final trace", async () => {
+  const { responder, calls } = setup({
+    sendChat: async (args) => {
+      calls.engine.push(args);
+      args.emit("reasoning_delta", { id: "r1", text: "检查文件" });
+      args.emit("tool_call_started", { id: "tool_1", name: "shell", preview: "ls" });
+      args.emit("tool_call_completed", { id: "tool_1", name: "shell", duration: 1.25 });
+      return { choices: [{ message: { content: "done" } }] };
+    }
+  });
+
+  await responder.respond(base);
+
+  assert.equal(typeof calls.engine[0].emit, "function");
+  assert.deepEqual(calls.cloudEvents.slice(1).map((item) => item.event.type), [
+    "reasoning_delta",
+    "tool_call_started",
+    "tool_call_completed"
+  ]);
+  assert.deepEqual(calls.post[0].body.trace, {
+    reasoning: "检查文件",
+    tools: [{
+      id: "tool_1",
+      name: "shell",
+      preview: "ls",
+      status: "completed",
+      duration: 1.25,
+      error: false
+    }]
+  });
+});
+
 test("respond forwards runtime config to the local chat engine", async () => {
   const { responder, calls } = setup();
   await responder.respond({

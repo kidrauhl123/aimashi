@@ -50,17 +50,11 @@
   }
 
   function groupTilesCtx() {
-    const { moduleState, deps } = _ctx;
-    const runtimeState = deps && typeof deps.getState === "function" ? deps.getState() : {};
-    const cloudUser = runtimeState.runtime?.cloud?.user || null;
-    return {
-      self: cloudUser || runtimeState.runtime?.user || null,
-      friends: moduleState.friends || [],
-      // Canonical owned-fellow list (cloud + local) so cloud fellows like mia
-      // resolve their name/avatar tile in groups they belong to.
-      fellows: _ctx.adapterCtx().fellows,
-      avatarAssetForKey: global.miaAvatar?.avatarAssetForKey
-    };
+    // Canonical identity/avatar context (self + cloud&local fellows + friends +
+    // avatarAssetForKey), shared with cloud-conversation message rendering. Group
+    // tiles need exactly this shape, so reuse it rather than re-deriving self/
+    // fellows here — re-deriving dropped cloud fellows and a usable self avatar.
+    return _ctx.adapterCtx();
   }
 
   // —— field writes ——
@@ -130,7 +124,12 @@
         isHost = member.member_ref === hostFellowId;
       } else {
         label = userNameFor(member, friends, self);
-        avatar = { image: "", crop: null, color: "#5e5ce6" };
+        // Resolve user avatar (self or friend) through the canonical contact
+        // resolver — server members carry no user avatar, only fellow_avatar_image.
+        avatar = global.miaContact.resolveContact(
+          { kind: global.miaContact.ContactKind.User, ref: member.member_ref },
+          { self, friends }
+        ).avatar;
       }
       global.miaAvatar.paintAvatar(avatarEl, avatar);
       const nameEl = document.createElement("span");
@@ -221,10 +220,10 @@
     const conversation = _ctx.moduleState.conversations.find((r) => r.id === conversationId);
     if (!conversation) return;
     const members = _ctx.conversationMembersCache.get(conversationId) || [];
-    const runtimeState = _ctx.deps?.getState?.() || {};
-    // Canonical owned-fellow list (cloud + local) — see groupTilesCtx().
-    const fellows = _ctx.adapterCtx().fellows;
-    const self = runtimeState.runtime?.cloud?.user || runtimeState.runtime?.user || null;
+    // Canonical context (self + cloud&local fellows + friends) — see groupTilesCtx().
+    const actx = _ctx.adapterCtx();
+    const fellows = actx.fellows;
+    const self = actx.self;
 
     const avatarBtn = document.getElementById("groupInfoAvatarPreview");
     applyTilesToButton(avatarBtn, conversation, members);
