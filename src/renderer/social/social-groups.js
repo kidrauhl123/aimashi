@@ -240,7 +240,9 @@
         id,
         name: fellow.name || id,
         color: fellow.color || "#5e5ce6",
-        image: fellow.avatarImage,
+        // Cloud fellows (e.g. mia) have no inline avatarImage; fall back to the
+        // key-derived preset asset, same as the conversation list / applyFellowAvatar.
+        image: fellow.avatarImage || window.miaAvatar?.avatarAssetForKey?.(fellow.key || id),
         crop: fellow.avatarCrop
       }));
     }

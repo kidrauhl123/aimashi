@@ -41,15 +41,15 @@
     global.miaAvatar.paintAvatar(el, { image, crop, color });
   }
 
-  function buildSideHtml({ time, pinned, unread, muted }) {
+  function buildStatusHtml({ pinned, unread, muted }) {
     const badge = unreadShared().unreadBadgeHtml(unread);
     const cls = muted ? "persona-unread muted" : "persona-unread";
     const unreadHtml = badge
       ? badge.replace('class="unread-badge"', `class="${cls}"`)
       : `<span class="${cls} hidden"></span>`;
+    const empty = !pinned && !badge;
     return `
-      <span class="persona-side">
-        <span class="persona-time">${escapeHtml(time || "")}</span>
+      <span class="persona-side${empty ? " empty" : ""}">
         <span class="persona-pin${pinned ? "" : " hidden"}" aria-label="置顶">${pinSvg()}</span>
         ${unreadHtml}
       </span>
@@ -78,10 +78,13 @@
         <span class="persona-name-row">
           <span class="persona-name">${escapeHtml(spec.name || "")}</span>
           <span class="persona-type">${escapeHtml(spec.typeLabel || "私聊")}</span>
+          <span class="persona-time">${escapeHtml(spec.time || "")}</span>
         </span>
-        <span class="persona-key">${escapeHtml(spec.preview || "暂无对话")}</span>
+        <span class="persona-preview-row">
+          <span class="persona-key">${escapeHtml(spec.preview || "暂无对话")}</span>
+          ${buildStatusHtml(spec)}
+        </span>
       </span>
-      ${buildSideHtml(spec)}
     `;
     const avatarEl = btn.querySelector(".avatar.fellow-photo");
     applyAvatarStyle(avatarEl, spec.avatar?.image, spec.avatar?.crop, spec.avatar?.color);
@@ -99,10 +102,13 @@
         <span class="persona-name-row">
           <span class="persona-name">${escapeHtml(spec.name || "未命名群聊")}</span>
           <span class="persona-type group">${escapeHtml(spec.typeLabel || "群聊")}</span>
+          <span class="persona-time">${escapeHtml(spec.time || "")}</span>
         </span>
-        <span class="persona-key">${escapeHtml(spec.preview || "")}</span>
+        <span class="persona-preview-row">
+          <span class="persona-key">${escapeHtml(spec.preview || "")}</span>
+          ${buildStatusHtml(spec)}
+        </span>
       </span>
-      ${buildSideHtml(spec)}
     `;
     const avatarEl = btn.querySelector(".avatar.group-avatar");
     // Custom override: user uploaded a single image for this group. Bypass

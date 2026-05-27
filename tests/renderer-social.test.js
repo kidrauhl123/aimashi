@@ -315,6 +315,88 @@ test("renderSidebarRows: dm conversation → private-conversation with otherUser
   assert.equal(rows[0].conversation.lastMessagePreview, "hi");
 });
 
+test("renderSidebarRows carries cloud pin state for sidebar sorting", () => {
+  const s = loadSocial();
+  s.moduleState.myUserId = "u_alice";
+  s.moduleState.friends = [{ id: "u_bob", username: "bob", account: "bob" }];
+  s.moduleState.cloudSettings = {
+    pins: ["dm:u_alice:u_bob"],
+    readMarks: {},
+    appearance: {},
+    updatedAt: "2026-05-21T20:02:00.000Z"
+  };
+  s.moduleState.conversations = [{ id: "dm:u_alice:u_bob", type: "dm", name: null, updatedAt: "2026-05-21T20:00:00.000Z" }];
+
+  const rows = s.renderSidebarRows();
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pinned, true);
+  assert.equal(rows[0].pinnedAt, "2026-05-21T20:02:00.000Z");
+});
+
+test("manual unread survives settings responses that omit local override bags", async () => {
+  const s = loadSocial();
+  const writes = [];
+  s.__mockWindow.miaUnread = require("../src/shared/unread");
+  s.__mockWindow.mia.social = {
+    settingsPut: async (body) => {
+      writes.push(body);
+      return {
+        pins: body.pins,
+        readMarks: body.readMarks,
+        appearance: body.appearance,
+        version: writes.length,
+        updatedAt: "2026-05-21T20:02:00.000Z"
+      };
+    }
+  };
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+
+  await s.setConversationManuallyUnread("dm:u_a:u_b", true);
+
+  assert.equal(s.getUnreadForConversation("dm:u_a:u_b"), 1);
+  assert.equal(writes[0].unreadOverrides["dm:u_a:u_b"], true);
+  s.applyCloudSettings({ pins: [], readMarks: {}, appearance: {}, version: 2, updatedAt: "2026-05-21T20:03:00.000Z" });
+  assert.equal(s.getUnreadForConversation("dm:u_a:u_b"), 1);
+
+  await s.setConversationManuallyUnread("dm:u_a:u_b", false);
+  s.applyCloudSettings({ pins: [], readMarks: {}, appearance: {}, version: 3, updatedAt: "2026-05-21T20:04:00.000Z" });
+
+  assert.equal(s.getUnreadForConversation("dm:u_a:u_b"), 0);
+  assert.equal(Boolean(s.moduleState.cloudSettings.unreadOverrides["dm:u_a:u_b"]), false);
+});
+
+test("opening a manually unread conversation clears the unread override", async () => {
+  const s = loadSocial();
+  const writes = [];
+  s.__mockWindow.miaUnread = require("../src/shared/unread");
+  s.__mockWindow.mia.social = {
+    settingsPut: async (body) => {
+      writes.push(body);
+      return {
+        pins: body.pins,
+        readMarks: body.readMarks,
+        appearance: body.appearance,
+        version: writes.length
+      };
+    }
+  };
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.messageCache.set("dm:u_a:u_b", {
+    messages: [{ id: "m1", seq: 4, body_md: "hello" }],
+    maxSeq: 4
+  });
+  await s.setConversationManuallyUnread("dm:u_a:u_b", true);
+  assert.equal(s.getUnreadForConversation("dm:u_a:u_b"), 1);
+
+  s.setActiveConversationId("dm:u_a:u_b");
+
+  assert.equal(s.getUnreadForConversation("dm:u_a:u_b"), 0);
+  assert.equal(s.moduleState.cloudSettings.readMarks["dm:u_a:u_b"], 4);
+  assert.equal(Boolean(s.moduleState.cloudSettings.unreadOverrides["dm:u_a:u_b"]), false);
+  assert.equal(Boolean(writes.at(-1).unreadOverrides["dm:u_a:u_b"]), false);
+});
+
 test("handleCloudEvent social.friend_request_received appends incoming", () => {
   const s = loadSocial();
   s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });

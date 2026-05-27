@@ -884,6 +884,8 @@
         const msgTs = new Date(lastMsg.created_at).getTime();
         if (msgTs > updatedAt) updatedAt = msgTs;
       }
+      const pinned = isConversationPinned(conversation.id);
+      const pinnedAt = pinned ? (_ensureCloudSettings().updatedAt || conversation.updatedAt || updatedAt || "") : "";
 
       // Route on conversations.type (schema truth). Two card shapes only:
       // private-conversation (dm / fellow) and group-conversation. id-prefix fallback
@@ -900,8 +902,8 @@
         return {
           type: "group-conversation",
           key: conversation.id,
-          pinned: false,
-          pinnedAt: "",
+          pinned,
+          pinnedAt,
           updatedAt,
           conversation: { ...conversation, type: "group", lastMessagePreview, memberCount }
         };
@@ -911,8 +913,8 @@
       return {
         type: "private-conversation",
         key: conversation.id,
-        pinned: false,
-        pinnedAt: "",
+        pinned,
+        pinnedAt,
         updatedAt,
         conversation: { ...conversation, type: conversationType || "dm", otherUser, lastMessagePreview }
       };
@@ -1682,7 +1684,7 @@
     // instead of restoring a stale offset.
     if (next !== moduleState.activeConversationId) _lastRenderedConversationId = null;
     moduleState.activeConversationId = next;
-    if (id) moduleState.unreadByConversation.delete(id);
+    if (id) markConversationRead(id);
   }
   function markConversationRead(conversationId) {
     if (!conversationId) return;
@@ -1710,10 +1712,27 @@
   // populated by bootstrapCloudSettings() at login and refreshed on each
   // user_settings.updated WS event. Mutations PUT via IPC and the
   // broadcast confirms / replaces the optimistic update.
+  function normalizeCloudSettings(settings, previous = {}) {
+    const input = settings && typeof settings === "object" ? settings : {};
+    const prior = previous && typeof previous === "object" ? previous : {};
+    return {
+      ...input,
+      pins: Array.isArray(input.pins) ? input.pins : [],
+      readMarks: input.readMarks && typeof input.readMarks === "object" ? input.readMarks : {},
+      appearance: input.appearance && typeof input.appearance === "object" ? input.appearance : {},
+      // Older cloud settings responses only echo pins/readMarks/appearance.
+      // Preserve these local bags so optimistic menu toggles don't flash away.
+      mutedConversations: Array.isArray(input.mutedConversations)
+        ? input.mutedConversations
+        : (Array.isArray(prior.mutedConversations) ? prior.mutedConversations : []),
+      unreadOverrides: input.unreadOverrides && typeof input.unreadOverrides === "object"
+        ? input.unreadOverrides
+        : (prior.unreadOverrides && typeof prior.unreadOverrides === "object" ? prior.unreadOverrides : {})
+    };
+  }
+
   function _ensureCloudSettings() {
-    if (!moduleState.cloudSettings) moduleState.cloudSettings = { pins: [], readMarks: {}, appearance: {}, mutedConversations: [], unreadOverrides: {} };
-    if (!Array.isArray(moduleState.cloudSettings.mutedConversations)) moduleState.cloudSettings.mutedConversations = [];
-    if (!moduleState.cloudSettings.unreadOverrides) moduleState.cloudSettings.unreadOverrides = {};
+    moduleState.cloudSettings = normalizeCloudSettings(moduleState.cloudSettings || {}, moduleState.cloudSettings || {});
     return moduleState.cloudSettings;
   }
   function isConversationPinned(conversationId) {
@@ -1778,7 +1797,7 @@
         appearance: next.appearance,
         expectedVersion: s.version || 0
       });
-      if (updated && typeof updated === "object") moduleState.cloudSettings = updated;
+      if (updated && typeof updated === "object") moduleState.cloudSettings = normalizeCloudSettings(updated, moduleState.cloudSettings || s);
     } catch (err) {
       if (!_retried && /409|version conflict/i.test(String(err?.message || ""))) {
         await bootstrapCloudSettings();
@@ -1794,14 +1813,7 @@
     try {
       const settings = await window.mia.social.settingsGet();
       if (settings && typeof settings === "object") {
-        moduleState.cloudSettings = {
-          ...settings,
-          pins: Array.isArray(settings.pins) ? settings.pins : [],
-          readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
-          appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {},
-          mutedConversations: Array.isArray(settings.mutedConversations) ? settings.mutedConversations : [],
-          unreadOverrides: settings.unreadOverrides && typeof settings.unreadOverrides === "object" ? settings.unreadOverrides : {}
-        };
+        moduleState.cloudSettings = normalizeCloudSettings(settings, moduleState.cloudSettings || {});
         if (deps && typeof deps.render === "function") deps.render();
       }
     } catch (err) {
@@ -1811,14 +1823,7 @@
 
   function applyCloudSettings(settings) {
     if (!settings || typeof settings !== "object") return;
-    moduleState.cloudSettings = {
-      ...settings,
-      pins: Array.isArray(settings.pins) ? settings.pins : [],
-      readMarks: settings.readMarks && typeof settings.readMarks === "object" ? settings.readMarks : {},
-      appearance: settings.appearance && typeof settings.appearance === "object" ? settings.appearance : {},
-      mutedConversations: Array.isArray(settings.mutedConversations) ? settings.mutedConversations : [],
-      unreadOverrides: settings.unreadOverrides && typeof settings.unreadOverrides === "object" ? settings.unreadOverrides : {}
-    };
+    moduleState.cloudSettings = normalizeCloudSettings(settings, moduleState.cloudSettings || {});
     if (deps && typeof deps.render === "function") deps.render();
   }
 

@@ -163,63 +163,19 @@
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        useSkillInComposer(button.dataset.skillUse, event.clientX, event.clientY);
+        useSkillInComposer(button.dataset.skillUse);
       });
     });
   }
 
-  // Attach the skill as a composer chip and open that Fellow's chat (Marvis-style).
-  // Await navigation first so the chip binds to the destination conversation, not the
-  // one we're leaving (openFellowChat resolves the cloud conversation asynchronously).
-  async function attachSkillToComposer(fellowKey, skillId) {
+  // 「使用」: attach the skill to the conversation the user is currently viewing
+  // on the messages page (no fellow picker). If no fellow conversation is open,
+  // prompt them to open one first.
+  function useSkillInComposer(skillId) {
     const skill = (state.skillLibrary.skills || []).find((item) => item.id === skillId);
     const name = skill ? window.miaSkillHelpers.skillDisplayName(skill) : skillId;
-    await window.miaFellowManager?.openFellowChat?.(fellowKey);
-    window.miaComposer?.addComposerSkill?.({ id: skillId, name });
-  }
-
-  // 「使用」: jump to the current chat with the skill chipped on; if no chat is
-  // active and there are multiple Fellows, pop a picker.
-  function useSkillInComposer(skillId, x, y) {
-    const fellows = window.miaFellowManager?.allOwnedFellows?.() || [];
-    if (!fellows.length) { window.alert("还没有可用的 Fellow，请先创建一个再使用技能。"); return; }
-    if (state.activeKey && fellows.some((f) => f.key === state.activeKey)) {
-      attachSkillToComposer(state.activeKey, skillId);
-    } else if (fellows.length === 1) {
-      attachSkillToComposer(fellows[0].key, skillId);
-    } else {
-      openUseSkillPicker(skillId, x, y);
-    }
-  }
-
-  // "使用" → pick a Fellow → enable the skill on it and open that chat.
-  function openUseSkillPicker(skillId, x, y) {
-    document.querySelector(".skill-use-picker")?.remove();
-    const fellows = window.miaFellowManager?.allOwnedFellows?.() || [];
-    const picker = document.createElement("div");
-    picker.className = "skill-use-picker";
-    picker.innerHTML = fellows.length
-      ? `<div class="skill-use-picker-label">用哪个 Fellow 使用？</div>` +
-        fellows.map((fellow) => `<button type="button" data-use-fellow="${escapeHtml(fellow.key)}">${escapeHtml(fellow.name || fellow.key)}</button>`).join("")
-      : `<div class="skill-use-picker-label">还没有可用的 Fellow</div>`;
-    document.body.appendChild(picker);
-    const width = picker.offsetWidth || 200;
-    const height = picker.offsetHeight || 120;
-    picker.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
-    picker.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
-    const close = (event) => {
-      if (event && picker.contains(event.target)) return;
-      picker.remove();
-      document.removeEventListener("mousedown", close, true);
-    };
-    picker.querySelectorAll("[data-use-fellow]").forEach((button) => {
-      button.addEventListener("click", () => {
-        picker.remove();
-        document.removeEventListener("mousedown", close, true);
-        attachSkillToComposer(button.dataset.useFellow, skillId);
-      });
-    });
-    setTimeout(() => document.addEventListener("mousedown", close, true), 0);
+    const attached = window.miaUseSkillInActiveConversation?.({ id: skillId, name });
+    if (!attached) window.alert("请先在消息页打开一个 Fellow 对话，再使用技能。");
   }
 
   function renderSkillPreview() {

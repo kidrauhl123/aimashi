@@ -1681,7 +1681,6 @@ async function renameCloudSessionConversation(conversation) {
 async function selectCloudSessionConversation(conversation) {
   if (!conversation?.id) return;
   window.miaSocial?.setActiveConversationId?.(conversation.id);
-  window.miaSocial?.markConversationRead?.(conversation.id);
   state.sessionMenuOpen = false;
   state.replyDraft = null;
   state.forceScrollToBottom = true;
@@ -1956,6 +1955,20 @@ function activeConversationFellowContext() {
     runtimeKind: runtimeKindForFellowConversation(conversation)
   };
 }
+
+// Composer "使用": attach the skill to the conversation the user is currently
+// viewing in the messages page — no fellow picker. Returns false when there is
+// no active fellow conversation so the caller can prompt the user to open one.
+function useSkillInActiveConversation(skill) {
+  if (!skill || !skill.id) return false;
+  if (!activeConversationFellowContext()) return false;
+  state.activeView = "chat";
+  showNarrowContent();
+  window.miaComposer?.addComposerSkill?.({ id: String(skill.id), name: skill.name || skill.id });
+  render();
+  return true;
+}
+window.miaUseSkillInActiveConversation = useSkillInActiveConversation;
 
 function activeFellowRuntimeControlContext() {
   const conversationContext = activeConversationFellowContext();

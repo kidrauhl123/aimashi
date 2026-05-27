@@ -623,13 +623,13 @@ body.sidebar-resizing * {
 
 .persona {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  width: calc(100% - 14px);
-  min-height: 60px;
-  margin: 0 7px;
-  padding: 9px 10px;
+  gap: 9px;
+  width: calc(100% - 12px);
+  min-height: 66px;
+  margin: 0 6px;
+  padding: 7px 9px;
   border: 0;
   border-radius: 11px;
   background: transparent;
@@ -717,7 +717,9 @@ body.sidebar-resizing * {
 
 .persona-main {
   display: grid;
-  gap: 2px;
+  grid-template-rows: 18px minmax(34px, auto);
+  gap: 1px;
+  min-height: 52px;
 }
 
 .persona-name-row {
@@ -728,7 +730,6 @@ body.sidebar-resizing * {
 }
 
 .persona-name,
-.persona-key,
 .persona-time {
   display: block;
   overflow: hidden;
@@ -736,11 +737,17 @@ body.sidebar-resizing * {
   white-space: nowrap;
 }
 
+.persona-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .persona-name {
   min-width: 0;
   color: var(--text);
   font-size: 14px;
-  font-weight: 430;
+  font-weight: 500;
+  line-height: 18px;
 }
 
 .persona-type {
@@ -763,7 +770,7 @@ body.sidebar-resizing * {
 
 .persona.active .persona-name {
   color: var(--list-active-text);
-  font-weight: 450;
+  font-weight: 520;
 }
 
 .persona.active .persona-type {
@@ -772,27 +779,54 @@ body.sidebar-resizing * {
 }
 
 .persona-key {
+  display: -webkit-box;
+  align-self: start;
+  max-height: 34px;
   color: var(--muted);
   font-size: 12px;
+  line-height: 17px;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .persona.active .persona-key {
   color: var(--list-active-muted);
 }
 
-.persona-side {
-  align-self: stretch;
+.persona-preview-row {
   display: grid;
-  align-content: center;
-  justify-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.persona-side {
+  align-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 4px;
-  max-width: 46px;
+  min-width: 18px;
+  max-width: 54px;
+  min-height: 18px;
+  margin-bottom: 1px;
+}
+
+.persona-side.empty {
+  display: none;
 }
 
 .persona-time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  max-width: 64px;
   color: var(--faint);
   font-size: 11px;
   font-weight: 400;
+  line-height: 16px;
 }
 
 .persona.active .persona-time,
@@ -940,8 +974,8 @@ body.sidebar-resizing * {
 }
 
 :root[data-list-style="flush"] .persona {
-  min-height: 66px;
-  padding: 10px 14px;
+  min-height: 68px;
+  padding: 8px 14px;
 }
 
 :root[data-list-style="flush"] .contact-row {
