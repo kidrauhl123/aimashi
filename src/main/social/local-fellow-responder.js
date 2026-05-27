@@ -16,18 +16,56 @@ function clientOpIdForDedupKey(dedupKey) {
   return `op_fellow_reply_${safe || "unknown"}`;
 }
 
+function errorClientOpIdForDedupKey(dedupKey) {
+  return clientOpIdForDedupKey(dedupKey).replace(/^op_fellow_reply_/, "op_fellow_reply_error_");
+}
+
 function responseText(result) {
   const message = result?.choices?.[0]?.message || result?.message || {};
   return String(message.content || result?.content || "").trim();
 }
 
-function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, log = () => {} }) {
+function runIdForDedupKey(dedupKey) {
+  return `local_${clientOpIdForDedupKey(dedupKey).replace(/^op_/, "")}`;
+}
+
+function triggerMessageIdForDedupKey(dedupKey) {
+  return String(dedupKey || "").split(":")[0] || "";
+}
+
+function userFacingFailureMessage(message) {
+  const text = String(message || "").trim();
+  if (/(quota|exhaust|RESOURCE_EXHAUSTED|429)/i.test(text)) {
+    return "我这次没能生成回复：模型配额已耗尽，请稍后重试或切换模型。";
+  }
+  return "我这次没能生成回复：本地模型运行失败，请稍后重试或切换模型。";
+}
+
+function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, emitCloudEvent = () => {}, log = () => {} }) {
   const processed = new Set();
   const inFlight = new Set();
 
   function remember(key) {
     processed.add(key);
     if (processed.size > PROCESSED_CAP) processed.delete(processed.values().next().value);
+  }
+
+  async function postFailureMessage({ roomId, fellowId, dedupKey, turnId, stage, error }) {
+    const message = String(error?.message || error || "unknown error");
+    try {
+      const result = await postRoomMessageAsFellow(roomId, {
+        fellowId,
+        bodyMd: userFacingFailureMessage(message),
+        turnId,
+        errorJson: { stage, message },
+        clientOpId: errorClientOpIdForDedupKey(dedupKey)
+      });
+      if (result && result.ok === false) throw new Error(result.error || result.message || "post failed");
+      return true;
+    } catch (postError) {
+      log(`[local-fellow-responder] failure post failed: ${postError?.message || postError}`);
+      return false;
+    }
   }
 
   async function respond({ roomId, fellowId, dedupKey, systemPrompt, userPrompt, turnId = null, runtimeConfig = null }) {
@@ -37,6 +75,14 @@ function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, log = (
     inFlight.add(dedupKey);
 
     let text = "";
+    const runId = runIdForDedupKey(dedupKey);
+    emitCloudEvent({
+      type: "cloud_agent_run_started",
+      runId,
+      roomId,
+      fellowId,
+      triggerMessageId: triggerMessageIdForDedupKey(dedupKey)
+    });
     try {
       const chatArgs = {
         fellowKey: fellowId,
@@ -55,10 +101,33 @@ function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, log = (
       text = responseText(result);
     } catch (error) {
       log(`[local-fellow-responder] engine failed: ${error?.message || error}`);
+      emitCloudEvent({
+        type: "cloud_agent_run_event",
+        runId,
+        roomId,
+        fellowId,
+        event: { type: "run.failed", error: String(error?.message || error) }
+      });
+      const didPostFailure = await postFailureMessage({
+        roomId,
+        fellowId,
+        dedupKey,
+        turnId,
+        stage: "engine",
+        error
+      });
+      if (didPostFailure) remember(dedupKey);
       inFlight.delete(dedupKey);
-      return;
+      return didPostFailure;
     }
     if (!text) {
+      emitCloudEvent({
+        type: "cloud_agent_run_event",
+        runId,
+        roomId,
+        fellowId,
+        event: { type: "run.failed", error: "empty response" }
+      });
       inFlight.delete(dedupKey);
       return;
     }
@@ -76,6 +145,13 @@ function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, log = (
       return true;
     } catch (error) {
       log(`[local-fellow-responder] post failed: ${error?.message || error}`);
+      emitCloudEvent({
+        type: "cloud_agent_run_event",
+        runId,
+        roomId,
+        fellowId,
+        event: { type: "run.failed", error: String(error?.message || error) }
+      });
       inFlight.delete(dedupKey);
       return false;
     }
@@ -87,6 +163,7 @@ function createLocalFellowResponder({ sendChat, postRoomMessageAsFellow, log = (
 module.exports = {
   clientOpIdForDedupKey,
   createLocalFellowResponder,
+  runIdForDedupKey,
   responseText,
   shouldHandleLocalCloudRoomAi
 };

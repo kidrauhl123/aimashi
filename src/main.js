@@ -1835,6 +1835,12 @@ for (const line of pendingCloudLogs.splice(0)) cloudBridgeRuntime.appendLog(line
 const localFellowResponder = createLocalFellowResponder({
   sendChat,
   postRoomMessageAsFellow: (roomId, body) => socialApi.postRoomMessageAsFellow(roomId, body),
+  emitCloudEvent: (message) => {
+    broadcastRendererEvent(IpcChannel.CloudEvent, {
+      type: message.type,
+      payload: message
+    });
+  },
   log: (line) => appendCloudLog(line)
 });
 function shouldHandleCloudRoomAi() {
@@ -1894,7 +1900,12 @@ cloudEventSocketRuntime = createCloudEventsClient({
   appendCloudLog,
   fellowRuntimeDispatcher: mainFellowRuntimeDispatcher
 });
-registerSocialIpc({ ipcMain, socialApi });
+registerSocialIpc({
+  ipcMain,
+  socialApi,
+  fellowRuntimeDispatcher: mainFellowRuntimeDispatcher,
+  log: (line) => appendCloudLog(line)
+});
 ipcMain.handle(IpcChannel.SocialMyUsername, () => {
   // Wrap in the same {ok, data} envelope safeCall uses for the other
   // social IPCs so the renderer's destructure path is consistent and

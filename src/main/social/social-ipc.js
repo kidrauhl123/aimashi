@@ -1,4 +1,5 @@
 const { IpcChannel } = require("../../shared/ipc-channels");
+const { CloudEvent } = require("../../shared/cloud-events.js");
 
 function safeCall(fn) {
   return async (_event, ...args) => {
@@ -11,7 +12,18 @@ function safeCall(fn) {
   };
 }
 
-function registerSocialIpc({ ipcMain, socialApi }) {
+function dispatchPostedRoomMessage({ roomId, result, fellowRuntimeDispatcher, log = () => {} }) {
+  const message = result?.message || result?.data?.message || null;
+  if (!roomId || !message?.id || message.sender_kind !== "user") return;
+  const promise = fellowRuntimeDispatcher?.handleCloudEvent?.({
+    type: CloudEvent.RoomMessageAppended,
+    roomId,
+    message
+  });
+  promise?.catch?.((error) => log(`Cloud room AI dispatch after post failed: ${error?.message || error}`));
+}
+
+function registerSocialIpc({ ipcMain, socialApi, fellowRuntimeDispatcher = null, log = () => {} }) {
   ipcMain.handle(IpcChannel.SocialSendFriendRequest, safeCall((toUsername) => socialApi.sendFriendRequest(toUsername)));
   ipcMain.handle(IpcChannel.SocialRespondFriendRequest, safeCall((requestId, action) => socialApi.respondFriendRequest(requestId, action)));
   ipcMain.handle(IpcChannel.SocialCancelFriendRequest, safeCall((requestId) => socialApi.cancelFriendRequest(requestId)));
@@ -25,7 +37,11 @@ function registerSocialIpc({ ipcMain, socialApi }) {
   ipcMain.handle(IpcChannel.SocialListPlatformModels, safeCall(() => socialApi.listPlatformModels()));
   ipcMain.handle(IpcChannel.SocialGetRoom, safeCall((roomId) => socialApi.getRoom(roomId)));
   ipcMain.handle(IpcChannel.SocialListRoomMessages, safeCall((roomId, sinceSeq, limit) => socialApi.listRoomMessages(roomId, sinceSeq, limit)));
-  ipcMain.handle(IpcChannel.SocialPostRoomMessage, safeCall((roomId, body) => socialApi.postRoomMessage(roomId, body)));
+  ipcMain.handle(IpcChannel.SocialPostRoomMessage, safeCall(async (roomId, body) => {
+    const result = await socialApi.postRoomMessage(roomId, body);
+    dispatchPostedRoomMessage({ roomId, result, fellowRuntimeDispatcher, log });
+    return result;
+  }));
   ipcMain.handle(IpcChannel.SocialDeleteRoomMessage, safeCall((roomId, messageId) => socialApi.deleteRoomMessage(roomId, messageId)));
   ipcMain.handle(IpcChannel.SocialCreateRoom, safeCall((payload) => socialApi.createRoom(payload)));
   ipcMain.handle(IpcChannel.SocialEnsureFellowRoom, safeCall((fellowId, body) => socialApi.ensureFellowRoom(fellowId, body)));

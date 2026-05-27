@@ -770,7 +770,7 @@ test("handleCloudEvent does not infer group typing state from conductor-mode use
   assert.equal(s.moduleState.cloudAgentRunsByRoom.has("g_typing"), false);
 });
 
-test("renderRoomChat hides typing until an agent stream emits text", () => {
+test("renderRoomChat shows typing as soon as an agent run starts", () => {
   const s = loadSocial();
   s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
   s.moduleState.activeRoomId = "fellow:u_a:mia";
@@ -792,7 +792,9 @@ test("renderRoomChat hides typing until an agent stream emits text", () => {
   };
   s.renderRoomChat(chat);
 
-  assert.equal(chat.children.length, 0);
+  assert.equal(chat.children.length, 1);
+  assert.match(chat.children[0].innerHTML, /typing-status/);
+  assert.match(chat.children[0].innerHTML, /正在输入/);
 });
 
 test("renderRoomChat does not label tool-only agent activity as typing", () => {

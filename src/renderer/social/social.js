@@ -1052,7 +1052,7 @@
 
   function _buildCloudAgentStreamingArticle(roomId, accentColor, members = []) {
     const run = moduleState.cloudAgentRunsByRoom.get(roomId);
-    if (!run || (!run.text && !run.tools.length)) return null;
+    if (!run || (!run.text && !run.tools.length && run.status !== "running")) return null;
     const room = moduleState.rooms.find((r) => r.id === roomId) || { id: roomId };
     const fellowKey = run.fellowId || room.decorations?.fellowKey || (room.id?.startsWith("fellow:") ? room.id.split(":")[2] : "mia");
     const synthetic = {
@@ -1083,7 +1083,7 @@
     const typingText = isGroupRoom
       ? `${run.typingLabel || authorName || fellowKey}正在输入`
       : "正在输入";
-    const statusHtml = run.status === "running" && run.text
+    const statusHtml = run.status === "running" && (run.text || !run.tools.length)
       ? `<span class="typing-status">${escapeHtml(typingText)}<span class="typing-dots"><i></i><i></i><i></i></span></span>`
       : "";
     const toolsHtml = run.tools.length

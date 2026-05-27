@@ -7,7 +7,7 @@ const {
 } = require("../src/main/social/local-fellow-responder.js");
 
 function setup(overrides = {}) {
-  const calls = { engine: [], post: [], log: [] };
+  const calls = { engine: [], post: [], log: [], cloudEvents: [] };
   const responder = createLocalFellowResponder({
     sendChat: async (args) => {
       calls.engine.push(args);
@@ -17,6 +17,7 @@ function setup(overrides = {}) {
       calls.post.push({ roomId, body });
       return { ok: true };
     },
+    emitCloudEvent: (event) => calls.cloudEvents.push(event),
     log: (line) => calls.log.push(line),
     ...overrides
   });
@@ -58,6 +59,18 @@ test("respond runs the local engine and posts the reply as the fellow", async ()
       clientOpId: "op_fellow_reply_m_1_codex"
     }
   }]);
+});
+
+test("respond emits a transient room run start before the local engine call", async () => {
+  const { responder, calls } = setup();
+
+  await responder.respond(base);
+
+  assert.equal(calls.cloudEvents[0].type, "cloud_agent_run_started");
+  assert.equal(calls.cloudEvents[0].roomId, "g_1");
+  assert.equal(calls.cloudEvents[0].fellowId, "codex");
+  assert.equal(calls.cloudEvents[0].triggerMessageId, "m_1");
+  assert.match(calls.cloudEvents[0].runId, /^local_/);
 });
 
 test("respond forwards runtime config to the local chat engine", async () => {
@@ -135,6 +148,29 @@ test("respond retries after post failure and dedups after post success", async (
   assert.equal(calls.engine.length, 2);
   assert.equal(calls.post.length, 2);
   assert.equal(calls.log.some((line) => line.includes("temporary")), true);
+});
+
+test("respond posts a visible fellow error when the local engine fails", async () => {
+  const { responder, calls } = setup({
+    sendChat: async (args) => {
+      calls.engine.push(args);
+      throw new Error("HTTP 429: Gemini quota exhausted");
+    }
+  });
+
+  const result = await responder.respond(base);
+
+  assert.equal(result, true);
+  assert.equal(calls.engine.length, 1);
+  assert.equal(calls.post.length, 1);
+  assert.equal(calls.post[0].roomId, "g_1");
+  assert.equal(calls.post[0].body.fellowId, "codex");
+  assert.match(calls.post[0].body.bodyMd, /模型配额已耗尽/);
+  assert.deepEqual(calls.post[0].body.errorJson, {
+    stage: "engine",
+    message: "HTTP 429: Gemini quota exhausted"
+  });
+  assert.equal(calls.post[0].body.clientOpId, "op_fellow_reply_error_m_1_codex");
 });
 
 test("respond skips empty replies and incomplete invocations", async () => {
