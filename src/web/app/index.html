@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f5f5f8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Mia">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Mia Web</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+    <link rel="manifest" href="../manifest.webmanifest">
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body>
+    <main class="app-shell" data-auth="loading">
+      <section id="loginView" class="login-view" aria-label="登录 Mia">
+        <div class="login-panel">
+          <div class="login-brand">
+            <div class="brand-mark">A</div>
+            <div>
+              <h1>Mia</h1>
+              <p>登录后在网页端、桌面端和手机端同步聊天。</p>
+            </div>
+          </div>
+          <form id="loginForm" class="login-form">
+            <label>
+              用户名
+              <input id="usernameInput" type="text" autocomplete="username" required>
+            </label>
+            <label>
+              密码
+              <div class="code-row">
+                <input id="passwordInput" type="password" autocomplete="current-password" placeholder="至少 6 位" required>
+                <button id="registerButton" type="submit">创建账号</button>
+              </div>
+            </label>
+            <button class="primary-action" type="submit">登录 Mia Web</button>
+            <p id="loginHint" class="login-hint">账号、会话和图片会保存到 Mia Cloud 服务器。</p>
+          </form>
+        </div>
+      </section>
+
+      <section id="mainView" class="main-view" aria-label="Mia Web">
+        <aside class="nav-rail" aria-label="主导航">
+          <button id="userAvatar" class="profile-avatar rail-avatar" type="button" title="账号与同步" aria-label="账号与同步">A</button>
+          <button class="rail-button active" type="button" data-view="chat" title="消息" aria-label="消息">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <em id="unreadCount" hidden>0</em>
+          </button>
+          <div class="rail-spacer"></div>
+          <button id="openSettings" class="rail-button" type="button" title="设置" aria-label="设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16 M4 12h16 M4 18h16"/></svg>
+          </button>
+        </aside>
+
+        <aside class="sidebar">
+          <header class="sidebar-tools">
+            <label class="search-box">
+              <span>⌕</span>
+              <input id="conversationSearch" autocomplete="off" placeholder="搜索">
+            </label>
+            <button id="newConversation" class="icon-button" type="button" title="新建" aria-label="新建">＋</button>
+            <div id="conversationCreateMenu" class="create-menu hidden">
+              <button id="convMenuAddFriend" type="button">
+                <span class="create-menu-icon" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                    <circle cx="24" cy="24" r="6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M30 18V26C30 28.2091 31.7909 30 34 30C36.2091 30 38 28.2091 38 26V24C38 16.268 31.732 10 24 10C16.268 10 10 16.268 10 24C10 31.732 16.268 38 24 38" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="create-menu-label">添加好友</span>
+              </button>
+              <button id="convMenuNewFellow" type="button">
+                <span class="create-menu-icon" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                    <circle cx="24" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M42 44C42 34.0589 33.9411 26 24 26C14.0589 26 6 34.0589 6 44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M19 39H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M24 34V44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="create-menu-label">创建智能体</span>
+              </button>
+              <button id="convMenuNewGroup" type="button">
+                <span class="create-menu-icon" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                    <path d="M19 20C22.866 20 26 16.866 26 13C26 9.13401 22.866 6 19 6C15.134 6 12 9.13401 12 13C12 16.866 15.134 20 19 20Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M32.6077 7C34.6405 8.2249 36.0001 10.4537 36.0001 13C36.0001 15.5463 34.6405 17.7751 32.6077 19" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4 40.8V42H34V40.8C34 36.3196 34 34.0794 33.1281 32.3681C32.3611 30.8628 31.1372 29.6389 29.6319 28.8719C27.9206 28 25.6804 28 21.2 28H16.8C12.3196 28 10.0794 28 8.36808 28.8719C6.86278 29.6389 5.63893 30.8628 4.87195 32.3681C4 34.0794 4 36.3196 4 40.8Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M43.9999 42.0001V40.8001C43.9999 36.3197 43.9999 34.0795 43.128 32.3682C42.361 30.8629 41.1371 29.6391 39.6318 28.8721" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="create-menu-label">发起群聊</span>
+              </button>
+            </div>
+          </header>
+          <section id="conversationList" class="persona-list" aria-label="会话列表"></section>
+        </aside>
+
+        <section class="workspace">
+          <header class="topbar">
+            <button id="mobileBack" class="narrow-back-button" type="button" aria-label="返回消息列表">‹</button>
+            <div class="group-title">
+              <span id="activeAvatar" class="avatar"></span>
+              <div>
+                <h1 id="activeTitle">Mia</h1>
+                <p id="activeMeta">选择一个会话开始聊天</p>
+              </div>
+            </div>
+            <div class="top-actions">
+              <div class="session-menu-wrap">
+                <button id="sessionMenuButton" class="session-trigger hidden" type="button" title="聊天记录" aria-label="聊天记录">
+                  <span id="currentSessionTitle" class="current-session-title">新对话</span>
+                </button>
+                <div id="sessionMenu" class="session-menu hidden">
+                  <div class="session-menu-head">
+                    <strong>
+                      <span class="session-menu-head-icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48" fill="none" focusable="false">
+                          <path d="M5.81836 6.72729V14H13.0911" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M4 24C4 35.0457 12.9543 44 24 44V44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C16.598 4 10.1351 8.02111 6.67677 13.9981" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M24.005 12L24.0038 24.0088L32.4832 32.4882" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </span>
+                      聊天记录
+                    </strong>
+                    <button id="newSession" class="icon-button" type="button" title="新建对话" aria-label="新建对话">＋</button>
+                  </div>
+                  <div id="sessionList" class="session-list"></div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <section class="chat-layout">
+            <div id="chat" class="chat" aria-live="polite"></div>
+            <form id="chatForm" class="composer">
+              <div class="composer-input-row">
+                <button id="composerAdd" class="composer-add-button" type="button" title="添加" aria-label="添加">+</button>
+                <textarea id="chatInput" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+                <button id="sendButton" class="send-button" type="submit" title="发送" aria-label="发送">↗</button>
+              </div>
+              <div id="composerBottom" class="composer-bottom hidden">
+                <div class="composer-controls">
+                  <label class="model-switcher" title="切换当前模型">
+                    <span id="quickModelAvatar" class="model-avatar" aria-hidden="true">◇</span>
+                    <span id="quickModelLabel" class="model-current-label">GPT-5.3 Codex</span>
+                    <select id="quickModelSelect" aria-label="切换当前模型">
+                      <option value="custom">Custom</option>
+                      <option value="openai-codex">GPT-5.3 Codex</option>
+                      <option value="xai">Grok 4.1 Fast</option>
+                      <option value="anthropic">Claude Sonnet 4.6</option>
+                      <option value="openrouter">Claude Sonnet 4.6</option>
+                      <option value="deepseek">DeepSeek Chat</option>
+                      <option value="gemini">Gemini 2.5 Pro</option>
+                      <option value="lmstudio">Local Model</option>
+                    </select>
+                  </label>
+                  <span class="composer-dot" aria-hidden="true">·</span>
+                  <label class="effort-switcher" title="切换推理强度">
+                    <span id="effortLabel" class="effort-label">Medium</span>
+                    <select id="effortSelect" aria-label="切换推理强度"></select>
+                  </label>
+                  <span class="composer-dot" aria-hidden="true">·</span>
+                  <label class="permission-switcher" title="危险命令权限模式">
+                    <span id="permissionLabel" class="permission-label">Ask</span>
+                    <select id="permissionMode" aria-label="权限模式"></select>
+                  </label>
+                </div>
+              </div>
+            </form>
+          </section>
+        </section>
+      </section>
+
+      <section id="settingsView" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="settings-dialog">
+          <button id="closeSettings" class="icon-button settings-close-button" type="button" title="关闭" aria-label="关闭设置">×</button>
+          <section class="settings-layout">
+            <aside class="settings-tabs">
+              <button class="settings-tab active" type="button" data-settings-tab="account">账号与同步</button>
+              <button class="settings-tab" type="button" data-settings-tab="appearance">外观</button>
+            </aside>
+            <div class="settings-content">
+              <h2 id="settingsTitle" class="visually-hidden">设置</h2>
+              <section class="settings-panel" data-settings-panel="account">
+                <div class="runtime-card mobile-pairing-card">
+                  <section class="connection-row">
+                    <div class="connection-row-head">
+                      <div>
+                        <strong>Mia Cloud</strong>
+                        <p id="cloudAccountHint">当前登录的账号，会和桌面端共享消息。</p>
+                      </div>
+                      <div class="cloud-actions">
+                        <button id="cloudLogoutFromSettings" class="secondary" type="button">退出登录</button>
+                      </div>
+                    </div>
+                    <section id="cloudAccountInfo" class="connection-details">
+                      <p id="cloudAccountUsername" class="pairing-hint">—</p>
+                    </section>
+                  </section>
+                </div>
+              </section>
+              <section class="settings-panel hidden" data-settings-panel="appearance">
+                <form id="appearanceForm" class="form-grid">
+                  <div class="settings-section-label">通用</div>
+                  <section class="settings-row settings-group-start">
+                    <div>
+                      <strong>界面主题</strong>
+                      <p>切换浅色或深色界面。</p>
+                    </div>
+                    <select id="appearanceTheme">
+                      <option value="light">浅色</option>
+                      <option value="dark">深色</option>
+                    </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>中栏列表</strong>
+                      <p>卡片样式或贯通样式。</p>
+                    </div>
+                    <select id="appearanceListStyle">
+                      <option value="card">卡片</option>
+                      <option value="flush">贯通</option>
+                    </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>选中态</strong>
+                      <p>柔和或实色。</p>
+                    </div>
+                    <select id="appearanceSelectionStyle">
+                      <option value="soft">柔和</option>
+                      <option value="solid">实色</option>
+                    </select>
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>悬停底色</strong>
+                      <p>鼠标移到卡片上时显示浅色底。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceHoverBackground" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
+                  </section>
+                  <section class="settings-row settings-group-end">
+                    <div>
+                      <strong>主题色</strong>
+                      <p>影响选中状态、链接和按钮。</p>
+                    </div>
+                    <input id="appearanceAccentColor" type="color" value="#5e5ce6" aria-label="主题色">
+                  </section>
+                  <div class="settings-section-label">聊天界面</div>
+                  <section class="settings-row settings-group-start">
+                    <div>
+                      <strong>用户气泡</strong>
+                      <p>只影响你发出的消息气泡底色。</p>
+                    </div>
+                    <input id="appearanceUserBubbleColor" type="color" value="#0162db" aria-label="用户气泡色">
+                  </section>
+                  <section class="settings-row">
+                    <div>
+                      <strong>用户头像</strong>
+                      <p>在聊天里显示你自己的头像。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceShowUserAvatar" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
+                  </section>
+                  <section class="settings-row settings-group-end">
+                    <div>
+                      <strong>伙伴头像</strong>
+                      <p>在聊天里显示对方 / 智能体的头像。</p>
+                    </div>
+                    <label class="settings-switch-wrap">
+                      <input id="appearanceShowAssistantAvatar" type="checkbox">
+                      <span class="settings-switch-text"></span>
+                    </label>
+                  </section>
+                </form>
+              </section>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden" role="status"></div>
+    </main>
+    <script src="../shared/time-format.js?v=20260523-shared-time-format"></script>
+    <script src="../shared/message-spec.js?v=20260523-shared-message-spec"></script>
+    <script src="../shared/contact.js?v=20260523-shared-contact"></script>
+    <script src="../shared/engine-contracts.js?v=20260525-web-ai-controls"></script>
+    <script src="../shared/conversation-kinds.js?v=20260524-cloud-agent"></script>
+    <script src="../shared/avatar-media.js?v=20260526-avatar-media"></script>
+    <script src="../shared/session-history.js?v=20260526-session-history"></script>
+    <script src="../shared/unread.js?v=20260523-shared-unread"></script>
+    <script src="../shared/group-tiles.js?v=20260523-group-tiles"></script>
+    <script src="../shared/send-pipeline.js?v=20260523-shared-send-pipeline"></script>
+    <script src="../shared/fellow-runtime-control.js?v=20260526-fellow-runtime-control"></script>
+    <script src="../helpers/markdown-helpers.js?v=20260526-web-rich-bubbles"></script>
+    <script src="../message-sources/cloud-room-source.js?v=20260523-cloud-room-source"></script>
+    <script src="../appearance.js?v=20260522-1"></script>
+    <script src="../app.js?v=20260523-task-2-1"></script>
+  </body>
+</html>

@@ -83,12 +83,12 @@ async function expectJsonStatus(baseUrl, path, expectedStatus, { token = "", met
 }
 
 async function assertWebAppServed(baseUrl) {
-  const response = await fetch(`${baseUrl}/`, {
+  const response = await fetch(`${baseUrl}/app/`, {
     headers: { Origin: baseUrl }
   });
-  if (!response.ok) throw new Error(`GET / failed: ${response.status}`);
+  if (!response.ok) throw new Error(`GET /app/ failed: ${response.status}`);
   const html = await response.text();
-  if (!/<title>Mia Web<\/title>/.test(html) || !/src="\.\/app\.js/.test(html)) {
+  if (!/<title>Mia Web<\/title>/.test(html) || !/src="\.\.\/app\.js/.test(html)) {
     throw new Error("Web app HTML did not look like Mia Web.");
   }
   const favicon = await fetch(`${baseUrl}/favicon.ico`, {

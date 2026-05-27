@@ -24,6 +24,27 @@ function copyDir(source, target) {
   fs.cpSync(path.join(root, source), target, { recursive: true });
 }
 
+function newestDesktopArm64Dmg() {
+  const releaseDir = path.join(root, "release");
+  const sourcePattern = "Mia-*-arm64-unsigned.dmg";
+  if (!fs.existsSync(releaseDir)) return "";
+  return fs.readdirSync(releaseDir)
+    .filter((file) => /^Mia-.*-arm64-unsigned\.dmg$/.test(file))
+    .map((file) => {
+      const fullPath = path.join(releaseDir, file);
+      return { fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs, sourcePattern };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.fullPath || "";
+}
+
+function copyDesktopDownloadArtifacts() {
+  const downloadsDir = path.join(webDir, "downloads");
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  const dmg = newestDesktopArm64Dmg();
+  if (!dmg) return;
+  fs.copyFileSync(dmg, path.join(downloadsDir, "mia-macos-arm64-latest.dmg"));
+}
+
 function writeIcoFromPng(sourcePng, targetIco) {
   const png = fs.readFileSync(sourcePng);
   const header = Buffer.alloc(22);
@@ -327,6 +348,8 @@ function verifyRelease() {
     "web/app.js",
     "web/appearance.js",
     "web/styles.css",
+    "web/landing.css",
+    "web/landing.js",
     "web/favicon.svg",
     "web/favicon.ico",
     "web/apple-touch-icon.png",
@@ -528,6 +551,7 @@ function main() {
   copyFile("src/shared/skill-safety.js", path.join(apiDir, "src", "shared", "skill-safety.js"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
   copyDir("src/web", webDir);
+  copyDesktopDownloadArtifacts();
   copyDir("src/renderer/assets/model-icons", path.join(webDir, "assets", "model-icons"));
   copyDir("src/renderer/assets/provider-icons", path.join(webDir, "assets", "provider-icons"));
   copyDir("src/renderer/assets/engine-icons", path.join(webDir, "assets", "engine-icons"));

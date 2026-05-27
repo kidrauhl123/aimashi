@@ -43,6 +43,8 @@ function safePath(requestPath) {
   for (const { filePath, base } of candidates) {
     if (filePath !== base && !filePath.startsWith(`${base}${path.sep}`)) continue;
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return filePath;
+    const indexPath = path.join(filePath, "index.html");
+    if (fs.existsSync(indexPath) && fs.statSync(indexPath).isFile()) return indexPath;
   }
   return candidates[0].filePath;
 }

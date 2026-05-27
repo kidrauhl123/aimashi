@@ -5,7 +5,7 @@
 // `localStorage`, WebSocket, …), so this test asserts two narrower
 // invariants instead:
 //
-//   1. src/web/index.html loads shared/unread.js before app.js (and the
+//   1. src/web/app/index.html loads shared/unread.js before app.js (and the
 //      build-cloud-release script copies the file into the web tree).
 //   2. src/web/app.js no longer contains any inline `> 99 ? "99+"` style
 //      truncation strings — the shared module owns that policy.
@@ -32,10 +32,10 @@ function extractCreateMenuItems(html, menuId) {
   });
 }
 
-test("src/web/index.html loads shared/unread.js before app.js", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html loads shared/unread.js before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const unreadIdx = html.indexOf("shared/unread.js");
-  const appIdx = html.indexOf("./app.js");
+  const appIdx = html.indexOf("../app.js");
   assert.ok(unreadIdx >= 0, "index.html must reference shared/unread.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(
@@ -44,8 +44,8 @@ test("src/web/index.html loads shared/unread.js before app.js", () => {
   );
 });
 
-test("src/web/index.html includes private AI composer controls", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html includes private AI composer controls", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   assert.match(html, /id="composerBottom"/);
   assert.match(html, /id="quickModelAvatar"/);
   assert.match(html, /id="quickModelSelect"/);
@@ -53,8 +53,8 @@ test("src/web/index.html includes private AI composer controls", () => {
   assert.match(html, /id="permissionMode"/);
 });
 
-test("src/web/index.html includes the desktop-style chat history menu", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html includes the desktop-style chat history menu", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   assert.match(html, /id="sessionMenuButton"/);
   assert.match(html, /id="currentSessionTitle"/);
   assert.match(html, /id="sessionMenu"/);
@@ -64,7 +64,7 @@ test("src/web/index.html includes the desktop-style chat history menu", () => {
 });
 
 test("src/web exposes cloud-only fellow creation from the sidebar plus menu", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
 
   assert.match(html, /id="convMenuNewFellow"/);
@@ -84,7 +84,7 @@ test("src/web exposes cloud-only fellow creation from the sidebar plus menu", ()
 
 test("src/web sidebar plus menu matches the desktop menu order, labels, and icons", () => {
   const desktopHtml = fs.readFileSync(path.join(ROOT, "src/renderer/index.html"), "utf8");
-  const webHtml = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+  const webHtml = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const desktopItems = extractCreateMenuItems(desktopHtml, "fellowCreateMenu");
   const webItems = extractCreateMenuItems(webHtml, "conversationCreateMenu");
 
@@ -98,51 +98,51 @@ test("src/web sidebar plus menu matches the desktop menu order, labels, and icon
   );
 });
 
-test("src/web/index.html uses the signed-in user avatar in the rail", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html uses the signed-in user avatar in the rail", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   assert.match(html, /id="userAvatar"/);
   assert.match(html, /class="[^"]*\brail-avatar\b/);
   assert.doesNotMatch(html, /<div class="rail-logo">A<\/div>/);
 });
 
-test("src/web/index.html loads shared engine contracts before app.js", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html loads shared engine contracts before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const engineIdx = html.indexOf("shared/engine-contracts.js");
-  const appIdx = html.indexOf("./app.js");
+  const appIdx = html.indexOf("../app.js");
   assert.ok(engineIdx >= 0, "index.html must reference shared/engine-contracts.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(engineIdx < appIdx, "engine contracts must be loaded before app.js");
 });
 
-test("src/web/index.html loads shared session-history before app.js", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html loads shared session-history before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const historyIdx = html.indexOf("shared/session-history.js");
-  const appIdx = html.indexOf("./app.js");
+  const appIdx = html.indexOf("../app.js");
   assert.ok(historyIdx >= 0, "index.html must reference shared/session-history.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(historyIdx < appIdx, "session-history must be loaded before app.js");
 });
 
-test("src/web/index.html loads shared fellow runtime control before app.js", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html loads shared fellow runtime control before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const controlIdx = html.indexOf("shared/fellow-runtime-control.js");
-  const appIdx = html.indexOf("./app.js");
+  const appIdx = html.indexOf("../app.js");
   assert.ok(controlIdx >= 0, "index.html must reference shared/fellow-runtime-control.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(controlIdx < appIdx, "fellow runtime control must be loaded before app.js");
 });
 
-test("src/web/index.html loads desktop markdown helper before app.js", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html loads desktop markdown helper before app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const markdownIdx = html.indexOf("helpers/markdown-helpers.js");
-  const appIdx = html.indexOf("./app.js");
+  const appIdx = html.indexOf("../app.js");
   assert.ok(markdownIdx >= 0, "index.html must reference the shared desktop markdown helper");
   assert.ok(appIdx >= 0, "index.html must load app.js");
   assert.ok(markdownIdx < appIdx, "markdown helper must be loaded before app.js so web bubbles can render rich text");
 });
 
-test("src/web/index.html omits redundant status labels from the chat chrome", () => {
-  const html = fs.readFileSync(path.join(ROOT, "src/web/index.html"), "utf8");
+test("src/web/app/index.html omits redundant status labels from the chat chrome", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.doesNotMatch(html, /id="statusText"/);
   assert.doesNotMatch(html, /id="modelSwitchStatus"/);

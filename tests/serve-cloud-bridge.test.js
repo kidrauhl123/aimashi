@@ -348,7 +348,12 @@ test("cloud can serve bundled web assets without exposing path traversal", async
     const index = await rawFetch(baseUrl, "/");
     assert.equal(index.status, 200);
     assert.match(index.headers.get("content-type") || "", /text\/html/);
-    assert.match(await index.text(), /<title>Mia Web<\/title>/);
+    assert.match(await index.text(), /<title>Mia Agent Workspace<\/title>/);
+
+    const appShell = await rawFetch(baseUrl, "/app/");
+    assert.equal(appShell.status, 200);
+    assert.match(appShell.headers.get("content-type") || "", /text\/html/);
+    assert.match(await appShell.text(), /<title>Mia Web<\/title>/);
 
     const app = await rawFetch(baseUrl, "/app.js");
     assert.equal(app.status, 200);

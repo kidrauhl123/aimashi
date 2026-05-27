@@ -42,12 +42,16 @@ async function stopWebServer(proc) {
   }
 }
 
-test("web dev server serves shared source modules used by index.html", async () => {
+test("web dev server serves shared source modules used by the /app shell", async () => {
   const { proc, baseUrl } = await startWebServer();
   try {
     const index = await fetch(`${baseUrl}/`);
     assert.equal(index.status, 200);
-    assert.match(await index.text(), /shared\/engine-contracts\.js/);
+    assert.match(await index.text(), /landing\.css/);
+
+    const app = await fetch(`${baseUrl}/app/`);
+    assert.equal(app.status, 200);
+    assert.match(await app.text(), /\.\.\/shared\/engine-contracts\.js/);
 
     const engine = await fetch(`${baseUrl}/shared/engine-contracts.js`);
     assert.equal(engine.status, 200);

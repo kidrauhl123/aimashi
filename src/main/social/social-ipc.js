@@ -1,5 +1,6 @@
 const { IpcChannel } = require("../../shared/ipc-channels");
 const { CloudEvent } = require("../../shared/cloud-events.js");
+const { SenderKind } = require("../../shared/conversation-kinds.js");
 
 function safeCall(fn) {
   return async (_event, ...args) => {
@@ -14,7 +15,7 @@ function safeCall(fn) {
 
 function dispatchPostedRoomMessage({ roomId, result, fellowRuntimeDispatcher, log = () => {} }) {
   const message = result?.message || result?.data?.message || null;
-  if (!roomId || !message?.id || message.sender_kind !== "user") return;
+  if (!roomId || !message?.id || message.sender_kind !== SenderKind.User) return;
   const promise = fellowRuntimeDispatcher?.handleCloudEvent?.({
     type: CloudEvent.RoomMessageAppended,
     roomId,

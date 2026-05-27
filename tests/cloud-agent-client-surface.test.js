@@ -18,7 +18,7 @@ test("desktop forwards cloud agent run events over the existing CloudEvent IPC",
 
 test("web cloud room rendering surfaces cloud agent streams and attachments", () => {
   const source = read("src/web/app.js");
-  const html = read("src/web/index.html");
+  const html = read("src/web/app/index.html");
   const release = read("scripts/build-cloud-release.js");
   assert.match(source, /cloud_agent_run_started/);
   assert.match(source, /cloud_agent_run_event/);
