@@ -724,11 +724,20 @@ async function bootstrap() {
     await ensureConversationMessages(state.activeConversationId);
     await ensureConversationMembers(state.activeConversationId);
   }
-  // Prefetch members for every group conversation so the sidebar mosaic shows real
-  // avatars on first paint instead of empty tiles.
+  // Prefetch members for every group conversation so the sidebar mosaic
+  // shows real avatars on first paint, and for cross-owner fellow chats
+  // so fellowAvatarFor can resolve the fellow's enriched avatar instead
+  // of falling back to the blank single-letter bubble.
   await Promise.all(
     state.conversations
-      .filter((r) => r.type === "group" || (!r.id?.startsWith("dm:") && !r.id?.startsWith("fellow:") && (r.id?.startsWith("g_") || r.id?.startsWith("g-"))))
+      .filter((r) => {
+        const isGroup = r.type === "group" || (!r.id?.startsWith("dm:") && !r.id?.startsWith("fellow:") && (r.id?.startsWith("g_") || r.id?.startsWith("g-")));
+        if (isGroup) return true;
+        const isFellow = r.type === "fellow" || r.id?.startsWith("fellow:");
+        if (!isFellow) return false;
+        const fellowKey = r.decorations?.fellowKey || (r.id?.split(":")[2] || "");
+        return !state.fellows.some((f) => String(f.id || f.key || "") === fellowKey);
+      })
       .map((r) => ensureConversationMembers(r.id))
   );
   renderConversationList();
@@ -1092,6 +1101,37 @@ function fellowKeyForConversation(conversation) {
 function fellowByKey(key) {
   const wanted = String(key || "");
   return state.fellows.find((fellow) => String(fellow.id || fellow.key || "") === wanted) || null;
+}
+
+// Avatar-only fellow lookup. state.fellows only carries fellows owned by the
+// current user, so any conversation involving someone else's fellow (e.g. a
+// group with a friend's AI, or a cross-owner fellow:<other>:<id> chat) used
+// to fall through to the blank single-letter bubble. The cloud already
+// enriches member rows with fellow_avatar_image / fellow_avatar_crop /
+// fellow_color (see social-store.js listConversationMembers), so prefer the
+// owned fellow when present, otherwise synthesize from the conversation's
+// member row.
+function fellowAvatarFor(conversation, fellowKey) {
+  const wanted = String(fellowKey || "");
+  if (!wanted) return null;
+  const owned = state.fellows.find((f) => String(f.id || f.key || "") === wanted);
+  if (owned) {
+    return {
+      avatarImage: owned.avatarImage || "",
+      avatarCrop: owned.avatarCrop || null,
+      color: owned.color || ""
+    };
+  }
+  const members = state.conversationMembersCache.get(conversation?.id) || [];
+  const member = members.find((m) => m.member_kind === "fellow" && m.member_ref === wanted);
+  if (member) {
+    return {
+      avatarImage: member.fellow_avatar_image || "",
+      avatarCrop: member.fellow_avatar_crop || null,
+      color: member.fellow_color || ""
+    };
+  }
+  return null;
 }
 
 function runtimeKindForFellowConversation(conversation, fellow) {
@@ -1517,11 +1557,11 @@ function combinedConversationItems() {
       }
     } else if (isFellow) {
       const fellowKey = r.decorations?.fellowKey || (r.id?.split(":")[2] || "");
-      const fellow = state.fellows?.find((f) => f.id === fellowKey);
-      if (fellow) {
-        avatar = fellow.avatarImage || "";
-        avatarCrop = fellow.avatarCrop || null;
-        color = fellow.color || "";
+      const fa = fellowAvatarFor(r, fellowKey);
+      if (fa) {
+        avatar = fa.avatarImage;
+        avatarCrop = fa.avatarCrop;
+        color = fa.color;
       }
     }
     return {
@@ -1936,10 +1976,10 @@ function renderActiveChat() {
       peerCrop = friend?.avatarCrop || null;
       peerColor = friend?.avatarColor || "";
     } else if (isFellow) {
-      const fellow = fellowByKey(fellowKeyForConversation(conversation));
-      peerAvatar = fellow?.avatarImage || "";
-      peerCrop = fellow?.avatarCrop || null;
-      peerColor = fellow?.color || "";
+      const fa = fellowAvatarFor(conversation, fellowKeyForConversation(conversation));
+      peerAvatar = fa?.avatarImage || "";
+      peerCrop = fa?.avatarCrop || null;
+      peerColor = fa?.color || "";
     }
     applyAvatarMedia(
       els.activeAvatar,

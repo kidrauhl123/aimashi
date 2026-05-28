@@ -58,11 +58,20 @@
         continue;
       }
       if (kind === "fellow") {
+        // Resolution priority mirrors cloud-conversation-source.js for
+        // message authors: own fellow registry first (we hold the freshest
+        // copy of fellows we own), then the server-enriched fields on the
+        // member row (covers cross-owner fellows uniformly — the server
+        // joins fellow definitions into listConversationMembers), then
+        // the asset fallback. Without the member-row branch, group tiles
+        // showed blank squares for any fellow the viewer didn't own.
         const fellow = (fellows || []).find((f) => (f.id || f.key) === ref);
         out.push({
-          image: fellow?.avatarImage || (typeof avatarAssetForKey === "function" ? avatarAssetForKey(ref) : ""),
-          crop: fellow?.avatarCrop || null,
-          color: fellow?.color || "#5e5ce6"
+          image: fellow?.avatarImage
+            || m.fellow_avatar_image
+            || (typeof avatarAssetForKey === "function" ? avatarAssetForKey(ref) : ""),
+          crop: fellow?.avatarCrop || m.fellow_avatar_crop || null,
+          color: fellow?.color || m.fellow_color || "#5e5ce6"
         });
         continue;
       }

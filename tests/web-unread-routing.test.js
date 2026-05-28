@@ -458,6 +458,40 @@ test("src/web/app.js skips unread bump when readMark already covers the replayed
   );
 });
 
+test("src/web/app.js resolves fellow avatars via conversationMembersCache when the fellow isn't owned", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(
+    source,
+    /function fellowAvatarFor\(/,
+    "web/app.js must expose a fellowAvatarFor helper so cross-owner fellow avatars don't fall back to single-letter bubbles"
+  );
+  // Conversation list path must use the new helper.
+  assert.match(
+    source,
+    /fellowAvatarFor\(r,\s*fellowKey\)/,
+    "conversation list must route fellow avatar lookup through fellowAvatarFor"
+  );
+  // Active chat header path must use the new helper.
+  assert.match(
+    source,
+    /fellowAvatarFor\(conversation,\s*fellowKeyForConversation\(conversation\)\)/,
+    "active chat header must route fellow avatar lookup through fellowAvatarFor"
+  );
+  // The helper must consult conversationMembersCache for enriched fellow_avatar_image.
+  const helperMatch = source.match(/function fellowAvatarFor\(conversation, fellowKey\)\s*\{[\s\S]*?\n\}\n/);
+  assert.ok(helperMatch, "fellowAvatarFor body must be defined");
+  assert.match(
+    helperMatch[0],
+    /state\.conversationMembersCache/,
+    "fellowAvatarFor must consult conversationMembersCache for cross-owner fellows"
+  );
+  assert.match(
+    helperMatch[0],
+    /fellow_avatar_image/,
+    "fellowAvatarFor must read the server-enriched fellow_avatar_image field"
+  );
+});
+
 test("src/web/app.js persists conversation readMarks as message seq, not timestamps", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.equal(
