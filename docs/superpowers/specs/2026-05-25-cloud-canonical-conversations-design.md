@@ -130,7 +130,7 @@ room_members:
 
 Fellow room 的标题和头像从 cloud fellow identity 或本地 fellow manifest 解析；如果解析不到，显示 room name 和默认头像。
 
-`mia.social.snapshot.v1` 仍可作为启动渲染缓存，但它只是 cloud rooms 的缓存。bootstrap 完成后必须被 cloud 结果覆盖，不能把已删除的本地 Fellow/session 再注入 conversation list。
+不要再使用 `mia.social.snapshot.v1` 作为 social 启动缓存。登录态首屏可以先从本地 SQLite social bootstrap cache 渲染 conversation list 和最近消息，然后用 cloud rooms 与消息增量回填覆盖修补。
 
 ## 5. 关键模块影响
 

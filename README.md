@@ -1,87 +1,167 @@
 # Mia
 
-Mia 是一个面向 Agent 时代的聊天和协作客户端：用户在同一个界面里管理多个 AI Fellow，选择本地 Agent 引擎，和真人好友私聊或拉群，并让自己的 Fellow 在群聊里参与协作。
+Mia 是一个 Electron 桌面端为主的 AI Fellow 工作台。它把本机 Agent 引擎、云端聊天房间、好友/群聊、权限确认、技能、桌宠和 Web 入口放到一套 GUI 里。
 
-简单说：**对话是入口，Agent 是肉，GUI 是壳**。
+当前项目不是单一桌面 demo，而是几条链路一起工作：
 
-## 当前形态
+- 桌面端：Electron 主进程、preload、renderer GUI、本机运行时、IPC、任务调度、桌宠窗口。
+- 本机 Agent：随包 Hermes runtime，以及用户机器上已经安装并登录的 Claude Code / Codex CLI。
+- Cloud：账号、好友、DM、群房间、消息同步、文件上传、WebSocket 事件、桌面 bridge、云端 Hermes worker。
+- Web：宣传页、Web 聊天壳、模型 admin 页面。
+- Mobile / Relay：保留的移动端和 relay 远控链路，不是当前主开发路径。
 
-Mia 现在不是单纯的桌面 demo，而是由几条链路组成：
+## 快速开始
 
-- **桌面端**：Electron 应用，负责本地聊天 UI、Fellow 管理、本地 Agent 调用、群聊协调、桌宠窗口和本地 bridge。
-- **本地引擎**：Hermes runtime 随桌面包构建；Claude Code / Codex 复用用户本机已安装并登录的 CLI。
-- **Cloud API**：提供账号、好友、DM、群房间、消息同步、WebSocket 事件和桌面 bridge 入口。
-- **Web 端**：浏览器页面可注册、登录、加好友、收发 DM、进入群聊并 @ 在线桌面端拥有的 Fellow。
-- **移动端页面**：保留在 `src/mobile/`，不是当前主开发路径。
-
-## 核心功能
-
-### Fellow 与本地 Agent
-
-- 每个 Fellow 有独立名字、头像、人设、颜色、置顶状态和引擎选择。
-- 支持的本地引擎：
-  - `hermes`
-  - `claude-code`
-  - `codex`
-- Hermes 模式通过 `X-Mia-Fellow` 等上下文注入 Fellow 人设。
-- Claude Code / Codex 模式通过本地 SDK 调用，在新会话或 stateless 调用前注入 Fellow 人设。
-- 外部 CLI 不随安装包分发；Mia 只从用户系统 `PATH` 探测和复用它们。
-
-### 私聊、好友和群聊
-
-- 用户通过 username 加好友，不再使用邀请码路径。
-- 好友接受后由 cloud 创建 DM 房间，消息用 cloud 权威 `seq` 同步。
-- 桌面端侧边栏混排 Fellow、真人 DM、群房间。
-- 桌面端可以创建群聊，把真人好友和自己的 Fellow 加进同一个房间。
-- 群聊支持两种 AI 回复模式：
-  - **协调者模式**：没有明确 @ 时，也让本地 conductor 判断哪些 Fellow 应该回应。
-  - **仅 @ 模式**：只有显式 @ 到 Fellow 时才触发回应。
-- 跨用户群聊里，别人 @ 你的 Fellow 时，cloud 会把调用事件推给你的在线桌面端，由你的本地引擎执行后再回写群消息。
-
-### Web / Cloud
-
-- Web 端位于 `src/web/`，生产入口目前是 `https://aiweb.buytb01.com`。
-- Cloud API 位于 `src/cloud/`，使用 SQLite 存账号、好友、房间、成员和消息。
-- 桌面 bridge 通过 WebSocket 登录同一个 cloud 账号，供 cloud 路由远程 Agent 调用。
-- WebSocket token 走 `Sec-WebSocket-Protocol`，避免把 bearer token 放进 URL。
-
-### 桌宠
-
-- 每个 Fellow 可以生成和播放桌宠。
-- 播放窗口由 Electron 透明窗口实现，读取 `pet.json` 和 spritesheet。
-- 生成器资源在 `resources/pet-generator/`。
-- 生成结果默认写入 Mia 的应用数据目录，也兼容读取旧的 Alkaka/Codex pet 目录。
-
-## 本地运行
+安装依赖：
 
 ```bash
 npm install
+```
+
+启动桌面端：
+
+```bash
 npm start
 ```
 
-常用命令：
+常用脚本：
 
 ```bash
-npm test              # 全量 Node 测试
-npm run check         # 基础结构和语法检查
-npm run open          # 打开 Electron 桌面端
-npm run web           # 本地 Web 预览
-npm run cloud         # 本地 Cloud API
-npm run bridge        # 本地 agent bridge
-npm run relay         # relay server
+npm test                         # Node test 全量测试
+npm run check                    # 结构、语法和关键 contract 自检
+npm run open                     # 等同于 Electron 打开桌面端
+npm run web                      # 本地 Web 静态服务，默认 127.0.0.1:4174
+npm run cloud                    # 本地 Cloud API，默认 127.0.0.1:4175
+npm run bridge                   # 本地 agent bridge，连接 Cloud 后执行远程 run
+npm run relay                    # relay server
+npm run desktop:permission-smoke # 桌面权限弹窗 smoke
 ```
 
-Cloud 相关测试和部署脚本依赖较新的 Node.js，生产侧要求 Node.js 25+，因为当前 cloud store 使用 `node:sqlite`。
+Cloud / SQLite 相关路径使用 `node:sqlite`，需要支持该模块的 Node 版本。生产和发布脚本按当前项目约束使用 Node 25+。
 
-## 运行时和数据目录
+## 主要目录
 
-桌面端的用户数据在 macOS 下默认位于：
+```text
+src/
+  main.js                  Electron 主进程装配入口
+  main/                    主进程服务、IPC、引擎适配、权限、cloud/relay/daemon 客户端
+  preload.js               renderer 可访问能力的窄桥
+  renderer/                桌面 GUI
+  shared/                  main / preload / renderer / web / tests 共用 contract
+  cloud/                   Cloud API 的 SQLite store、社交、消息、技能市场、用户设置
+  cloud-agent/             云端 Hermes worker、run store、runtime binding、附件落盘
+  web/                     线上宣传页和 Web app shell
+  mobile/                  移动端页面
+  relay/                   relay server
+resources/
+  conductor/               conductor 默认 prompt
+  pet-generator/           桌宠生成资源
+scripts/                   本地服务、cloud 发布、runtime 构建、诊断和 smoke 脚本
+skills/                    Mia 内置 skill
+tests/                     node:test 测试
+vendor/
+  hermes-runtime/          随包 Hermes runtime 构建产物
+```
+
+## 桌面端架构
+
+`src/main.js` 仍是装配入口，但大量职责已经拆到 `src/main/`：
+
+- Agent 引擎适配：`hermes-chat-adapter.js`、`claude-code-chat-adapter.js`、`codex-chat-adapter.js`、`chat-engine-registry.js`。
+- 会话与消息：`chat-session-service.js`、`chat-store.js`、`chat-response.js`、`chat-events.js`。
+- 权限与外部执行：`agent-permission-coordinator.js`、`external-agent-command-service.js`、`codex-app-server-runner.js`。
+- 运行时管理：`runtime-paths.js`、`runtime-initializer-service.js`、`runtime-lifecycle-service.js`、`engine-*` 服务。
+- Fellow 与社交：`fellow-*`、`social/*`、`cloud/*`。
+- 调度与任务：`scheduler*.js`、`tasks-*.js`、`daemon/*`。
+
+Renderer 入口是 `src/renderer/app.js`，UI 子功能继续拆在：
+
+- `renderer/chat/`
+- `renderer/fellow/`
+- `renderer/social/`
+- `renderer/settings/`
+- `renderer/tasks/`
+- `renderer/message-sources/`
+- `renderer/styles/*.css`
+
+Renderer 不直接使用 Node/Electron 能力，需要系统能力时通过 `preload.js` 暴露的 API 和 `src/shared/ipc-channels.js` 里的 channel 走 IPC。
+
+## Agent 引擎边界
+
+Mia 当前支持三类 Fellow 引擎：
+
+- `hermes`：Mia 随包的 Hermes runtime。构建脚本是 `scripts/build-hermes-runtime.sh`，产物在 `vendor/hermes-runtime/<target>/`。
+- `claude-code`：用户本机 Claude Code CLI。Mia 通过 SDK/本机命令适配，不把 CLI 打进安装包。
+- `codex`：用户本机 Codex CLI / Codex SDK。权限、会话和 Codex App Server 路径由本机环境决定。
+
+硬边界：
+
+- 不要把 Claude Code / Codex 二进制加入 Electron `extraResources`。
+- Hermes 是随包 runtime；Claude Code / Codex 是用户环境里的外部工具。
+- Fellow 的名字、头像、人设、技能、权限模式和引擎配置属于 Mia 的产品层，不属于某个单独 CLI。
+
+## Cloud 和 Web
+
+Cloud 服务入口是 `scripts/serve-cloud.js`。它组合：
+
+- `src/cloud/sqlite-store.js`
+- `src/cloud/social-store.js`
+- `src/cloud/messages-store.js`
+- `src/cloud/fellows-store.js`
+- `src/cloud/skills-store.js`
+- `src/cloud/user-settings-store.js`
+- `src/cloud-agent/*`
+
+本地默认：
+
+```text
+MIA_CLOUD_HOST=127.0.0.1
+MIA_CLOUD_PORT=4175
+MIA_CLOUD_DATA=.mia-cloud
+```
+
+Web 服务入口是 `scripts/serve-web.js`，默认读取 `src/web/`，并把 `/api/*` 代理到本地 Cloud：
+
+```text
+MIA_WEB_PORT=4174
+MIA_WEB_API_TARGET=http://127.0.0.1:4175
+```
+
+线上生产入口当前是：
+
+```text
+https://aiweb.buytb01.com
+```
+
+WebSocket 鉴权优先走 `Sec-WebSocket-Protocol` 中的 `mia-token.<token>`，避免把 bearer token 放进 URL。测试环境可以通过 `MIA_CLOUD_ALLOW_QUERY_TOKEN=1` 放开 query token。
+
+## 本地 bridge
+
+`scripts/local-agent-bridge.js` 连接 Cloud 的 `/api/bridge` WebSocket，把云端发来的 run 路由到本机执行。常用环境变量：
+
+```text
+MIA_CLOUD_URL=http://127.0.0.1:4175
+MIA_CLOUD_TOKEN=<token>
+MIA_CLOUD_USERNAME=<username>
+MIA_CLOUD_PASSWORD=<password>
+MIA_BRIDGE_ENGINE=codex
+MIA_BRIDGE_NAME=<device-name>
+MIA_BRIDGE_CWD=<working-directory>
+```
+
+如果没有 `MIA_CLOUD_TOKEN`，bridge 会尝试用 username/password 登录 Cloud。附件会落到临时目录，生成图片会从 Codex 生成目录回收并回传到 Cloud。
+
+## 用户数据和运行时目录
+
+桌面端默认用户数据目录：
 
 ```text
 ~/Library/Application Support/Mia/
 ```
 
-关键子目录：
+测试或自动化应使用 `MIA_USER_DATA_DIR` 指向临时目录，避免写真实用户数据。
+
+典型运行时结构：
 
 ```text
 runtime/
@@ -100,25 +180,25 @@ runtime/
     logs/
 ```
 
-Hermes runtime 本体不是在首次启动时现场下载，而是在打包前构建到：
-
-```text
-vendor/hermes-runtime/<target>/
-```
-
-打包时会把对应平台的 runtime 放进安装包资源。改动 Hermes runtime 构建逻辑前先看 `scripts/build-hermes-runtime.sh`。
-
 ## 打包和发布
 
-桌面端当前优先支持 macOS unsigned 包：
+构建 Hermes runtime：
+
+```bash
+npm run hermes:runtime
+npm run hermes:runtime:mac-arm64
+npm run hermes:runtime:mac-x64
+npm run hermes:runtime:linux-x64
+npm run hermes:runtime:win-x64
+```
+
+构建 macOS unsigned 包：
 
 ```bash
 npm run dist:mac
 ```
 
-这会先构建 `vendor/hermes-runtime/mac-arm64`，再走 Electron Builder，并生成 macOS app/DMG 相关产物。当前还没有接入正式签名、公证和自动更新。
-
-Cloud 发布脚本在 `scripts/`，常用入口：
+Cloud release：
 
 ```bash
 npm run cloud:release
@@ -127,45 +207,51 @@ npm run cloud:deploy
 npm run cloud:prod:verify -- https://aiweb.buytb01.com
 ```
 
-更完整的生产部署说明见 `docs/cloud-deployment.md`。
-
-## 项目结构
+Cloud 发布包会生成到：
 
 ```text
-src/
-  main.js                     Electron 主进程装配入口
-  main/                       主进程 feature 模块、IPC、引擎适配、群成员模型、任务调度
-  renderer/                   桌面端渲染层
-    app.js                    渲染层装配入口
-    group/                    本地群聊 UI 和 AI 回复模式
-    social/                   cloud 好友、DM、群房间 UI
-    styles/                   按界面职责拆分的 CSS
-  cloud/                      Cloud API、SQLite store、消息和社交模型
-  relay/                      relay server
-  mobile/                     移动端页面
-  web/                        浏览器端页面
-  shared/                     main / preload / renderer / tests 共用 contract
-resources/
-  pet-generator/              桌宠生成器资源
-skills/                       Mia 附带 skills
-scripts/                      runtime 构建、cloud 发布、诊断和 smoke 脚本
-tests/                        Node test 测试
-vendor/
-  hermes-runtime/             随包 Hermes runtime
+dist/mia-cloud-release/
+dist/mia-cloud-release.tgz
+dist/mia-cloud-release.tgz.sha256
 ```
 
-## 重要边界
+生产部署说明见 `docs/cloud-deployment.md`。部署脚本会安装 API、Web 静态文件、systemd、nginx、Cloud Hermes worker 和 LiteLLM 相关配置。
 
-- Hermes 是 Mia 随包的开源 runtime 副本；Claude Code / Codex 是用户机器上的外部 CLI，不能打进安装包。
-- renderer 不直接使用 Node/Electron 能力，需要系统能力时走 preload 暴露的窄接口。
-- main、renderer、cloud、web、mobile 的状态边界要清楚；同一类会话状态只应有一个权威 owner。
-- 新功能优先放进按领域命名的模块，不要继续扩大 `src/main.js`、`src/renderer/app.js`、`src/renderer/styles.css` 这类历史大文件。
+## 测试策略
 
-## 已知限制
+项目主要使用 `node:test`。高频验证：
 
-- Cloud 侧还没有真正的 server-side Fellow registry；群成员里的 Fellow 仍主要由 owner 桌面端声明。
-- Web 端不能自己运行本地 Fellow；跨用户 Fellow 回复要求 owner 的桌面端在线。
-- DM/群消息的未读、分页、typing、已读回执等体验还不完整。
-- 云端群聊目前主要靠显式 @ 触发远端 Fellow；本地群聊已有 conductor 模式，完整 cloud conductor 化仍是后续工作。
-- 桌宠生成仍依赖用户本机可用的 Codex image generation 能力和相关运行环境。
-- macOS 签名、公证、自动更新还未接入。
+```bash
+npm test
+npm run check
+```
+
+局部开发时可以直接跑相关测试：
+
+```bash
+node --test tests/chat-session-service.test.js
+node --test tests/serve-cloud-bridge.test.js
+node --test tests/web-landing.test.js
+```
+
+`npm run check` 会检查关键文件存在、JS 语法、shell 脚本语法、权限模式、引擎 registry、runtime path、Cloud 服务边界等结构性约束。
+
+## 开发规则
+
+- 新代码优先放进按领域命名的模块，不继续扩大 `src/main.js`、`src/renderer/app.js`、`src/renderer/styles.css`。
+- 跨进程字符串、engine id、permission mode、cloud event type 等 contract 必须集中到 `src/shared/` 或所属 feature 的常量模块。
+- Renderer 不直接访问 Node/Electron。
+- Main 不写 DOM。
+- Cloud、Web、Mobile、Desktop 的状态 owner 要清楚，同一类会话状态只能有一个权威来源。
+- 持久化 schema 改动必须兼容已有数据，并可重复运行。
+- Secret 不写入仓库，不进 README 示例，不打印到日志。
+- 高频 stream、heartbeat、polling 不打 info 日志。
+
+## 当前限制
+
+- `src/main.js`、`src/renderer/app.js`、`src/renderer/styles.css` 仍偏大，后续改动应继续拆分。
+- Web 端不能直接运行用户本机 Fellow；远程 Fellow 调用需要 owner 桌面端在线，或云端 Hermes worker 可用。
+- Cloud agent 和桌面 agent 的能力边界仍在演进，特别是权限、附件、生成图片、取消和流式进度。
+- 桌宠生成依赖本机可用的图像生成能力和对应运行环境。
+- macOS 签名、公证和自动更新还不是完整生产链路。
+- Mobile / Relay 目录仍保留，但不是当前主要产品面。
