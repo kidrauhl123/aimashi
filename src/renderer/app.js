@@ -319,7 +319,26 @@ function isActiveRunRunning() {
 }
 window.miaIsActiveRunRunning = isActiveRunRunning;
 
-const TYPING_DOTS_HTML = `<span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span>`;
+function typingDotsHtml(label) {
+  const prefix = label ? `${label} ` : "";
+  const escape = window.miaMarkdown?.escapeHtml || ((s) => String(s ?? ""));
+  return `<span class="typing-status">${escape(prefix)}正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span>`;
+}
+
+function typingLabelForActiveRun(social, conversation) {
+  const run = social?.activeConversationRun?.();
+  const fellowId = run?.fellowId || "";
+  if (!fellowId) return "";
+  // Only group conversations need to identify the speaker — DM / fellow chats
+  // already have the fellow's name in the header itself.
+  if (conversation?.type !== "group") return "";
+  const personas = state.runtime?.fellows || state.runtime?.personas || [];
+  const owned = personas.find((p) => (p.key || p.id) === fellowId);
+  if (owned?.name) return owned.name;
+  const members = social?.getConversationMembers?.(conversation.id) || [];
+  const member = members.find((m) => m.member_kind === MemberKind.Fellow && m.member_ref === fellowId);
+  return member?.fellow_name || fellowId;
+}
 
 // Reconcile #activeChatMeta with the active cloud-agent run state. While the
 // run is running we show typing dots; otherwise we restore the base meta
@@ -327,14 +346,13 @@ const TYPING_DOTS_HTML = `<span class="typing-status">正在输入<span class="t
 // (no message_appended to trigger a full render) doesn't leave stale dots.
 function paintHeaderStatus() {
   if (!els.activeChatMeta) return;
-  if (isActiveRunRunning()) {
-    els.activeChatMeta.innerHTML = TYPING_DOTS_HTML;
-    return;
-  }
   const social = window.miaSocial;
   const conversationId = social?.getActiveConversationId?.();
-  if (!conversationId) return;
-  const conversation = social?.getConversationById?.(conversationId);
+  const conversation = conversationId ? social?.getConversationById?.(conversationId) : null;
+  if (isActiveRunRunning()) {
+    els.activeChatMeta.innerHTML = typingDotsHtml(typingLabelForActiveRun(social, conversation));
+    return;
+  }
   if (!conversation) return;
   const personas = state.runtime?.fellows || state.runtime?.personas || [];
   paintActiveCloudConversationHeader(conversation, { personas, social });
