@@ -159,6 +159,59 @@ test("scripts/build-cloud-release.js copies shared/unread.js into the web tree",
   );
 });
 
+test("scripts/build-cloud-release.js copies shared/avatar-resolve.js into the web tree", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/avatar-resolve\.js["'][^)]+["']shared["'][^)]+["']avatar-resolve\.js["']\)/,
+    "build-cloud-release must copy src/shared/avatar-resolve.js to web/shared/avatar-resolve.js"
+  );
+});
+
+test("src/web/app/index.html loads shared/avatar-resolve.js before contact.js and app.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
+  const resolveIdx = html.indexOf("shared/avatar-resolve.js");
+  const contactIdx = html.indexOf("shared/contact.js");
+  const appIdx = html.indexOf("../app.js");
+  assert.ok(resolveIdx >= 0, "index.html must reference shared/avatar-resolve.js");
+  assert.ok(contactIdx >= 0, "index.html must reference shared/contact.js");
+  assert.ok(appIdx >= 0, "index.html must load app.js");
+  assert.ok(
+    resolveIdx < contactIdx,
+    "shared/avatar-resolve.js must load before shared/contact.js so the identity-hash fallback is available when resolveContact runs"
+  );
+  assert.ok(
+    resolveIdx < appIdx,
+    "shared/avatar-resolve.js must load before app.js so window.miaAvatarResolve is defined when app.js evaluates"
+  );
+});
+
+test("src/web/app.js stopped maintaining its own copy of the avatar preset table", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.doesNotMatch(
+    source,
+    /const AVATAR_PRESETS\s*=\s*\{/,
+    "web/app.js must not declare its own AVATAR_PRESETS object — drift between renderer and web is exactly what we just consolidated"
+  );
+  assert.doesNotMatch(
+    source,
+    /const WEB_AVATAR_PRESET_GROUPS\s*=\s*\{[\s\S]*?human:\s*\[[\s\S]{200,}/,
+    "web/app.js must not define its own preset list — pull from window.miaAvatarResolve instead"
+  );
+});
+
+test("src/renderer/index.html loads shared/avatar-resolve.js before helpers/avatar-helpers.js", () => {
+  const html = fs.readFileSync(path.join(ROOT, "src/renderer/index.html"), "utf8");
+  const resolveIdx = html.indexOf("shared/avatar-resolve.js");
+  const helpersIdx = html.indexOf("helpers/avatar-helpers.js");
+  assert.ok(resolveIdx >= 0, "renderer must reference shared/avatar-resolve.js");
+  assert.ok(helpersIdx >= 0, "renderer must reference helpers/avatar-helpers.js");
+  assert.ok(
+    resolveIdx < helpersIdx,
+    "shared/avatar-resolve.js must load before helpers/avatar-helpers.js so the renderer's preset aliases resolve at module-eval time"
+  );
+});
+
 test("scripts/build-cloud-release.js copies shared/engine-contracts.js into the web tree", () => {
   const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
   assert.match(

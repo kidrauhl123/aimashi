@@ -32,99 +32,39 @@
     return (name || "?").trim().slice(0, 2).toUpperCase();
   }
 
-  function avatarAssetForKey(key = "") {
-    let hash = 0;
-    for (const char of String(key || "mia")) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-    const index = (hash % 16) + 1;
-    return `./assets/avatars/${String(index).padStart(2, "0")}.png`;
+  // Presets, identity hash, and crop math now live in shared/avatar-resolve.js
+  // so web and renderer stay aligned. Local aliases preserve the existing
+  // call-site names without forcing every caller to spell out the namespace.
+  function avatarResolve() {
+    if (typeof window !== "undefined" && window.miaAvatarResolve) return window.miaAvatarResolve;
+    throw new Error("avatar-helpers: shared/avatar-resolve.js must load before this module");
   }
 
-  const AVATAR_MIN_ZOOM = 1;
-  const DEFAULT_AVATAR_CROP = { x: 50, y: 50, zoom: 1 };
-  const DEFAULT_PRESET_AVATAR_CROP = { x: 50, y: 13.5, zoom: 1.72 };
+  const AVATAR_MIN_ZOOM = avatarResolve().AVATAR_MIN_ZOOM;
+  const DEFAULT_AVATAR_CROP = avatarResolve().DEFAULT_AVATAR_CROP;
+  const DEFAULT_PRESET_AVATAR_CROP = avatarResolve().DEFAULT_PRESET_AVATAR_CROP;
+  const avatarPresetGroupTabs = avatarResolve().avatarPresetGroupTabs;
+  const avatarPresetGroups = avatarResolve().avatarPresetGroups;
+  const avatarPresets = avatarResolve().avatarPresets;
 
-  const avatarPresetGroupTabs = [
-    { key: "human", label: "人形" },
-    { key: "pet", label: "宠物" }
-  ];
+  const avatarAssetForKey = avatarResolve().avatarAssetForKey;
+  const defaultAvatarAssets = avatarResolve().defaultAvatarAssets;
+  const canonicalAvatarSrc = avatarResolve().canonicalAvatarSrc;
+  const avatarPresetBySrc = avatarResolve().avatarPresetBySrc;
+  const avatarPresetGroupForSrc = avatarResolve().avatarPresetGroupForSrc;
+  const avatarThumbForSrc = avatarResolve().avatarThumbForSrc;
+  const isNeutralAvatarCrop = avatarResolve().isNeutralAvatarCrop;
+  const avatarCropForImage = avatarResolve().avatarCropForImage;
 
-  const avatarPresetGroups = {
-    human: [
-      { name: "青羽", src: "./assets/avatars/01.png", crop: { x: 50.0687, y: 14.5495, zoom: 2.04 } },
-      { name: "桃奈", src: "./assets/avatars/02.png", crop: { x: 57.2536, y: 8.1635, zoom: 1.56 } },
-      { name: "紫音", src: "./assets/avatars/03.png", crop: { x: 50, y: 14, zoom: 1.48 } },
-      { name: "小栗", src: "./assets/avatars/04.png", crop: { x: 49.0079, y: 23.5736, zoom: 1.72 } },
-      { name: "墨川", src: "./assets/avatars/05.png", crop: { x: 47.6785, y: 11.3611, zoom: 1.88 } },
-      { name: "珊瑚", src: "./assets/avatars/06.png", crop: { x: 46.8749, y: 10.4285, zoom: 1.64 } },
-      { name: "雪璃", src: "./assets/avatars/07.png", crop: { x: 51.6741, y: 8.0209, zoom: 1.72 } },
-      { name: "赤焰", src: "./assets/avatars/08.png", crop: { x: 50.974, y: 12.8636, zoom: 1.88 } },
-      { name: "蓝汐", src: "./assets/avatars/09.png", crop: { x: 47.4999, y: 12.2142, zoom: 1.8 } },
-      { name: "棕野", src: "./assets/avatars/10.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-      { name: "夜莓", src: "./assets/avatars/11.png", crop: { x: 55.8037, y: 7.9731, zoom: 1.64 } },
-      { name: "空铃", src: "./assets/avatars/12.png", crop: { x: 47.3214, y: 16.9763, zoom: 1.8 } },
-      { name: "茉茶", src: "./assets/avatars/13.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-      { name: "星柚", src: "./assets/avatars/14.png", crop: { x: 50, y: 14, zoom: 1.72 } },
-      { name: "爱丽丝", src: "./assets/avatars/15.png", crop: { x: 45.1848, y: 5.1022, zoom: 1.56 } },
-      { name: "岚", src: "./assets/avatars/16.png", crop: { x: 51.0913, y: 15.7858, zoom: 1.72 } }
-    ],
-    pet: Array.from({ length: 16 }, (_item, index) => {
-      const id = String(index + 1).padStart(2, "0");
-      return {
-        name: `宠物 ${id}`,
-        src: `./assets/avatars-pet/${id}.png`,
-        thumb: `./assets/avatar-thumbs-pet/${id}.png`,
-        crop: { x: 50, y: 50, zoom: 1 }
-      };
-    })
-  };
-
-  const avatarPresets = Object.values(avatarPresetGroups).flat();
-
-  function defaultAvatarAssets() {
-    return avatarPresetGroups.human.map((preset) => preset.src);
-  }
-
-  function canonicalAvatarSrc(src) {
-    return String(src || "").trim().replace("./assets/avatar-icons/", "./assets/avatars/");
-  }
-
-  function avatarPresetBySrc(src) {
-    const canonical = canonicalAvatarSrc(src);
-    return avatarPresets.find((preset) => preset.src === canonical) || null;
-  }
-
-  function avatarPresetGroupForSrc(src) {
-    const canonical = canonicalAvatarSrc(src);
-    return avatarPresetGroupTabs.find(({ key }) =>
-      avatarPresetGroups[key]?.some((preset) => preset.src === canonical)
-    )?.key || "";
-  }
-
-  function avatarThumbForSrc(src) {
-    const preset = avatarPresetBySrc(src);
-    if (!preset) return "";
-    if (preset.thumb) return preset.thumb;
-    return canonicalAvatarSrc(preset.src).replace("./assets/avatars/", "./assets/avatar-thumbs/");
-  }
-
+  // Renderer-specific wrapper: shared/avatar-resolve.js doesn't branch on
+  // "is this a video?" because trim handling is platform-specific. Keep
+  // that branch local and delegate the still-image case to the shared
+  // resolver so the preset table stays single-sourced.
   function avatarDefaultCropForSrc(src) {
-    if (avatarMedia().isVideo(src)) return { ...DEFAULT_AVATAR_CROP, start: 0, duration: avatarMedia().DEFAULT_TRIM_DURATION || 3 };
-    const preset = avatarPresetBySrc(src);
-    if (!preset) return { ...DEFAULT_AVATAR_CROP };
-    return { ...DEFAULT_PRESET_AVATAR_CROP, ...(preset.crop || {}) };
-  }
-
-  function isNeutralAvatarCrop(crop) {
-    if (!crop) return true;
-    const c = normalizeCrop(crop);
-    return c.x === 50 && c.y === 50 && Math.abs(c.zoom - 1) < 0.001;
-  }
-
-  function avatarCropForImage(image, crop) {
-    if (avatarPresetBySrc(image) && isNeutralAvatarCrop(crop)) {
-      return avatarDefaultCropForSrc(image);
+    if (avatarMedia().isVideo(src)) {
+      return { ...DEFAULT_AVATAR_CROP, start: 0, duration: avatarMedia().DEFAULT_TRIM_DURATION || 3 };
     }
-    return crop || DEFAULT_AVATAR_CROP;
+    return avatarResolve().avatarDefaultCropForSrc(src);
   }
 
   function cropsClose(a = {}, b = {}) {
@@ -143,28 +83,7 @@
     return `file://${raw}`;
   }
 
-  function normalizeCrop(crop = {}) {
-    const source = crop && typeof crop === "object" ? crop : {};
-    const num = (value, fallback, min, max) => {
-      const next = Number(value);
-      if (!Number.isFinite(next)) return fallback;
-      return Math.max(min, Math.min(max, next));
-    };
-    const normalized = {
-      x: num(source.x, 50, 0, 100),
-      y: num(source.y, 50, 0, 100),
-      zoom: num(source.zoom, 1, AVATAR_MIN_ZOOM, 2.4)
-    };
-    if (
-      Object.prototype.hasOwnProperty.call(source, "start")
-      || Object.prototype.hasOwnProperty.call(source, "duration")
-      || Object.prototype.hasOwnProperty.call(source, "trimStart")
-      || Object.prototype.hasOwnProperty.call(source, "trimDuration")
-    ) {
-      Object.assign(normalized, avatarMedia().normalizeTrim(source));
-    }
-    return normalized;
-  }
+  const normalizeCrop = avatarResolve().normalizeAvatarCrop;
 
   function avatarBackgroundStyle(image, crop = {}, color = "#5e5ce6") {
     const src = avatarImageSrc(image) || image || "";

@@ -1,6 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { resolveContact, ContactKind } = require("../src/shared/contact");
+const { avatarAssetForKey } = require("../src/shared/avatar-resolve");
 
 const ctx = {
   self: { id: "user_me", username: "me", avatarImage: "data:me", avatarCrop: {x:50,y:50,zoom:1}, avatarColor: "#111" },
@@ -44,8 +45,8 @@ test("resolveContact friend by id", () => {
   assert.equal(c.avatar.image, "data:alice");
 });
 
-test("resolveContact unknown returns placeholder", () => {
+test("resolveContact unknown returns stable fallback avatar", () => {
   const c = resolveContact({ kind: "user", ref: "user_ghost" }, ctx);
   assert.equal(c.displayName, "user_ghost");
-  assert.equal(c.avatar.image, "");
+  assert.equal(c.avatar.image, avatarAssetForKey("user_ghost"));
 });

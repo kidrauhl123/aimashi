@@ -481,8 +481,9 @@ function groupTilesCtx(personas) {
   return {
     self,
     friends: social?.moduleState?.friends || [],
-    fellows: personas || [],
-    avatarAssetForKey: window.miaAvatar?.avatarAssetForKey
+    fellows: personas || []
+    // shared/avatar-resolve.js owns the "no avatarImage → preset by hash"
+    // fallback now, so consumers don't need to hand it in via ctx.
   };
 }
 

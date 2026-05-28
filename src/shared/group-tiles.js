@@ -16,63 +16,84 @@
 //     self    — { id, avatarImage, avatarCrop, avatarColor }
 //     friends — [{ id, avatarImage, avatarCrop, avatarColor }, ...]
 //     fellows — [{ id|key, avatarImage, avatarCrop, color }, ...]
-//     avatarAssetForKey(fellowId) — optional fallback for unknown fellows
 //
-// Returns: [{ image, crop, color }, ...] in member order, with nulls filtered.
+// "What if the contact has no avatarImage" is no longer the resolver's
+// concern: shared/avatar-resolve.js's resolveAvatarForContact always returns
+// a usable {image, crop, color}, picking an identity-deterministic preset
+// when there's nothing else. Callers do NOT need to pass an
+// avatarAssetForKey override anymore.
+//
+// Returns: [{ image, crop, color }, ...] in member order.
 
 (function attachGroupTiles(root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.miaGroupTiles = api;
 })(typeof window !== "undefined" ? window : globalThis, function () {
+  function avatarResolver() {
+    if (typeof window !== "undefined" && window.miaAvatarResolve) return window.miaAvatarResolve;
+    if (typeof require === "function") {
+      try { return require("./avatar-resolve.js"); } catch { /* shared module not loaded */ }
+    }
+    return null;
+  }
+
+  function resolveTile(input) {
+    const resolver = avatarResolver();
+    if (resolver && typeof resolver.resolveAvatarForContact === "function") {
+      const result = resolver.resolveAvatarForContact(input);
+      return { image: result.image, crop: result.crop, color: result.color };
+    }
+    return {
+      image: input.avatarImage || "",
+      crop: input.avatarCrop || null,
+      color: input.color || "#5e5ce6"
+    };
+  }
+
   function resolveGroupMemberTiles(members, ctx = {}) {
     if (!Array.isArray(members)) return [];
-    const { self, friends, fellows, avatarAssetForKey } = ctx;
+    const { self, friends, fellows } = ctx;
     const out = [];
     for (const m of members) {
       if (!m) continue;
       const kind = m.member_kind;
-      const ref = m.member_ref;
+      const ref = String(m.member_ref || "");
       if (kind === "user") {
-        // Self is just another user-kind member; no special "boss" position
-        // or default color. We still look up self separately because the
-        // friend list never includes the viewer.
+        // Self is just another user-kind member; no "boss" position. We
+        // still look up self separately because the friend list never
+        // includes the viewer.
         if (self && ref === self.id) {
-          out.push({
-            image: self.avatarImage || "",
-            crop: self.avatarCrop || null,
-            color: self.avatarColor || "#5e5ce6"
-          });
+          out.push(resolveTile({
+            id: self.id,
+            avatarImage: self.avatarImage,
+            avatarCrop: self.avatarCrop,
+            color: self.avatarColor
+          }));
           continue;
         }
         const friend = (friends || []).find((f) => f.id === ref);
-        if (friend) {
-          out.push({
-            image: friend.avatarImage || "",
-            crop: friend.avatarCrop || null,
-            color: friend.avatarColor || "#5e5ce6"
-          });
-          continue;
-        }
-        out.push({ image: "", crop: null, color: "#5e5ce6" });
+        out.push(resolveTile({
+          id: ref,
+          avatarImage: friend?.avatarImage,
+          avatarCrop: friend?.avatarCrop,
+          color: friend?.avatarColor
+        }));
         continue;
       }
       if (kind === "fellow") {
-        // Resolution priority mirrors cloud-conversation-source.js for
-        // message authors: own fellow registry first (we hold the freshest
+        // Resolution priority: viewer's own fellow registry first (freshest
         // copy of fellows we own), then the server-enriched fields on the
-        // member row (covers cross-owner fellows uniformly — the server
-        // joins fellow definitions into listConversationMembers), then
-        // the asset fallback. Without the member-row branch, group tiles
-        // showed blank squares for any fellow the viewer didn't own.
+        // member row (cross-owner fellows the server joined into
+        // listConversationMembers). resolveAvatarForContact handles the
+        // identity-hash fallback when neither side has an image.
         const fellow = (fellows || []).find((f) => (f.id || f.key) === ref);
-        out.push({
-          image: fellow?.avatarImage
-            || m.fellow_avatar_image
-            || (typeof avatarAssetForKey === "function" ? avatarAssetForKey(ref) : ""),
-          crop: fellow?.avatarCrop || m.fellow_avatar_crop || null,
-          color: fellow?.color || m.fellow_color || "#5e5ce6"
-        });
+        out.push(resolveTile({
+          id: ref,
+          avatarImage: fellow?.avatarImage || m.fellow_avatar_image,
+          avatarCrop: fellow?.avatarCrop || m.fellow_avatar_crop,
+          color: fellow?.color || m.fellow_color
+        }));
         continue;
       }
       // Unknown kind: skip (tile stays out of the mosaic).

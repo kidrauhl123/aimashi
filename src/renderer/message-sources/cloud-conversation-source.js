@@ -1,22 +1,34 @@
 (function (global) {
   "use strict";
 
-  function spec() { return global.miaMessageSpec || require("../../shared/message-spec"); }
-  function contact() { return global.miaContact || require("../../shared/contact"); }
-  const { MemberKind, SenderKind } = (typeof window !== "undefined" && window.miaConversationKinds) || require("../../shared/conversation-kinds");
+  function spec() {
+    if (global.miaMessageSpec) return global.miaMessageSpec;
+    if (typeof require === "function") return require("../../shared/message-spec");
+    throw new Error("cloud-conversation-source: shared/message-spec.js must load first");
+  }
+  function contact() {
+    if (global.miaContact) return global.miaContact;
+    if (typeof require === "function") return require("../../shared/contact");
+    throw new Error("cloud-conversation-source: shared/contact.js must load first");
+  }
+  function avatarResolve() {
+    if (global.miaAvatarResolve) return global.miaAvatarResolve;
+    if (typeof require === "function") return require("../../shared/avatar-resolve");
+    throw new Error("cloud-conversation-source: shared/avatar-resolve.js must load first");
+  }
+  const { MemberKind, SenderKind } = global.miaConversationKinds
+    || (typeof require === "function"
+      ? require("../../shared/conversation-kinds")
+      : { MemberKind: { Fellow: "fellow", User: "user" }, SenderKind: { Fellow: "fellow", User: "user", System: "system" } });
 
   function safeJsonArray(s) { try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; } }
 
   function createCloudConversationSource({ conversation, messages, members, ctx }) {
     const { normalizeSpec } = spec();
     const { resolveContact, ContactKind } = contact();
+    const { resolveAvatarForContact } = avatarResolve();
     const selfId = ctx.self?.id || "";
     const memberArr = Array.isArray(members) ? members : [];
-
-    function fallbackFellowAvatar(fellowId, color = "#5e5ce6") {
-      const image = typeof ctx.avatarAssetForKey === "function" ? ctx.avatarAssetForKey(fellowId) : "";
-      return { image, crop: null, color };
-    }
 
     function authorForMessage(m) {
       if (m.sender_kind === SenderKind.User) {
@@ -25,38 +37,39 @@
       }
       if (m.sender_kind === SenderKind.Fellow) {
         const member = memberArr.find((mem) => mem.member_kind === MemberKind.Fellow && mem.member_ref === m.sender_ref);
-        // Resolution priority for fellow display name + avatar:
-        //   1. local fellow registry (if I own this fellow)
-        //   2. server-enriched fellow_name / fellow_avatar_image on the
-        //      member row (covers cross-owner fellows uniformly)
-        //   3. raw sender_ref as last resort
-        // Owner attribution intentionally omitted — UX showed it as
+        // displayName priority: own fellow registry → server-enriched
+        // fellow_name on member row → conversation name (for a 1:1 fellow
+        // chat that hasn't been auto-titled) → raw sender_ref. Owner
+        // attribution intentionally omitted — UX showed it as
         // "(${ownerUsername})" before but users found it noisy ("不要括号
         // 展示其主人"). If we need owner context later it belongs in the
         // contact card, not the message label.
         const localFellow = resolveContact({ kind: ContactKind.Fellow, ref: m.sender_ref }, ctx);
-        let displayName = "";
-        let avatar = fallbackFellowAvatar(m.sender_ref);
-        if (localFellow.displayName && localFellow.displayName !== m.sender_ref) {
+        const ownedByMe = Boolean(localFellow.displayName && localFellow.displayName !== m.sender_ref);
+        let displayName;
+        if (ownedByMe) {
           displayName = localFellow.displayName;
-          avatar = localFellow.avatar?.image
-            ? localFellow.avatar
-            : fallbackFellowAvatar(m.sender_ref, localFellow.avatar?.color || avatar.color);
         } else if (member && member.fellow_name) {
           displayName = member.fellow_name;
-          if (member.fellow_avatar_image) {
-            avatar = {
-              image: member.fellow_avatar_image,
-              crop: member.fellow_avatar_crop || null,
-              color: member.fellow_color || "#5e5ce6"
-            };
-          } else {
-            avatar = fallbackFellowAvatar(m.sender_ref, member.fellow_color || avatar.color);
-          }
         } else {
-          const conversationFellowKey = conversation.decorations?.fellowKey || (String(conversation.id || "").startsWith("fellow:") ? String(conversation.id || "").split(":").slice(2).join(":") : "");
-          displayName = conversationFellowKey === m.sender_ref && conversation.name ? conversation.name : m.sender_ref;
+          const conversationFellowKey = conversation.decorations?.fellowKey
+            || (String(conversation.id || "").startsWith("fellow:")
+              ? String(conversation.id || "").split(":").slice(2).join(":")
+              : "");
+          displayName = conversationFellowKey === m.sender_ref && conversation.name
+            ? conversation.name
+            : m.sender_ref;
         }
+        // Avatar priority mirrors displayName: own fellow first, then
+        // server-enriched member row, then identity-deterministic preset
+        // from the shared resolver. The resolver always returns a usable
+        // {image, crop, color} so we never produce a blank tile.
+        const avatar = resolveAvatarForContact({
+          id: m.sender_ref,
+          avatarImage: (ownedByMe && localFellow.avatar?.image) || member?.fellow_avatar_image,
+          avatarCrop: (ownedByMe && localFellow.avatar?.crop) || member?.fellow_avatar_crop,
+          color: (ownedByMe && localFellow.avatar?.color) || member?.fellow_color
+        });
         return {
           kind: ContactKind.Fellow,
           id: m.sender_ref,

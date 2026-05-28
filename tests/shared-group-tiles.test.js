@@ -6,6 +6,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { resolveGroupMemberTiles } = require("../src/shared/group-tiles");
+const { avatarAssetForKey, avatarDefaultCropForSrc } = require("../src/shared/avatar-resolve");
 
 test("group tile prefers the owned fellow's avatar over the member-row enrichment", () => {
   const members = [
@@ -43,14 +44,12 @@ test("group tile falls back to enriched member-row fields for cross-owner fellow
   }]);
 });
 
-test("group tile falls back to avatarAssetForKey when neither ctx.fellows nor member row carries an image", () => {
+test("group tile falls back to shared stable avatar when neither ctx.fellows nor member row carries an image", () => {
   const members = [{ member_kind: "fellow", member_ref: "unknown-fellow" }];
-  const tiles = resolveGroupMemberTiles(members, {
-    fellows: [],
-    avatarAssetForKey: (id) => `/assets/preset/${id}.png`
-  });
-  assert.equal(tiles[0].image, "/assets/preset/unknown-fellow.png");
-  assert.equal(tiles[0].crop, null);
+  const tiles = resolveGroupMemberTiles(members, { fellows: [] });
+  const expectedImage = avatarAssetForKey("unknown-fellow");
+  assert.equal(tiles[0].image, expectedImage);
+  assert.deepEqual(tiles[0].crop, avatarDefaultCropForSrc(expectedImage));
   assert.equal(tiles[0].color, "#5e5ce6");
 });
 

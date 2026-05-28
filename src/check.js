@@ -87,6 +87,7 @@ const required = [
   "src/renderer/helpers/markdown-helpers.js",
   "src/renderer/helpers/format-helpers.js",
   "src/renderer/helpers/scrollbar-overlay.js",
+  "src/shared/avatar-resolve.js",
   "resources/conductor/default-prompts/dispatch.md",
   "resources/conductor/default-prompts/summarize.md",
   "resources/conductor/default-prompts/nudge.md",

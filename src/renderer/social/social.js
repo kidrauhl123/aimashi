@@ -919,8 +919,10 @@
         avatarColor: localUser.avatarColor || cloudUser.avatarColor || "#5e5ce6"
       },
       fellows,
-      friends: moduleState.friends || [],
-      avatarAssetForKey: window.miaAvatar?.avatarAssetForKey
+      friends: moduleState.friends || []
+      // The identity-deterministic preset fallback lives inside
+      // shared/avatar-resolve.js now; consumers no longer need ctx to
+      // carry avatarAssetForKey.
     };
   }
 

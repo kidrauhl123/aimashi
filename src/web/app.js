@@ -332,116 +332,37 @@ function renderAttachmentChips(attachments = []) {
   return `<div class="message-attachments">${attachments.map(renderAttachmentChip).join("")}</div>`;
 }
 
-// Avatar preset crop table — mirrors src/renderer/helpers/avatar-helpers.js
-// so web renders fellow avatars the same as desktop. Pet avatars are square
-// (default crop); human avatars have face-centered crops that need explicit
-// background-size + background-position.
-const AVATAR_PRESETS = {
-  "./assets/avatars/01.png": { x: 50.0687, y: 14.5495, zoom: 2.04 },
-  "./assets/avatars/02.png": { x: 57.2536, y: 8.1635, zoom: 1.56 },
-  "./assets/avatars/03.png": { x: 50, y: 14, zoom: 1.48 },
-  "./assets/avatars/04.png": { x: 49.0079, y: 23.5736, zoom: 1.72 },
-  "./assets/avatars/05.png": { x: 47.6785, y: 11.3611, zoom: 1.88 },
-  "./assets/avatars/06.png": { x: 46.8749, y: 10.4285, zoom: 1.64 },
-  "./assets/avatars/07.png": { x: 51.6741, y: 8.0209, zoom: 1.72 },
-  "./assets/avatars/08.png": { x: 50.974, y: 12.8636, zoom: 1.88 },
-  "./assets/avatars/09.png": { x: 47.4999, y: 12.2142, zoom: 1.8 },
-  "./assets/avatars/10.png": { x: 50, y: 14, zoom: 1.8 },
-  "./assets/avatars/11.png": { x: 55.8037, y: 7.9731, zoom: 1.64 },
-  "./assets/avatars/12.png": { x: 47.3214, y: 16.9763, zoom: 1.8 },
-  "./assets/avatars/13.png": { x: 50, y: 14, zoom: 1.8 },
-  "./assets/avatars/14.png": { x: 50, y: 14, zoom: 1.72 },
-  "./assets/avatars/15.png": { x: 45.1848, y: 5.1022, zoom: 1.56 },
-  "./assets/avatars/16.png": { x: 51.0913, y: 15.7858, zoom: 1.72 }
-};
+// Avatar presets, identity hash, crop math: shared module so web and
+// desktop never drift apart on "what avatar does this fellow have." See
+// src/shared/avatar-resolve.js. Aliases below keep the existing call sites
+// readable instead of forcing every reference through window.miaAvatarResolve.
+const avatarResolve = window.miaAvatarResolve;
+const WEB_AVATAR_PRESETS = avatarResolve.avatarPresets;
+const WEB_AVATAR_PRESET_GROUPS = avatarResolve.avatarPresetGroups;
+const WEB_AVATAR_PRESET_GROUP_TABS = avatarResolve.avatarPresetGroupTabs;
+const webAvatarPresetBySrc = avatarResolve.avatarPresetBySrc;
+const webAvatarPresetGroupForSrc = avatarResolve.avatarPresetGroupForSrc;
+const webNormalizeAvatarCrop = avatarResolve.normalizeAvatarCrop;
 
-const WEB_AVATAR_PRESET_GROUP_TABS = [
-  { key: "human", label: "人形" },
-  { key: "pet", label: "宠物" }
-];
-
-const WEB_AVATAR_PRESET_GROUPS = {
-  human: [
-    { name: "青羽", src: "./assets/avatars/01.png", crop: { x: 50.0687, y: 14.5495, zoom: 2.04 } },
-    { name: "桃奈", src: "./assets/avatars/02.png", crop: { x: 57.2536, y: 8.1635, zoom: 1.56 } },
-    { name: "紫音", src: "./assets/avatars/03.png", crop: { x: 50, y: 14, zoom: 1.48 } },
-    { name: "小栗", src: "./assets/avatars/04.png", crop: { x: 49.0079, y: 23.5736, zoom: 1.72 } },
-    { name: "墨川", src: "./assets/avatars/05.png", crop: { x: 47.6785, y: 11.3611, zoom: 1.88 } },
-    { name: "珊瑚", src: "./assets/avatars/06.png", crop: { x: 46.8749, y: 10.4285, zoom: 1.64 } },
-    { name: "雪璃", src: "./assets/avatars/07.png", crop: { x: 51.6741, y: 8.0209, zoom: 1.72 } },
-    { name: "赤焰", src: "./assets/avatars/08.png", crop: { x: 50.974, y: 12.8636, zoom: 1.88 } },
-    { name: "蓝汐", src: "./assets/avatars/09.png", crop: { x: 47.4999, y: 12.2142, zoom: 1.8 } },
-    { name: "棕野", src: "./assets/avatars/10.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-    { name: "夜莓", src: "./assets/avatars/11.png", crop: { x: 55.8037, y: 7.9731, zoom: 1.64 } },
-    { name: "空铃", src: "./assets/avatars/12.png", crop: { x: 47.3214, y: 16.9763, zoom: 1.8 } },
-    { name: "茉茶", src: "./assets/avatars/13.png", crop: { x: 50, y: 14, zoom: 1.8 } },
-    { name: "星柚", src: "./assets/avatars/14.png", crop: { x: 50, y: 14, zoom: 1.72 } },
-    { name: "爱丽丝", src: "./assets/avatars/15.png", crop: { x: 45.1848, y: 5.1022, zoom: 1.56 } },
-    { name: "岚", src: "./assets/avatars/16.png", crop: { x: 51.0913, y: 15.7858, zoom: 1.72 } }
-  ],
-  pet: Array.from({ length: 16 }, (_item, index) => {
-    const id = String(index + 1).padStart(2, "0");
-    return { name: `宠物 ${id}`, src: `./assets/avatars-pet/${id}.png`, crop: { x: 50, y: 50, zoom: 1 } };
-  })
-};
-
-const WEB_AVATAR_PRESETS = Object.values(WEB_AVATAR_PRESET_GROUPS).flat();
-
-function webAvatarPresetBySrc(src) {
-  const value = String(src || "").trim();
-  return WEB_AVATAR_PRESETS.find((preset) => preset.src === value) || null;
-}
-
-function webAvatarPresetGroupForSrc(src) {
-  const value = String(src || "").trim();
-  return WEB_AVATAR_PRESET_GROUP_TABS.find(({ key }) =>
-    WEB_AVATAR_PRESET_GROUPS[key]?.some((preset) => preset.src === value)
-  )?.key || "human";
-}
-
-function webNormalizeAvatarCrop(crop = {}) {
-  const source = crop && typeof crop === "object" ? crop : {};
-  const num = (value, fallback, min, max) => {
-    const next = Number(value);
-    if (!Number.isFinite(next)) return fallback;
-    return Math.max(min, Math.min(max, next));
-  };
-  const normalized = {
-    x: num(source.x, 50, 0, 100),
-    y: num(source.y, 50, 0, 100),
-    zoom: num(source.zoom, 1, 1, 2.4)
-  };
-  if (
-    Object.prototype.hasOwnProperty.call(source, "start")
-    || Object.prototype.hasOwnProperty.call(source, "duration")
-    || Object.prototype.hasOwnProperty.call(source, "trimStart")
-    || Object.prototype.hasOwnProperty.call(source, "trimDuration")
-  ) {
-    Object.assign(normalized, avatarMedia.normalizeTrim?.(source) || avatarMedia.trimFromCrop?.(source) || { start: 0, duration: 3 });
-  }
-  return normalized;
-}
-
+// Web-side wrapper: shared/avatar-resolve.js doesn't branch on "is this a
+// video?" (video trim handling is platform-specific), so we keep the video
+// branch local and delegate the still-image case to the shared resolver.
 function webAvatarDefaultCropForSrc(src) {
-  if (avatarMedia.isVideo?.(src)) return { x: 50, y: 50, zoom: 1, start: 0, duration: avatarMedia.DEFAULT_TRIM_DURATION || 3 };
-  return { x: 50, y: 13.5, zoom: 1.72, ...(webAvatarPresetBySrc(src)?.crop || {}) };
+  if (avatarMedia.isVideo?.(src)) {
+    return { x: 50, y: 50, zoom: 1, start: 0, duration: avatarMedia.DEFAULT_TRIM_DURATION || 3 };
+  }
+  return avatarResolve.avatarDefaultCropForSrc(src);
 }
 
 function avatarBackgroundStyle(image, customCrop, fallbackColor) {
   if (!image) return `background-color:${fallbackColor};color:#fff;display:inline-flex;align-items:center;justify-content:center;`;
   if (avatarMedia.isVideo?.(image)) return "background-color:transparent;";
-  // Look up presets against the raw value (preset keys may use "./assets/")
-  // before normalizing the URL for the actual background-image declaration.
-  const preset = AVATAR_PRESETS[image] || null;
+  // Look up presets against the raw value (preset keys still use the
+  // "./assets/" form) before normalizing the URL for the actual
+  // background-image declaration. avatarCropForImage applies the shared
+  // "neutral crop → preset crop" rule so the call site doesn't have to.
   const src = normalizeAvatarUrl(image);
-  // Treat (50, 50, 1) as "no crop set" so we fall back to the preset crop
-  // for human avatars even when the synced conversation didn't carry one.
-  const isNeutral = !customCrop || (
-    Math.abs(Number(customCrop.x) - 50) < 0.01 &&
-    Math.abs(Number(customCrop.y) - 50) < 0.01 &&
-    Math.abs(Number(customCrop.zoom || 1) - 1) < 0.001
-  );
-  const crop = (!isNeutral && customCrop) || preset || { x: 50, y: 50, zoom: 1 };
+  const crop = avatarResolve.avatarCropForImage(image, customCrop);
   const x = Number.isFinite(Number(crop.x)) ? Number(crop.x) : 50;
   const y = Number.isFinite(Number(crop.y)) ? Number(crop.y) : 50;
   const zoom = Number.isFinite(Number(crop.zoom)) ? Number(crop.zoom) : 1;
@@ -1124,35 +1045,38 @@ function fellowByKey(key) {
   return state.fellows.find((fellow) => String(fellow.id || fellow.key || "") === wanted) || null;
 }
 
-// Avatar-only fellow lookup. state.fellows only carries fellows owned by the
-// current user, so any conversation involving someone else's fellow (e.g. a
-// group with a friend's AI, or a cross-owner fellow:<other>:<id> chat) used
-// to fall through to the blank single-letter bubble. The cloud already
-// enriches member rows with fellow_avatar_image / fellow_avatar_crop /
-// fellow_color (see social-store.js listConversationMembers), so prefer the
-// owned fellow when present, otherwise synthesize from the conversation's
-// member row.
+// Locate the most authoritative metadata for a fellow shown in this
+// conversation, then hand it to shared/avatar-resolve.js so the result is
+// always a usable {image, crop, color} — never the blank single-letter
+// bubble we used to fall back to. Resolution order:
+//   1. state.fellows  — fellows the viewer owns (freshest copy).
+//   2. cached member row — covers cross-owner fellows the server already
+//      enriched with fellow_avatar_image / _crop / _color.
+//   3. nothing local — resolveAvatarForContact still picks a deterministic
+//      preset by hashing the fellow id, matching the desktop fallback.
 function fellowAvatarFor(conversation, fellowKey) {
   const wanted = String(fellowKey || "");
   if (!wanted) return null;
   const owned = state.fellows.find((f) => String(f.id || f.key || "") === wanted);
   if (owned) {
-    return {
-      avatarImage: owned.avatarImage || "",
-      avatarCrop: owned.avatarCrop || null,
-      color: owned.color || ""
-    };
+    return avatarResolve.resolveAvatarForContact({
+      id: wanted,
+      avatarImage: owned.avatarImage,
+      avatarCrop: owned.avatarCrop,
+      color: owned.color
+    });
   }
   const members = state.conversationMembersCache.get(conversation?.id) || [];
-  const member = members.find((m) => m.member_kind === "fellow" && m.member_ref === wanted);
+  const member = members.find((m) => m.member_kind === MemberKind.Fellow && m.member_ref === wanted);
   if (member) {
-    return {
-      avatarImage: member.fellow_avatar_image || "",
-      avatarCrop: member.fellow_avatar_crop || null,
-      color: member.fellow_color || ""
-    };
+    return avatarResolve.resolveAvatarForContact({
+      id: wanted,
+      avatarImage: member.fellow_avatar_image,
+      avatarCrop: member.fellow_avatar_crop,
+      color: member.fellow_color
+    });
   }
-  return null;
+  return avatarResolve.resolveAvatarForContact({ id: wanted });
 }
 
 function runtimeKindForFellowConversation(conversation, fellow) {
@@ -1580,8 +1504,8 @@ function combinedConversationItems() {
       const fellowKey = r.decorations?.fellowKey || (r.id?.split(":")[2] || "");
       const fa = fellowAvatarFor(r, fellowKey);
       if (fa) {
-        avatar = fa.avatarImage;
-        avatarCrop = fa.avatarCrop;
+        avatar = fa.image;
+        avatarCrop = fa.crop;
         color = fa.color;
       }
     }
@@ -1998,8 +1922,8 @@ function renderActiveChat() {
       peerColor = friend?.avatarColor || "";
     } else if (isFellow) {
       const fa = fellowAvatarFor(conversation, fellowKeyForConversation(conversation));
-      peerAvatar = fa?.avatarImage || "";
-      peerCrop = fa?.avatarCrop || null;
+      peerAvatar = fa?.image || "";
+      peerCrop = fa?.crop || null;
       peerColor = fa?.color || "";
     }
     applyAvatarMedia(
