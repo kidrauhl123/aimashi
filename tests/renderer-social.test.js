@@ -711,6 +711,63 @@ test("sendInActiveConversation shows outgoing cloud messages before the network 
   assert.equal(entry.maxSeq, 1);
 });
 
+test("sendInActiveConversation reconciles the websocket echo before the POST reply resolves", async () => {
+  const s = loadSocial();
+  const post = deferred();
+  const posted = [];
+  s.moduleState.myUserId = "u_me";
+  s.__mockWindow.mia.social = {
+    postConversationMessage: async (conversationId, body) => {
+      posted.push({ conversationId, body });
+      return post.promise;
+    }
+  };
+  s.moduleState.activeConversationId = "g_echo";
+  s.moduleState.conversations = [{ id: "g_echo", type: "group", name: "Echo" }];
+  s.moduleState.messageCache.set("g_echo", { messages: [], maxSeq: 0 });
+
+  const sendPromise = s.sendInActiveConversation("hello once");
+  const entry = s.moduleState.messageCache.get("g_echo");
+  const localTurnId = entry.messages[0]?.turn_id || "server_echo_turn";
+
+  s.handleCloudEvent({
+    type: "conversation.message_appended",
+    payload: {
+      conversationId: "g_echo",
+      message: {
+        id: "m_server_echo",
+        seq: 1,
+        turn_id: localTurnId,
+        sender_kind: "user",
+        sender_ref: "u_me",
+        body_md: "hello once"
+      }
+    }
+  });
+
+  assert.deepEqual(entry.messages.map((m) => m.id), ["m_server_echo"]);
+  assert.equal(entry.messages[0]._localPending, undefined);
+  assert.equal(entry.maxSeq, 1);
+
+  post.resolve({
+    ok: true,
+    data: {
+      message: {
+        id: "m_server_echo",
+        seq: 1,
+        turn_id: localTurnId,
+        sender_kind: "user",
+        sender_ref: "u_me",
+        body_md: "hello once"
+      }
+    }
+  });
+  await sendPromise;
+
+  assert.deepEqual(entry.messages.map((m) => m.id), ["m_server_echo"]);
+  assert.equal(posted[0].body.turnId, localTurnId);
+});
+
 test("sendInActiveConversation keeps a failed outgoing cloud message visible", async () => {
   const s = loadSocial();
   const posted = [];
@@ -1579,4 +1636,68 @@ test("opening a conversation with a WARM local cache fetches a bounded recent ov
 
   assert.deepEqual(listCalls, [30], "warm cache → recent overlap since maxSeq - 50, not a full refetch");
   assert.equal(s.moduleState.messageCache.get("dm:u_a:u_b").messages.length, 80, "cached history merged for instant paint");
+});
+
+test("applyCloudSettings clears auto-counted unread when peer device's readMark catches up", () => {
+  const s = loadSocial();
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  // Local state: a conversation we've cached up to seq=4 with 2 auto-counted unread.
+  s.moduleState.messageCache.set("dm:u_a:u_b", { messages: [], maxSeq: 4 });
+  s.moduleState.unreadByConversation.set("dm:u_a:u_b", 2);
+  // Another device pushes readMarks { "dm:u_a:u_b": 4 } via user_settings.updated.
+  s.applyCloudSettings({
+    pins: [],
+    readMarks: { "dm:u_a:u_b": 4 },
+    appearance: {},
+    version: 2,
+    updatedAt: "2026-05-28T00:00:00.000Z"
+  });
+  assert.equal(s.moduleState.unreadByConversation.has("dm:u_a:u_b"), false,
+    "readMark caught up to local maxSeq → unread badge must clear");
+});
+
+test("applyCloudSettings leaves unread alone when local has fresher messages than peer's readMark", () => {
+  const s = loadSocial();
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  // Local saw seq=6 (2 messages newer than peer's mark) and counted both.
+  s.moduleState.messageCache.set("dm:u_a:u_b", { messages: [], maxSeq: 6 });
+  s.moduleState.unreadByConversation.set("dm:u_a:u_b", 2);
+  s.applyCloudSettings({
+    pins: [],
+    readMarks: { "dm:u_a:u_b": 4 },
+    appearance: {},
+    version: 3,
+    updatedAt: "2026-05-28T00:01:00.000Z"
+  });
+  assert.equal(s.moduleState.unreadByConversation.get("dm:u_a:u_b"), 2,
+    "peer's readMark < local maxSeq → newer messages are still genuinely unread");
+});
+
+test("message_appended skips unread bump when readMark already covers the replayed seq", () => {
+  const s = loadSocial();
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  // Peer has already read up to seq=5. Active conversation is something else
+  // so the "active conversation auto-clear" branch doesn't muddy the test.
+  s.moduleState.cloudSettings = { pins: [], readMarks: { "dm:u_a:u_b": 5 }, appearance: {}, version: 1, unreadOverrides: {} };
+  s.moduleState.activeConversationId = "dm:other";
+  // WS replays an old message_appended with seq=3 — already read on web.
+  s.handleCloudEvent({
+    type: "conversation.message_appended",
+    payload: {
+      conversationId: "dm:u_a:u_b",
+      message: { id: "m3", seq: 3, body_md: "old", sender_ref: "u_other", created_at: "2026-05-28T00:02:00.000Z" }
+    }
+  });
+  assert.equal(s.moduleState.unreadByConversation.has("dm:u_a:u_b"), false,
+    "replayed message at seq=3 with readMark=5 must not light the badge");
+  // A genuinely newer message at seq=6 should still bump.
+  s.handleCloudEvent({
+    type: "conversation.message_appended",
+    payload: {
+      conversationId: "dm:u_a:u_b",
+      message: { id: "m6", seq: 6, body_md: "new", sender_ref: "u_other", created_at: "2026-05-28T00:03:00.000Z" }
+    }
+  });
+  assert.equal(s.moduleState.unreadByConversation.get("dm:u_a:u_b"), 1,
+    "fresh message at seq=6 with readMark=5 must bump unread");
 });

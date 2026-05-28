@@ -421,6 +421,43 @@ test("src/web/app.js routes through window.miaUnread", () => {
   );
 });
 
+test("src/web/app.js reconciles state.unread when another device pushes readMarks", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  assert.match(
+    source,
+    /function reconcileUnreadFromReadMarks\(/,
+    "web/app.js must expose a reconcileUnreadFromReadMarks helper so cross-device read state clears local badges"
+  );
+  const handlerMatch = source.match(/type === "user_settings\.updated"[\s\S]{0,600}?\}\s*\}/);
+  assert.ok(handlerMatch, "user_settings.updated handler must exist");
+  assert.match(
+    handlerMatch[0],
+    /reconcileUnreadFromReadMarks\(/,
+    "user_settings.updated must call reconcileUnreadFromReadMarks so desktop-side read state clears web badges"
+  );
+  assert.match(
+    handlerMatch[0],
+    /renderRailUnreadBadge\(/,
+    "user_settings.updated must refresh the rail badge after reconciling unread"
+  );
+});
+
+test("src/web/app.js skips unread bump when readMark already covers the replayed message", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  const handlerMatch = source.match(/type === "conversation\.message_appended"[\s\S]*?renderRailUnreadBadge\(\);/);
+  assert.ok(handlerMatch, "conversation.message_appended handler must exist");
+  assert.match(
+    handlerMatch[0],
+    /state\.settings\?\.readMarks\?\.\[conversationId\]/,
+    "message_appended must consult readMarks before bumping unread (covers WS replay after another device marked read)"
+  );
+  assert.match(
+    handlerMatch[0],
+    /msgSeq\s*>\s*readMark/,
+    "message_appended must compare msg.seq against the existing readMark"
+  );
+});
+
 test("src/web/app.js persists conversation readMarks as message seq, not timestamps", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   assert.equal(

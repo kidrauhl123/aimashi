@@ -781,6 +781,24 @@ function lastSeenSeqForConversation(conversationId) {
   return Number.isFinite(maxSeq) && maxSeq > 0 ? maxSeq : 0;
 }
 
+// Another device pushed new readMarks. For each conversation whose readMark
+// has caught up to (or past) the highest seq we've cached locally, clear
+// the local unread counter so the badge clears in real time. Uncached
+// conversations report maxSeq=0, so readSeq >= maxSeq trivially holds and
+// we trust the peer's mark — they're authoritative for "the user has seen
+// it." Messages arriving after this with seq > readMark will still bump
+// unread normally via message_appended with a fresh seq.
+function reconcileUnreadFromReadMarks(readMarks) {
+  if (!readMarks || typeof readMarks !== "object") return;
+  for (const [id, mark] of Object.entries(readMarks)) {
+    const readSeq = Number(mark) || 0;
+    if (readSeq <= 0) continue;
+    if (readSeq >= lastSeenSeqForConversation(id)) {
+      state.unread.delete(id);
+    }
+  }
+}
+
 // ── cloud events (WS) ──────────────────────────────────────────────────────
 
 // Resume cursor for replay (Phase 1.C). Per-account so logging out of A
@@ -904,7 +922,15 @@ function handleCloudEvent(envelope) {
       );
       const isMine = author.kind === "self";
       if (!isMine && conversationId !== state.activeConversationId) {
-        state.unread.set(conversationId, (state.unread.get(conversationId) || 0) + 1);
+        // Skip the bump if another device has already marked this seq read
+        // (covers WS replay on reconnect: server replays old message_appended
+        // rows from since_seq forward, and we'd otherwise re-light the badge
+        // for conversations the user read on desktop).
+        const readMark = Number(state.settings?.readMarks?.[conversationId]) || 0;
+        const msgSeq = Number(msg.seq) || 0;
+        if (msgSeq > readMark) {
+          state.unread.set(conversationId, (state.unread.get(conversationId) || 0) + 1);
+        }
       }
     }
     if (conversationId === state.activeConversationId) {
@@ -1025,7 +1051,9 @@ function handleCloudEvent(envelope) {
     // a whole).
     if (envelope.settings) {
       state.settings = envelope.settings;
+      reconcileUnreadFromReadMarks(envelope.settings.readMarks);
       renderConversationList();
+      renderRailUnreadBadge();
     }
   }
 }

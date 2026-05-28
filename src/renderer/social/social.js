@@ -1227,6 +1227,7 @@
         moduleState.messageCache.set(conversationId, { messages: [], maxSeq: 0 });
       }
       const entry = moduleState.messageCache.get(conversationId);
+      if (_reconcileEchoedConversationMessage(conversationId, cachedMessage)) return;
       // De-dup by id
       const fresh = !entry.messages.find((m) => m.id === cachedMessage.id);
       if (fresh) {
@@ -1249,7 +1250,15 @@
       // in the currently open conversation.
       const isMine = _isMessageFromSelf(message);
       if (fresh && !isMine && conversationId !== moduleState.activeConversationId) {
-        moduleState.unreadByConversation.set(conversationId, (moduleState.unreadByConversation.get(conversationId) || 0) + 1);
+        // Skip the bump if another device already marked this seq read
+        // (covers WS replay on reconnect: server replays old message_appended
+        // rows from since_seq forward, and we'd otherwise re-light the
+        // badge for conversations the user already read on web).
+        const readMark = Number(moduleState.cloudSettings?.readMarks?.[conversationId]) || 0;
+        const msgSeq = Number(cachedMessage.seq) || 0;
+        if (msgSeq > readMark) {
+          moduleState.unreadByConversation.set(conversationId, (moduleState.unreadByConversation.get(conversationId) || 0) + 1);
+        }
       }
 
       // If this is the active conversation, append to DOM directly for snappy UX. Only
@@ -1769,6 +1778,7 @@
       // Mirror the server's skills_json so the bubble renders chips immediately,
       // before the echoed message comes back.
       skills_json: skills && skills.length ? JSON.stringify(skills) : null,
+      turn_id: prepared.clientTraceId || null,
       status: "sending",
       created_at: new Date().toISOString(),
       _localPending: true
@@ -1789,6 +1799,20 @@
     msg.status = "error";
     msg.error = String(error || "发送失败");
     msg._localPending = false;
+    if (conversationId === moduleState.activeConversationId) _reRenderActiveChat();
+    if (deps && typeof deps.render === "function") deps.render();
+    return true;
+  }
+
+  function _reconcileEchoedConversationMessage(conversationId, sentMsg) {
+    if (!conversationId || !sentMsg || !sentMsg.id || !sentMsg.turn_id) return false;
+    const entry = moduleState.messageCache.get(conversationId);
+    if (!entry) return false;
+    const localIdx = entry.messages.findIndex((m) => m && m._localPending && m.turn_id === sentMsg.turn_id);
+    if (localIdx < 0) return false;
+    entry.messages[localIdx] = sentMsg;
+    entry.messages.sort((a, b) => a.seq - b.seq);
+    if (sentMsg.seq > entry.maxSeq) entry.maxSeq = sentMsg.seq;
     if (conversationId === moduleState.activeConversationId) _reRenderActiveChat();
     if (deps && typeof deps.render === "function") deps.render();
     return true;
@@ -2137,6 +2161,7 @@
     try {
       const res = await window.mia.social.postConversationMessage(conversationId, {
         bodyMd: prepared.bodyMd,
+        turnId: prepared.clientTraceId,
         ...(mentions.length ? { mentions } : {}),
         ...(skills ? { skills } : {})
       });
@@ -2419,7 +2444,27 @@
   function applyCloudSettings(settings) {
     if (!settings || typeof settings !== "object") return;
     moduleState.cloudSettings = normalizeCloudSettings(settings, moduleState.cloudSettings || {});
+    reconcileUnreadFromReadMarks(moduleState.cloudSettings.readMarks);
     if (deps && typeof deps.render === "function") deps.render();
+  }
+
+  // Another device pushed new readMarks. For each conversation whose readMark
+  // has caught up to (or past) the highest seq we've cached locally, clear
+  // moduleState.unreadByConversation so the badge clears in real time.
+  // Uncached conversations report maxSeq=0, so readSeq >= maxSeq trivially
+  // holds and we trust the peer's mark. Manual "标为未读" overrides live in
+  // cloudSettings.unreadOverrides and are unaffected; auto-counted unread
+  // is what this resets.
+  function reconcileUnreadFromReadMarks(readMarks) {
+    if (!readMarks || typeof readMarks !== "object") return;
+    for (const [id, mark] of Object.entries(readMarks)) {
+      const readSeq = Number(mark) || 0;
+      if (readSeq <= 0) continue;
+      const maxSeq = Number(moduleState.messageCache.get(id)?.maxSeq) || 0;
+      if (readSeq >= maxSeq) {
+        moduleState.unreadByConversation.delete(id);
+      }
+    }
   }
 
   // PATCH /api/conversations/:id — rename the cloud conversation (groups only; DM rename
