@@ -2273,7 +2273,6 @@ async function initializeRuntime() {
       escapeHtml: window.miaMarkdown.escapeHtml,
       setText,
       formatRunTime,
-      renderMessageHtml,
       render,
       renderView,
       renderChat,

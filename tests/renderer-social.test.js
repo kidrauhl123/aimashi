@@ -6,8 +6,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const sessionHistory = require("../src/shared/session-history");
 
-function loadSocial() {
+function loadSocial(options = {}) {
   const src = fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "social", "social.js"), "utf8");
   const mockEl = () => ({
     classList: { add() {}, remove() {}, toggle() {} },
@@ -29,6 +30,7 @@ function loadSocial() {
     cloneNode() { return mockEl(); },
   });
   const mockWindow = {
+    requestAnimationFrame: options.requestAnimationFrame,
     mia: {},
     miaFellowCommands: require("../src/renderer/fellow/fellow-commands.js"),
     miaSendPipeline: require("../src/shared/send-pipeline.js"),
@@ -41,9 +43,10 @@ function loadSocial() {
   const context = vm.createContext({
     window: mockWindow,
     globalThis: mockWindow,
+    localStorage: options.localStorage,
     document: {
       createElement: () => mockEl(),
-      getElementById: () => mockEl(),
+      getElementById: (id) => options.elementsById?.[id] || mockEl(),
       querySelector: () => mockEl(),
       body: { appendChild() {} },
       addEventListener() {},
@@ -186,6 +189,109 @@ test("bootstrapAfterLogin asks untitled loaded conversations to generate titles"
   await s.bootstrapAfterLogin();
 
   assert.deepEqual(titleCandidates, ["fellow:u_1:kongling"]);
+});
+
+test("bootstrapAfterLogin paints cached SQLite social data before slow cloud conversations return", async () => {
+  const s = loadSocial();
+  let renderCount = 0;
+  let releaseCloudConversations;
+  s.initSocialModule({
+    getState: () => ({ runtime: { cloud: { user: { id: "u_1" } } } }),
+    render: () => { renderCount += 1; },
+    els: {},
+    appendTransientChat: () => {},
+  });
+  s.__mockWindow.mia.social = {
+    getCachedSocialBootstrap: async (userId) => ({
+      ok: true,
+      data: {
+        userId,
+        conversations: [{ id: "fellow:u_1:mia", type: "fellow", name: "Mia" }],
+        friends: [],
+        fellows: [{ id: "mia", key: "mia", name: "Mia" }],
+        members: {}
+      }
+    }),
+    getCachedConversationMessages: async () => ({
+      ok: true,
+      data: { messages: [{ id: "m1", seq: 1, sender_kind: "fellow", sender_ref: "mia", body_md: "cached hello" }] }
+    }),
+    myUsername: async () => ({ ok: true, data: { id: "u_1", username: "jung" } }),
+    listFriends: async () => ({ ok: true, data: { friends: [] } }),
+    listFriendRequests: async () => ({ ok: true, data: { requests: [] } }),
+    listFellows: async () => ({ ok: true, data: { fellows: [] } }),
+    settingsGet: async () => ({}),
+    listConversations: async () => new Promise((resolve) => {
+      releaseCloudConversations = () => resolve({ ok: true, data: { conversations: [{ id: "fellow:u_1:mia", type: "fellow", name: "Mia" }] } });
+    }),
+    listConversationMessages: async () => ({ ok: true, data: { messages: [] } }),
+  };
+
+  const boot = s.bootstrapAfterLogin();
+  await flushMicrotasks();
+
+  assert.equal(s.moduleState.bootstrapped, true);
+  assert.deepEqual(s.moduleState.conversations.map((item) => item.id), ["fellow:u_1:mia"]);
+  assert.equal(s.moduleState.messageCache.get("fellow:u_1:mia").messages[0].body_md, "cached hello");
+  assert.equal(renderCount, 1);
+
+  releaseCloudConversations();
+  await boot;
+});
+
+test("bootstrapAfterLogin keeps legacy UUID fellow sessions for history but hides them from sidebar", async () => {
+  const s = loadSocial();
+  const legacy = {
+    id: "fellow:u_1:9b7c6d5e-1111-4222-8333-123456789abc",
+    type: "fellow",
+    name: "old session",
+    decorations: { fellowKey: "mia", sessionId: "9b7c6d5e-1111-4222-8333-123456789abc" }
+  };
+  const stable = {
+    id: "fellow:u_1:mia",
+    type: "fellow",
+    name: "Mia",
+    decorations: { fellowKey: "mia", sessionId: "mia" }
+  };
+  s.initSocialModule({
+    getState: () => ({ runtime: { cloud: { user: { id: "u_1" } } } }),
+    render: () => {},
+    els: {},
+    appendTransientChat: () => {},
+  });
+  s.__mockWindow.mia.social = {
+    getCachedSocialBootstrap: async (userId) => ({
+      ok: true,
+      data: { userId, conversations: [legacy, stable], friends: [], fellows: [{ id: "mia", name: "Mia" }], members: {} }
+    }),
+    getCachedConversationMessages: async () => ({ ok: true, data: { messages: [] } }),
+    myUsername: async () => ({ ok: true, data: { id: "u_1", username: "jung" } }),
+    listFriends: async () => ({ ok: true, data: { friends: [] } }),
+    listFriendRequests: async () => ({ ok: true, data: { requests: [] } }),
+    listFellows: async () => ({ ok: true, data: { fellows: [{ id: "mia", name: "Mia" }] } }),
+    settingsGet: async () => ({}),
+    listConversations: async () => ({ ok: true, data: { conversations: [legacy, stable] } }),
+    listConversationMessages: async () => ({ ok: true, data: { messages: [] } }),
+  };
+
+  await s.bootstrapAfterLogin();
+
+  assert.deepEqual(s.moduleState.conversations.map((item) => item.id), [
+    "fellow:u_1:9b7c6d5e-1111-4222-8333-123456789abc",
+    "fellow:u_1:mia"
+  ]);
+  assert.equal(s.fellowConversationForKey("mia").id, "fellow:u_1:mia");
+  assert.deepEqual(
+    sessionHistory
+      .sessionConversationsForConversation(stable, s.moduleState.conversations, { messageCache: s.moduleState.messageCache })
+      .map((item) => item.id)
+      .sort(),
+    [
+      "fellow:u_1:9b7c6d5e-1111-4222-8333-123456789abc",
+      "fellow:u_1:mia"
+    ].sort()
+  );
+  assert.deepEqual(s.renderSidebarRows().map((row) => row.conversation.id), ["fellow:u_1:mia"]);
 });
 
 test("bootstrapAfterLogin syncs external fellow runtime config for web controls", async () => {
@@ -877,6 +983,168 @@ test("handleCloudEvent cloud_agent_run events track transient conversation strea
   assert.equal(run.tools.map((tool) => tool.name).join(","), "shell");
 });
 
+test("handleCloudEvent tracks pending agent permission requests on the active run", () => {
+  const s = loadSocial();
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_started",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_perm", fellowId: "mia" },
+  });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: {
+      conversationId: "fellow:u_a:mia",
+      runId: "car_perm",
+      event: {
+        type: "permission_request",
+        requestId: "perm_1",
+        engine: "codex",
+        toolName: "shell",
+        title: "Codex 想执行命令",
+        preview: "npm test"
+      }
+    },
+  });
+
+  const run = s.moduleState.cloudAgentRunsByConversation.get("fellow:u_a:mia");
+  assert.equal(run.pendingPermissions.length, 1);
+  assert.equal(run.pendingPermissions[0].requestId, "perm_1");
+  assert.equal(s.moduleState.pendingPermissionsById.get("perm_1").preview, "npm test");
+
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: {
+      conversationId: "fellow:u_a:mia",
+      runId: "car_perm",
+      event: { type: "permission_resolved", requestId: "perm_1" }
+    },
+  });
+  assert.equal(run.pendingPermissions.length, 0);
+  assert.equal(s.moduleState.pendingPermissionsById.has("perm_1"), false);
+});
+
+test("permission banner title omits repeated actor names", () => {
+  const s = loadSocial();
+  const compact = s._internalCtx.compactPermissionTitle;
+  s.moduleState.fellows = [{ key: "codex", name: "空铃" }];
+
+  assert.equal(compact({ title: "Codex 想执行命令", fellowKey: "codex" }), "空铃想执行命令");
+  assert.equal(compact({ title: "Codex 想执行命令" }), "Codex想执行命令");
+  assert.equal(compact({ title: "空铃 想使用 Bash" }), "空铃想使用 Bash");
+  assert.equal(compact({ title: "请求扩展权限" }), "请求扩展权限");
+  assert.equal(compact({ title: "需要权限审批" }), "请求执行权限");
+});
+
+test("successful permission decision removes the pending banner after one click", async () => {
+  const disabled = [];
+  const banner = {
+    dataset: { requestId: "perm_1" },
+    addEventListener() {},
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    set innerHTML(value) { this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    querySelectorAll(selector) {
+      assert.equal(selector, "button[data-permission-decision]");
+      return disabled;
+    }
+  };
+  const s = loadSocial({ elementsById: { agentPermissionBanner: banner } });
+  disabled.push({ disabled: false }, { disabled: false });
+  const respondCalls = [];
+  s.__mockWindow.mia.respondChatPermission = async (payload) => {
+    respondCalls.push(payload);
+    return { ok: true };
+  };
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.activeConversationId = "fellow:u_a:mia";
+  const run = s._internalCtx.cloudRunFor("fellow:u_a:mia", "car_perm");
+  s._internalCtx.addRunPermission(run, { requestId: "perm_1", title: "Codex 想执行命令" });
+  s._internalCtx.renderAgentPermissionBanner();
+
+  await s._internalCtx.submitPermissionDecision({ dataset: { permissionDecision: "allow_once" } });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(respondCalls)), [{ requestId: "perm_1", decision: "allow_once" }]);
+  assert.equal(run.pendingPermissions.length, 0);
+  assert.equal(s.moduleState.pendingPermissionsById.has("perm_1"), false);
+  assert.deepEqual(disabled.map((button) => button.disabled), [true, true]);
+});
+
+test("permission decision handles primary pointerdown before click fallback", async () => {
+  const listeners = {};
+  const disabled = [];
+  const button = {
+    dataset: { permissionDecision: "deny" },
+    disabled: false,
+    closest(selector) {
+      return selector === "button[data-permission-decision]" ? this : null;
+    }
+  };
+  const banner = {
+    dataset: { requestId: "perm_1" },
+    addEventListener(type, handler, options) {
+      listeners[type] = { handler, options };
+    },
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    set innerHTML(value) { this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    querySelectorAll(selector) {
+      assert.equal(selector, "button[data-permission-decision]");
+      return disabled;
+    }
+  };
+  const s = loadSocial({ elementsById: { agentPermissionBanner: banner } });
+  disabled.push(button);
+  const respondCalls = [];
+  s.__mockWindow.mia.respondChatPermission = async (payload) => {
+    respondCalls.push(payload);
+    return { ok: true };
+  };
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.activeConversationId = "fellow:u_a:mia";
+  const run = s._internalCtx.cloudRunFor("fellow:u_a:mia", "car_perm");
+  s._internalCtx.addRunPermission(run, { requestId: "perm_1", title: "Codex 想执行命令" });
+  s._internalCtx.renderAgentPermissionBanner();
+
+  assert.equal(typeof listeners.pointerdown?.handler, "function");
+  assert.equal(listeners.pointerdown.options, true);
+  const eventCalls = [];
+  await listeners.pointerdown.handler({
+    type: "pointerdown",
+    button: 0,
+    target: button,
+    preventDefault() { eventCalls.push("prevent"); },
+    stopPropagation() { eventCalls.push("stop"); }
+  });
+
+  assert.deepEqual(eventCalls, ["prevent", "stop"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(respondCalls)), [{ requestId: "perm_1", decision: "deny" }]);
+});
+
+test("permission banner preserves bottom stickiness when it changes composer height", () => {
+  const scheduled = [];
+  const banner = {
+    dataset: {},
+    addEventListener() {},
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    set innerHTML(value) { this._html = value; },
+    get innerHTML() { return this._html || ""; }
+  };
+  const chat = { scrollTop: 730, scrollHeight: 1000, clientHeight: 220 };
+  const s = loadSocial({
+    elementsById: { agentPermissionBanner: banner, chat },
+    requestAnimationFrame: (fn) => { scheduled.push(fn); return scheduled.length; }
+  });
+  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.activeConversationId = "fellow:u_a:mia";
+  const run = s._internalCtx.cloudRunFor("fellow:u_a:mia", "car_perm");
+  s._internalCtx.addRunPermission(run, { requestId: "perm_1", preview: "vm_stat" });
+
+  s._internalCtx.renderAgentPermissionBanner();
+  scheduled.forEach((fn) => fn());
+
+  assert.equal(chat.scrollTop, 1000);
+});
+
 test("handleCloudEvent does not infer group typing state from conductor-mode user messages", () => {
   const s = loadSocial();
   s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
@@ -1003,6 +1271,45 @@ test("renderConversationChat renders normalized cloud run trace blocks", () => {
   assert.match(chat.children[0].innerHTML, /shell:completed/);
 });
 
+test("renderConversationChat marks rendered trace rows after painting", () => {
+  const s = loadSocial();
+  let markedRoot = null;
+  s.__mockWindow.miaTraceBlocks = {
+    renderTraceBlocks() {
+      return '<div class="trace"><details class="trace-row trace-anim-enter" data-trace-key="cloud-run:car_1::tool::tool_1"></details></div>';
+    },
+    markRenderedTraceBlocks(root) {
+      markedRoot = root;
+    }
+  };
+  s.initSocialModule({ getState: () => ({ user: { id: "u_a" } }), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.myUserId = "u_a";
+  s.moduleState.activeConversationId = "fellow:u_a:mia";
+  s.moduleState.conversations = [{ id: "fellow:u_a:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } }];
+  s.moduleState.messageCache.set("fellow:u_a:mia", { messages: [], maxSeq: 0 });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_started",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", fellowId: "mia" },
+  });
+  s.handleCloudEvent({
+    type: "cloud_agent_run_event",
+    payload: { conversationId: "fellow:u_a:mia", runId: "car_1", event: { type: "tool_call_started", id: "tool_1", name: "shell" } },
+  });
+
+  const chat = {
+    children: [],
+    appendChild(child) { this.children.push(child); return child; },
+    set innerHTML(value) { this.children = []; this._html = value; },
+    get innerHTML() { return this._html || ""; },
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+  };
+  s.renderConversationChat(chat);
+
+  assert.equal(markedRoot, chat);
+});
+
 test("renderConversationChat renders persisted trace_json on fellow messages", () => {
   const s = loadSocial();
   installCloudConversationSource(s.__mockWindow);
@@ -1097,6 +1404,41 @@ test("handleCloudEvent preserves transient run trace when final fellow message l
   assert.equal(s.moduleState.cloudAgentRunsByConversation.has("fellow:u_a:mia"), false);
 });
 
+test("social module does not read the legacy localStorage snapshot on load", () => {
+  const touched = [];
+  loadSocial({
+    localStorage: {
+      getItem: (key) => { touched.push(`get:${key}`); return null; },
+      setItem: (key) => { touched.push(`set:${key}`); }
+    }
+  });
+
+  assert.deepEqual(touched, []);
+});
+
+test("bootstrapAfterLogin does not write the legacy localStorage snapshot", async () => {
+  const touched = [];
+  const s = loadSocial({
+    localStorage: {
+      getItem: (key) => { touched.push(`get:${key}`); return null; },
+      setItem: (key) => { touched.push(`set:${key}`); }
+    }
+  });
+  s.initSocialModule({ getState: () => ({ runtime: {} }), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.__mockWindow.mia.social = {
+    myUsername: async () => ({ ok: true, data: { id: "u_me", username: "me" } }),
+    listFriends: async () => ({ ok: true, data: { friends: [] } }),
+    listFriendRequests: async () => ({ ok: true, data: { requests: [] } }),
+    listFellows: async () => ({ ok: true, data: { fellows: [] } }),
+    listConversations: async () => ({ ok: true, data: { conversations: [] } }),
+    settingsGet: async () => ({ ok: true, data: { settings: { version: 1, readMarks: {}, unreadOverrides: {} } } })
+  };
+
+  await s.bootstrapAfterLogin();
+
+  assert.deepEqual(touched, []);
+});
+
 async function flushMicrotasks(times = 15) {
   for (let i = 0; i < times; i++) await Promise.resolve();
 }
@@ -1109,11 +1451,10 @@ function makeMessages(from, to) {
   return out;
 }
 
-// Regression: the local-first delta cursor must come from the persisted cache,
-// not the in-memory snapshot preview (a single latest message). Using the
-// preview seq as the cursor made "since_seq = latest" fetch nothing, so the
-// conversation stayed stuck on one message.
-test("opening a conversation with an EMPTY local cache backfills from seq 0, not the snapshot-preview seq", async () => {
+// Regression: the local-first delta cursor must come from the persisted SQLite
+// cache, not a stale in-memory row from the current renderer session. Using that
+// stale row as the cursor can skip the real server backfill.
+test("opening a conversation with an EMPTY local cache backfills from seq 0, not stale memory seq", async () => {
   const s = loadSocial();
   installCloudConversationSource(s.__mockWindow);
   s.__mockWindow.miaAvatar = { avatarThumbBackgroundStyle: () => "" };
@@ -1121,7 +1462,7 @@ test("opening a conversation with an EMPTY local cache backfills from seq 0, not
   s.moduleState.myUserId = "u_me";
   s.moduleState.cloudSettings = { version: 1, readMarks: {}, unreadOverrides: {} };
   s.moduleState.conversations = [{ id: "dm:u_a:u_b", type: "dm" }];
-  // Cold start: only the latest message (seq 9) is hydrated from the localStorage snapshot.
+  // Simulate a stale row already in renderer memory while SQLite has no durable history.
   s.moduleState.messageCache.set("dm:u_a:u_b", { maxSeq: 9, messages: makeMessages(9, 9) });
 
   const listCalls = [];
@@ -1139,11 +1480,82 @@ test("opening a conversation with an EMPTY local cache backfills from seq 0, not
     await flushMicrotasks();
   });
 
-  assert.deepEqual(listCalls, [0], "empty cache → full backfill (since_seq 0), not the preview seq 9");
-  assert.equal(s.moduleState.messageCache.get("dm:u_a:u_b").messages.length, 9, "full history merged in, not stuck on one preview message");
+  assert.deepEqual(listCalls, [0], "empty cache → full backfill (since_seq 0), not the stale memory seq 9");
+  assert.equal(s.moduleState.messageCache.get("dm:u_a:u_b").messages.length, 9, "full history merged in, not stuck on one stale row");
 });
 
-test("opening a conversation with a WARM local cache fetches only the delta after the cached max seq", async () => {
+test("backfill upgrades stale in-memory messages with persisted trace_json", async () => {
+  const s = loadSocial();
+  installCloudConversationSource(s.__mockWindow);
+  s.__mockWindow.miaAvatar = { avatarThumbBackgroundStyle: () => "" };
+  s.initSocialModule({ getState: () => ({ runtime: {} }), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.cloudSettings = { version: 1, readMarks: {}, unreadOverrides: {} };
+  s.moduleState.conversations = [{ id: "fellow:u_me:mia", type: "fellow", decorations: { fellowKey: "mia" } }];
+  // A stale row may exist in renderer memory before the server returns richer fields.
+  s.moduleState.messageCache.set("fellow:u_me:mia", {
+    maxSeq: 3,
+    messages: [{ id: "m3", seq: 3, sender_kind: "fellow", sender_ref: "mia", body_md: "done" }]
+  });
+
+  const tracedMessage = {
+    id: "m3",
+    seq: 3,
+    sender_kind: "fellow",
+    sender_ref: "mia",
+    body_md: "done",
+    trace_json: JSON.stringify({ reasoning: "检查文件", tools: [{ id: "tool_1", name: "shell", status: "completed" }] })
+  };
+  s.__mockWindow.mia.social = {
+    getCachedConversationMessages: async () => ({ ok: true, data: { messages: [] } }),
+    listConversationMessages: async () => ({ ok: true, data: { messages: [tracedMessage] } }),
+    settingsPut: async () => ({})
+  };
+
+  await withMutedConsoleWarn(async () => {
+    s.setActiveConversationId("fellow:u_me:mia");
+    await flushMicrotasks();
+  });
+
+  const cached = s.moduleState.messageCache.get("fellow:u_me:mia").messages[0];
+  assert.equal(cached.trace_json, tracedMessage.trace_json);
+});
+
+test("warm cache backfill overlaps recent messages to repair missing trace_json", async () => {
+  const s = loadSocial();
+  installCloudConversationSource(s.__mockWindow);
+  s.__mockWindow.miaAvatar = { avatarThumbBackgroundStyle: () => "" };
+  s.initSocialModule({ getState: () => ({ runtime: {} }), render: () => {}, els: {}, appendTransientChat: () => {} });
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.cloudSettings = { version: 1, readMarks: {}, unreadOverrides: {} };
+  s.moduleState.conversations = [{ id: "fellow:u_me:mia", type: "fellow", decorations: { fellowKey: "mia" } }];
+
+  const staleCached = { id: "m3", seq: 3, sender_kind: "fellow", sender_ref: "mia", body_md: "done" };
+  const tracedMessage = {
+    ...staleCached,
+    trace_json: JSON.stringify({ reasoning: "检查文件", tools: [{ id: "tool_1", name: "shell", status: "completed" }] })
+  };
+  const listCalls = [];
+  s.__mockWindow.mia.social = {
+    getCachedConversationMessages: async () => ({ ok: true, data: { messages: [staleCached] } }),
+    listConversationMessages: async (_id, sinceSeq) => {
+      listCalls.push(sinceSeq);
+      return { ok: true, data: { messages: sinceSeq < 3 ? [tracedMessage] : [] } };
+    },
+    settingsPut: async () => ({})
+  };
+
+  await withMutedConsoleWarn(async () => {
+    s.setActiveConversationId("fellow:u_me:mia");
+    await flushMicrotasks();
+  });
+
+  const cached = s.moduleState.messageCache.get("fellow:u_me:mia").messages[0];
+  assert.deepEqual(listCalls, [0]);
+  assert.equal(cached.trace_json, tracedMessage.trace_json);
+});
+
+test("opening a conversation with a WARM local cache fetches a bounded recent overlap", async () => {
   const s = loadSocial();
   installCloudConversationSource(s.__mockWindow);
   s.__mockWindow.miaAvatar = { avatarThumbBackgroundStyle: () => "" };
@@ -1151,11 +1563,11 @@ test("opening a conversation with a WARM local cache fetches only the delta afte
   s.moduleState.myUserId = "u_me";
   s.moduleState.cloudSettings = { version: 1, readMarks: {}, unreadOverrides: {} };
   s.moduleState.conversations = [{ id: "dm:u_a:u_b", type: "dm" }];
-  s.moduleState.messageCache.set("dm:u_a:u_b", { maxSeq: 9, messages: makeMessages(9, 9) });
+  s.moduleState.messageCache.set("dm:u_a:u_b", { maxSeq: 80, messages: makeMessages(80, 80) });
 
   const listCalls = [];
   s.__mockWindow.mia.social = {
-    getCachedConversationMessages: async () => ({ ok: true, data: { messages: makeMessages(1, 9) } }), // warm SQLite cache, max seq 9
+    getCachedConversationMessages: async () => ({ ok: true, data: { messages: makeMessages(1, 80) } }), // warm SQLite cache, max seq 80
     listConversationMessages: async (_id, sinceSeq) => { listCalls.push(sinceSeq); return { ok: true, data: { messages: [] } }; },
     settingsPut: async () => ({})
   };
@@ -1165,6 +1577,6 @@ test("opening a conversation with a WARM local cache fetches only the delta afte
     await flushMicrotasks();
   });
 
-  assert.deepEqual(listCalls, [9], "warm cache → delta since the cached max seq (9)");
-  assert.equal(s.moduleState.messageCache.get("dm:u_a:u_b").messages.length, 9, "cached history merged for instant paint");
+  assert.deepEqual(listCalls, [30], "warm cache → recent overlap since maxSeq - 50, not a full refetch");
+  assert.equal(s.moduleState.messageCache.get("dm:u_a:u_b").messages.length, 80, "cached history merged for instant paint");
 });

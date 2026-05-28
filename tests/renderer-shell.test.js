@@ -63,10 +63,87 @@ test("desktop cloud fellow conversations expose the restored chat history menu",
   assert.match(appSource, /sessionHistory\.createFellowSessionPayload/);
   assert.match(appSource, /sessionHistory\.fellowDisplayTitle/);
   assert.match(appSource, /function createNewCloudSessionForActive\(conversation\)/);
-  assert.match(socialSource, /sessionHistoryShared\(\)\.sidebarConversations\(moduleState\.conversations/);
+  assert.match(socialSource, /sessionHistoryShared\(\)\.sidebarConversations\(visibleSocialConversations\(moduleState\.conversations\)/);
   assert.match(appSource, /window\.mia\.social\.ensureFellowSessionConversation/);
   assert.match(preloadSource, /ensureFellowSessionConversation: \(sessionId, body\) => ipcRenderer\.invoke\(IpcChannel\.SocialEnsureFellowSessionConversation, sessionId, body\)/);
   assert.match(socialApiSource, /async ensureFellowSessionConversation\(sessionId, body = \{\}\)/);
+});
+
+test("cloud-only renderer and preload do not expose local chat session CRUD", () => {
+  const preloadSource = fs.readFileSync(path.join(root, "src/preload.js"), "utf8");
+  const tasksSource = fs.readFileSync(path.join(root, "src/renderer/tasks/tasks-panel.js"), "utf8");
+  const stateSource = fs.readFileSync(path.join(root, "src/renderer/app-state.js"), "utf8");
+
+  for (const source of [preloadSource, tasksSource, stateSource]) {
+    assert.doesNotMatch(source, /loadChatSessions|saveChatSession|saveChatReadState|createChatSession|renameChatSession/);
+  }
+  assert.doesNotMatch(tasksSource, /state\.chatStore|activeSessionIdByPersona/);
+  assert.match(tasksSource, /ensureFellowConversation/);
+  assert.match(tasksSource, /conversationId/);
+});
+
+test("main window accepts the first mouse click after regaining focus", () => {
+  const mainSource = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
+
+  assert.match(mainSource, /acceptFirstMouse:\s*true/);
+});
+
+test("chat code blocks use a right-aligned language copy button without code frame borders", () => {
+  const chatCss = fs.readFileSync(path.join(root, "src/renderer/styles/chat.css"), "utf8");
+  const webCss = fs.readFileSync(path.join(root, "src/web/styles.css"), "utf8");
+  const cssBlock = (css, selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.notEqual(start, -1, `${selector} block exists`);
+    const end = css.indexOf("}", start);
+    return css.slice(start, end + 1);
+  };
+
+  for (const css of [chatCss, webCss]) {
+    const block = cssBlock(css, ".message-code-block");
+    const darkBlock = cssBlock(css, ':root[data-theme="dark"] .message-code-block');
+    const caption = cssBlock(css, ".message-code-block figcaption");
+    const button = cssBlock(css, ".message-code-copy");
+    const hover = cssBlock(css, ".message-code-copy:hover");
+    const copied = cssBlock(css, ".message-code-copy.copied");
+    assert.doesNotMatch(block, /border:/);
+    assert.doesNotMatch(darkBlock, /border-color:/);
+    assert.match(block, /background:/);
+    assert.match(caption, /position:\s*absolute;/);
+    assert.match(caption, /justify-content:\s*flex-end;/);
+    assert.match(caption, /min-height:\s*0;/);
+    assert.match(button, /width:\s*auto;/);
+    assert.match(button, /font-size:\s*11px;/);
+    assert.match(button, /font-weight:\s*500;/);
+    assert.match(button, /opacity:\s*0\.72;/);
+    assert.match(hover, /background:\s*rgba\(0,\s*0,\s*0,\s*0\.06\);/);
+    assert.doesNotMatch(hover, /accent/);
+    assert.doesNotMatch(copied, /accent/);
+    assert.doesNotMatch(cssBlock(css, ".message-code-block figcaption"), /border-bottom:/);
+    assert.match(cssBlock(css, ".message-code-block pre"), /padding:\s*12px;/);
+  }
+});
+
+test("agent permission banner blends into the composer and keeps allow buttons compact", () => {
+  const css = fs.readFileSync(path.join(root, "src/renderer/styles.css"), "utf8");
+  const cssBlock = (selector) => {
+    const start = css.indexOf(`${selector} {`);
+    assert.notEqual(start, -1, `${selector} style exists`);
+    const end = css.indexOf("}", start);
+    return css.slice(start, end + 1);
+  };
+  const block = cssBlock(".agent-permission-banner");
+  const allowButtons = cssBlock(".agent-permission-allow-actions .agent-permission-button");
+  const primary = cssBlock(".agent-permission-button.primary");
+
+  assert.doesNotMatch(block, /border:/);
+  assert.doesNotMatch(block, /border-radius:/);
+  assert.doesNotMatch(block, /background:/);
+  assert.doesNotMatch(block, /box-shadow:/);
+  assert.match(block, /gap:\s*6px;/);
+  assert.match(block, /padding:\s*4px 0 2px;/);
+  assert.match(allowButtons, /width:\s*64px;/);
+  assert.match(allowButtons, /min-height:\s*26px;/);
+  assert.doesNotMatch(primary, /min-width:/);
 });
 
 test("desktop fellow controls save through fellow runtime control adapter", () => {

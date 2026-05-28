@@ -20,7 +20,7 @@
   // Injected at init time. All functions below use these bare identifiers as
   // they did when inline in app.js — keeping diffs minimal.
   let state, els, mia;
-  let escapeHtml, setText, formatRunTime, renderMessageHtml;
+  let escapeHtml, setText, formatRunTime;
   let render, renderView, renderChat;
 
   function initTasksPanel(deps) {
@@ -30,7 +30,6 @@
     escapeHtml = deps.escapeHtml;
     setText = deps.setText;
     formatRunTime = deps.formatRunTime;
-    renderMessageHtml = deps.renderMessageHtml;
     render = deps.render;
     renderView = deps.renderView;
     renderChat = deps.renderChat;
@@ -347,16 +346,16 @@
     let timezone = "UTC";
     try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { /* keep UTC */ }
 
-    let sessionId;
+    let conversationId;
     try {
-      sessionId = await resolveSessionForFellow(fellowId);
+      conversationId = await resolveConversationForFellow(fellowId);
     } catch (e) {
-      return showError("无法为该 Agent 准备会话：" + (e?.message || e));
+      return showError("无法为该 Agent 准备云端对话：" + (e?.message || e));
     }
-    if (!sessionId) return showError("该 Agent 还没有可用会话，请先和它聊一句。");
+    if (!conversationId) return showError("该 Agent 还没有可用云端对话，请先完成登录后重试。");
 
     try {
-      const created = await window.mia.tasks.create({ title, fellowId, sessionId, prompt, trigger, timezone });
+      const created = await window.mia.tasks.create({ title, fellowId, conversationId, prompt, trigger, timezone });
       closeTaskCreate();
       state.selectedTaskId = created?.id || "";
       state.selectedRunId = "";
@@ -368,21 +367,15 @@
     }
   }
 
-  // Bind the task to a session that ACTUALLY EXISTS in the store, so its output
-  // lands in a conversation the user can find. activeSessionIdByPersona can point
-  // at an unsaved/empty session that gets pruned → a phantom binding, so only
-  // trust it when it's present in chatStore; otherwise use the fellow's latest
-  // real session, and only create one when the fellow has none.
-  async function resolveSessionForFellow(fellowKey) {
-    const list = state.chatStore?.sessions?.[fellowKey];
-    const active = state.activeSessionIdByPersona?.[fellowKey];
-    if (Array.isArray(list) && list.length) {
-      if (active && list.some((s) => s.id === active)) return active;
-      return list[0].id;
-    }
-    state.chatStore = await window.mia.createChatSession({ personaKey: fellowKey });
-    const created = state.chatStore?.sessions?.[fellowKey];
-    return Array.isArray(created) && created.length ? created[0].id : null;
+  async function resolveConversationForFellow(fellowKey) {
+    const key = String(fellowKey || "").trim();
+    if (!key) return null;
+    const existing = __global.miaSocial?.fellowConversationForKey?.(key);
+    if (existing?.id) return existing.id;
+    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
+    const fellow = fellows.find((item) => item?.key === key || item?.id === key) || { key };
+    const conversation = await __global.miaSocial?.ensureFellowConversation?.(fellow);
+    return conversation?.id || null;
   }
 
   function renderRunDetail(task) {
@@ -393,8 +386,7 @@
       return;
     }
     // Plain text, not a chat bubble — the run-detail is a report, not a conversation.
-    // Prefer the race-free copy stored on the run; fall back to the session message.
-    const outputText = run.outputText || lookupMessage(task.sessionId, run.outputMessageId)?.content || "";
+    const outputText = run.outputText || "";
     const outputHtml = outputText
       ? `<div class="run-output-text">${window.miaMarkdown.renderMarkdown(outputText)}</div>`
       : `<div class="run-detail-empty">${run.error ? `运行失败：${escapeHtml(run.error)}` : "本次没有产生输出。"}</div>`;
@@ -427,7 +419,7 @@
       renderTaskView();
     });
     els.tasksContent.querySelector("[data-action='open-conversation']")?.addEventListener("click", () => {
-      jumpToTaskSession(task);
+      jumpToTaskConversation(task);
     });
     els.tasksContent.querySelector("[data-action='run-now']")?.addEventListener("click", async () => {
       try { await window.mia.tasks.runNow(task.id); } catch (e) { console.warn("run-now failed", e); }
@@ -436,28 +428,14 @@
     });
   }
 
-  function lookupMessage(sessionId, messageId) {
-    if (!messageId) return null;
-    const buckets = state.chatStore?.sessions || {};
-    for (const key of Object.keys(buckets)) {
-      const bucket = buckets[key];
-      const arr = Array.isArray(bucket) ? bucket : (bucket?.sessions || []);
-      for (const s of arr) {
-        if (s.id !== sessionId) continue;
-        return (s.messages || []).find((m) => m.id === messageId) || null;
-      }
-    }
-    return null;
-  }
-
-  function jumpToTaskSession(task) {
-    const fellowKey = findFellowForSession(task.sessionId) || task.fellowId;
-    state.activeKey = fellowKey;
+  function jumpToTaskConversation(task) {
+    const conversationId = task.conversationId || task.sessionId;
+    if (!conversationId) return;
+    const fellowKey = task.fellowId || "";
+    state.activeKey = "";
     state.activeContactKey = fellowKey;
-    if (state.activeSessionIdByPersona) {
-      state.activeSessionIdByPersona[fellowKey] = task.sessionId;
-    }
     state.activeView = "chat";
+    __global.miaSocial?.setActiveConversationId?.(conversationId);
     if (typeof render === "function") render();
     else { renderView(); if (typeof renderChat === "function") renderChat(); }
   }
@@ -487,7 +465,8 @@
   }
 
   function renderTaskDetail(task) {
-    const sessionTitle = lookupSessionTitle(task.sessionId) || task.sessionId;
+    const conversationId = task.conversationId || task.sessionId || "";
+    const conversationTitle = conversationTitleFor(task) || conversationId;
     const pauseLabel = task.status === "paused" ? "启用" : "暂停";
     const pauseAction = task.status === "paused" ? "resume" : "pause";
     const closed = task.status === "done" || task.status === "failed";
@@ -497,9 +476,9 @@
       <article class="task-detail">
         <header class="task-detail-head">
           <div class="task-detail-source">
-            <small>来源会话</small>
-            <strong>${escapeHtml(sessionTitle)} · ${escapeHtml(fellowName(task.fellowId))}</strong>
-            <button class="link" type="button" data-jump-session="${escapeHtml(task.sessionId)}">[打开 →]</button>
+            <small>来源对话</small>
+            <strong>${escapeHtml(conversationTitle)} · ${escapeHtml(fellowName(task.fellowId))}</strong>
+            <button class="link" type="button" data-jump-conversation="${escapeHtml(conversationId)}">[打开 →]</button>
           </div>
           <div class="task-detail-actions">
             <button class="secondary" type="button" data-action="run-now">运行一次</button>
@@ -535,15 +514,10 @@
     attachTaskDetailHandlers(task);
   }
 
-  function lookupSessionTitle(sessionId) {
-    const allSessions = state.chatStore?.sessions || {};
-    for (const key of Object.keys(allSessions)) {
-      const arr = allSessions[key];
-      if (!Array.isArray(arr)) continue;
-      const found = arr.find((s) => s.id === sessionId);
-      if (found) return found.title || null;
-    }
-    return null;
+  function conversationTitleFor(task) {
+    const conversationId = task.conversationId || task.sessionId;
+    const conversation = conversationId ? __global.miaSocial?.getConversationById?.(conversationId) : null;
+    return conversation?.name || conversation?.title || null;
   }
 
   function attachTaskDetailHandlers(task) {
@@ -555,7 +529,7 @@
           if (action === "pause")   await window.mia.tasks.pause(task.id);
           if (action === "resume")  await window.mia.tasks.resume(task.id);
           if (action === "delete") {
-            if (!confirm(`删除任务「${task.title}」？已发生的历史记录会保留在会话里。`)) return;
+            if (!confirm(`删除任务「${task.title}」？已发生的历史记录会保留在对话里。`)) return;
             await window.mia.tasks.delete(task.id);
             state.selectedTaskId = "";
           }
@@ -572,26 +546,11 @@
         renderTaskView();
       });
     });
-    els.tasksContent.querySelectorAll("[data-jump-session]").forEach((btn) => {
+    els.tasksContent.querySelectorAll("[data-jump-conversation]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        jumpToTaskSession(task);
+        jumpToTaskConversation(task);
       });
     });
-  }
-
-  function findFellowForSession(sessionId) {
-    const fellows = state.runtime?.fellows || state.runtime?.personas || [];
-    const allSessions = state.chatStore?.sessions || {};
-    for (const f of fellows) {
-      const arr = allSessions[f.key];
-      if (!Array.isArray(arr)) continue;
-      if (arr.some((s) => s.id === sessionId)) return f.key;
-    }
-    for (const key of Object.keys(allSessions)) {
-      const arr = allSessions[key];
-      if (Array.isArray(arr) && arr.some((s) => s.id === sessionId)) return key;
-    }
-    return null;
   }
 
   async function loadTasksFromDaemon() {
@@ -603,44 +562,12 @@
     }
   }
 
-  // The daemon owns the chat store and is the single writer. When it appends a
-  // task's reply it broadcasts `sessions_changed`; the desktop just reloads the
-  // authoritative store from disk and re-renders — no second writer, no merge
-  // guesswork, so the reply reliably shows up in the executor's conversation.
-  let _reloadRetry = null;
-  async function reloadChatFromDisk() {
-    // Never touch state.chatStore mid-stream: streaming render + the final append
-    // re-resolve from it, so replacing it under an in-flight turn corrupts that
-    // turn. Defer until generation finishes, then reload.
-    if (state.isGenerating) {
-      clearTimeout(_reloadRetry);
-      _reloadRetry = setTimeout(reloadChatFromDisk, 1500);
-      return;
-    }
-    try {
-      const fresh = await window.mia.loadChatSessions();
-      if (fresh && fresh.sessions) {
-        state.chatStore = fresh;
-        if (state.activeView === "chat" && typeof render === "function") render();
-      }
-    } catch (e) {
-      console.warn("reload chat after task event failed", e);
-    }
-  }
-
   let _tasksUnsubscribe = null;
   function subscribeTaskEvents() {
     if (_tasksUnsubscribe) return;
     _tasksUnsubscribe = window.mia.tasks.subscribe(async (envelope) => {
-      if (envelope.type === "sessions_changed") {
-        await reloadChatFromDisk();
-        return;
-      }
       await loadTasksFromDaemon();
       if (envelope.type === "finished" || envelope.type === "failed") {
-        // Reload chat too in case the sessions_changed event was missed (e.g. the
-        // SSE reconnected after the daemon wrote).
-        if (envelope.type === "finished") await reloadChatFromDisk();
         const taskId = envelope.payload?.taskId;
         if (taskId && state.selectedTaskId !== taskId) {
           state.tasksUnread.set(taskId, (state.tasksUnread.get(taskId) || 0) + 1);

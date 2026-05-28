@@ -1163,7 +1163,7 @@ body.topbar-click-capture .topbar {
 }
 
 .session-trigger:hover {
-  background: var(--hover-background);
+  background: var(--field);
 }
 
 .session-menu-wrap {
@@ -1177,7 +1177,7 @@ body.topbar-click-capture .topbar {
   height: 34px;
   padding: 0 10px;
   border-radius: 10px;
-  background: transparent;
+  background: var(--field);
   color: var(--text);
 }
 
@@ -2173,6 +2173,192 @@ body.topbar-click-capture .topbar {
 
 .composer.dragging-attachment {
   background: color-mix(in srgb, var(--surface-soft) 88%, var(--accent));
+}
+
+.agent-permission-banner {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 4px 0 2px;
+}
+
+.agent-permission-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.agent-permission-source {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.agent-permission-source::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb) / 0.64);
+}
+
+.agent-permission-kicker {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+  font-size: 14px;
+  font-weight: 520;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-permission-heading strong {
+  flex: 0 0 auto;
+  max-width: 46%;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 13.5px;
+  font-weight: 430;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-permission-description {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-permission-preview {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 11px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--field) 72%, var(--surface));
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-permission-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-permission-allow-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-permission-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--field);
+  color: color-mix(in srgb, var(--text) 70%, var(--muted));
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  touch-action: manipulation;
+  transition: background 120ms ease, color 120ms ease, filter 120ms ease, opacity 120ms ease;
+}
+
+.agent-permission-allow-actions .agent-permission-button {
+  flex: 0 0 64px;
+  width: 64px;
+  min-height: 26px;
+  padding: 0 6px;
+}
+
+.agent-permission-button:hover:not(:disabled) {
+  background: var(--field);
+}
+
+.agent-permission-button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.agent-permission-button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.06);
+}
+
+.agent-permission-button.ghost {
+  background: transparent;
+  color: var(--faint);
+  padding-left: 8px;
+}
+
+.agent-permission-button.ghost:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.agent-permission-button-label {
+  white-space: nowrap;
+}
+
+.agent-permission-key {
+  color: color-mix(in srgb, currentColor 56%, transparent);
+  font-size: 10.5px;
+  font-weight: 520;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.agent-permission-button:disabled {
+  opacity: 0.55;
+}
+
+@media (max-width: 720px) {
+  .agent-permission-actions {
+    flex-wrap: wrap;
+  }
+
+  .agent-permission-allow-actions {
+    flex: 1 1 100%;
+  }
+
+  .agent-permission-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .agent-permission-heading strong {
+    max-width: 100%;
+  }
 }
 
 .composer-input-row {
@@ -3924,7 +4110,7 @@ body.topbar-click-capture .topbar {
 
 .settings-panel .secondary:hover:not(:disabled) {
   border-color: transparent;
-  background: var(--hover-background);
+  background: rgb(0 0 0 / 0.055);
 }
 
 .settings-actions {
@@ -4234,7 +4420,7 @@ body.topbar-click-capture .topbar {
 }
 
 .pairing-link:hover {
-  background: var(--hover-background);
+  background: var(--field);
 }
 
 .pairing-hint {

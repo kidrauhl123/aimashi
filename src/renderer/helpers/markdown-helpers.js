@@ -241,12 +241,52 @@
     return `
       <figure class="message-code-block" data-language="${escapeHtml(lang)}">
         <figcaption>
-          <span>${escapeHtml(label)}</span>
-          <button type="button" data-copy-code aria-label="复制代码" title="复制代码">⧉</button>
+          <button type="button" class="message-code-copy" data-copy-code aria-label="复制 ${escapeHtml(label)} 代码" title="复制 ${escapeHtml(label)} 代码">${escapeHtml(label)}</button>
         </figcaption>
         <pre><code class="syntax-code language-${escapeHtml(lang)}">${highlightCode(String(code || "").replace(/\n$/, ""), lang)}</code></pre>
       </figure>
     `;
+  }
+
+  function splitTableCells(line) {
+    let text = String(line || "").trim();
+    if (text.startsWith("|")) text = text.slice(1);
+    if (text.endsWith("|")) text = text.slice(0, -1);
+    return text.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
+  }
+
+  function isTableDelimiterRow(line) {
+    if (!line || line.indexOf("-") === -1) return false;
+    const cells = splitTableCells(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  function tableCellAlignment(spec) {
+    const left = spec.startsWith(":");
+    const right = spec.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return "";
+  }
+
+  function renderTable(headerLine, delimiterLine, rowLines) {
+    const aligns = splitTableCells(delimiterLine).map(tableCellAlignment);
+    const headers = splitTableCells(headerLine);
+    const styleFor = (index) => (aligns[index] ? ` style="text-align:${aligns[index]}"` : "");
+    const head = headers
+      .map((cell, index) => `<th${styleFor(index)}>${renderInlineMarkdown(cell)}</th>`)
+      .join("");
+    const body = rowLines
+      .map((rowLine) => {
+        const cells = splitTableCells(rowLine);
+        const tds = headers
+          .map((_, index) => `<td${styleFor(index)}>${renderInlineMarkdown(cells[index] || "")}</td>`)
+          .join("");
+        return `<tr>${tds}</tr>`;
+      })
+      .join("");
+    return `<div class="message-table-wrap"><table class="message-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function renderMarkdown(value) {
@@ -271,7 +311,8 @@
       flushList();
     };
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const fenceMatch = line.match(/^```([A-Za-z0-9_+.-]*)\s*$/);
       if (fence) {
         if (fenceMatch) {
@@ -322,6 +363,25 @@
         }
         list.items.push(ordered[1]);
         continue;
+      }
+      if (line.indexOf("|") !== -1 && isTableDelimiterRow(lines[i + 1])) {
+        // GFM requires the delimiter row to have the same column count as the
+        // header. The mismatch check also rejects most accidental paragraph + rule
+        // combinations (e.g. one-cell `---` after a sentence containing a `|`).
+        const headerCells = splitTableCells(line);
+        const delimiterCells = splitTableCells(lines[i + 1]);
+        if (headerCells.length === delimiterCells.length && headerCells.length > 0) {
+          flushTextBlocks();
+          const rowLines = [];
+          let j = i + 2;
+          while (j < lines.length && lines[j].trim() && lines[j].indexOf("|") !== -1) {
+            rowLines.push(lines[j]);
+            j++;
+          }
+          html.push(renderTable(line, lines[i + 1], rowLines));
+          i = j - 1;
+          continue;
+        }
       }
       paragraph.push(line);
     }

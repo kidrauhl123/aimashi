@@ -34,8 +34,6 @@
     return {
       runtime: null,
       activeKey: "",
-      chatStore: { schema_version: 1, readAt: {}, sessions: {} },
-      activeSessionIdByPersona: {},
       generatingTitleIds: new Set(),
       generatedFiles: new Map(),
       startupTasks: [],

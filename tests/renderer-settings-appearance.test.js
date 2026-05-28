@@ -53,6 +53,13 @@ function loadAppearanceModule() {
   return { api, documentElement, styleValues };
 }
 
+function cssBlock(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cssSource.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(match, `missing CSS block for ${selector}`);
+  return match[1];
+}
+
 test("appearance normalizers preserve both list and selection choices", () => {
   const { api } = loadAppearanceModule();
 
@@ -97,4 +104,11 @@ test("desktop appearance settings do not expose removed font presets", () => {
   assert.doesNotMatch(htmlSource, /<option value="mono">/);
   assert.doesNotMatch(cssSource, /\.font-choice\[data-font-preset="sf-pro"\]/);
   assert.doesNotMatch(cssSource, /\.font-choice\[data-font-preset="mono"\]/);
+});
+
+test("hover background toggle does not erase controls that already have a fill", () => {
+  assert.match(cssBlock(".session-trigger:hover"), /background:\s*var\(--field\);/);
+  assert.match(cssBlock(".agent-permission-button:hover:not(:disabled)"), /background:\s*var\(--field\);/);
+  assert.match(cssBlock(".settings-panel .secondary:hover:not(:disabled)"), /background:\s*rgb\(0 0 0 \/ 0\.055\);/);
+  assert.match(cssBlock(".pairing-link:hover"), /background:\s*var\(--field\);/);
 });

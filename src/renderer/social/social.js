@@ -5,6 +5,31 @@
 (function (global) {
   // Decision: cap initial-message fetch to 30 conversations to keep bootstrap fast.
   const INITIAL_CONVERSATIONS_CAP = 30;
+  // Fetch a small recent overlap so older local SQLite rows can be upgraded when
+  // the server adds fields like trace_json after the row was first cached.
+  const MESSAGE_BACKFILL_OVERLAP = 50;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Device-local memory of the last conversation the user had open, so relaunch
+  // lands back on it instead of an empty chat pane. Same renderer-prefs convention
+  // as mia.sidebarWidth; not synced across devices on purpose.
+  const LAST_CONVERSATION_KEY = "mia.lastActiveConversationId";
+
+  function readLastActiveConversationId() {
+    try {
+      return (typeof window !== "undefined" && window.localStorage?.getItem(LAST_CONVERSATION_KEY)) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function writeLastActiveConversationId(id) {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return;
+      if (id) window.localStorage.setItem(LAST_CONVERSATION_KEY, id);
+    } catch {
+      // localStorage may be unavailable in restricted renderer contexts.
+    }
+  }
 
   // Lazy shared-dep accessor (mirrors unreadShared / sendPipelineShared) so the
   // module still loads in test VMs where neither the global nor require exists.
@@ -71,6 +96,7 @@
     myUsername: "",
     myUserId: "",
     cloudAgentRunsByConversation: new Map(),
+    pendingPermissionsById: new Map(),
     // unreadByConversation: conversationId → count. Bumped by WS conversation.message_appended when
     // the message is from someone else and the conversation isn't currently open.
     // Cleared by setActiveConversationId (and on bootstrap — incomingRequests path
@@ -79,6 +105,9 @@
   };
 
   let deps = null;
+  let _cloudRunRenderFrame = 0;
+  let _permissionBannerWired = false;
+  const _permissionDecisionInFlight = new Set();
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -254,10 +283,13 @@
     } else if (name === "run.completed" || name === "complete") {
       run.text = eventText(event) || run.text;
       run.status = "complete";
+      clearRunPermissions(run);
     } else if (name === "run.failed" || name === "error") {
       run.status = "error";
+      clearRunPermissions(run);
     } else if (name === "run.cancelled") {
       run.status = "cancelled";
+      clearRunPermissions(run);
     } else if (name === "reasoning.available" || name === "reasoning_delta") {
       appendRunReasoning(run, event);
     } else if (name === "tool.started" || name === "tool_call_started") {
@@ -273,6 +305,10 @@
         tool.error = Boolean(event.error || event.data?.error);
         if (event.preview) tool.preview = String(event.preview);
       }
+    } else if (name === "permission_request") {
+      addRunPermission(run, event);
+    } else if (name === "permission_resolved") {
+      removeRunPermission(run, event);
     }
   }
 
@@ -348,6 +384,13 @@
     });
   }
 
+  function markRenderedTraceBlocks(containerEl) {
+    const renderer = global.miaTraceBlocks;
+    if (renderer && typeof renderer.markRenderedTraceBlocks === "function") {
+      renderer.markRenderedTraceBlocks(containerEl);
+    }
+  }
+
   function cloudRunFor(conversationId, runId = "") {
     const existing = moduleState.cloudAgentRunsByConversation.get(conversationId);
     if (existing) return existing;
@@ -359,11 +402,269 @@
       status: "running",
       createdAt: new Date().toISOString(),
       tools: [],
+      pendingPermissions: [],
       toolsById: new Map(),
       toolsByName: new Map()
     };
     moduleState.cloudAgentRunsByConversation.set(conversationId, run);
     return run;
+  }
+
+  function normalizePermissionRequest(event = {}) {
+    const requestId = String(event.requestId || event.id || "").trim();
+    if (!requestId) return null;
+    return {
+      requestId,
+      engine: String(event.engine || "").trim(),
+      fellowKey: String(event.fellowKey || "").trim(),
+      fellowName: String(event.fellowName || event.fellow_name || "").trim(),
+      sessionId: String(event.sessionId || "").trim(),
+      toolName: String(event.toolName || event.tool || "tool").trim() || "tool",
+      title: String(event.title || "需要权限审批").trim(),
+      description: String(event.description || "").trim(),
+      preview: String(event.preview || "").trim(),
+      rule: event.rule && typeof event.rule === "object" ? event.rule : null,
+      createdAt: String(event.createdAt || new Date().toISOString())
+    };
+  }
+
+  function addRunPermission(run, event = {}) {
+    if (!run) return;
+    const request = normalizePermissionRequest(event);
+    if (!request) return;
+    moduleState.pendingPermissionsById.set(request.requestId, request);
+    run.pendingPermissions = (run.pendingPermissions || []).filter((item) => item.requestId !== request.requestId);
+    run.pendingPermissions.push(request);
+  }
+
+  function removeRunPermission(run, event = {}) {
+    const requestId = String(event.requestId || event.id || "").trim();
+    if (!requestId) return;
+    moduleState.pendingPermissionsById.delete(requestId);
+    if (run && Array.isArray(run.pendingPermissions)) {
+      run.pendingPermissions = run.pendingPermissions.filter((item) => item.requestId !== requestId);
+    }
+  }
+
+  function removePermissionRequestById(requestId) {
+    const id = String(requestId || "").trim();
+    if (!id) return;
+    moduleState.pendingPermissionsById.delete(id);
+    for (const run of moduleState.cloudAgentRunsByConversation.values()) {
+      if (!run || !Array.isArray(run.pendingPermissions)) continue;
+      run.pendingPermissions = run.pendingPermissions.filter((item) => item.requestId !== id);
+    }
+  }
+
+  function clearRunPermissions(run) {
+    if (!run || !Array.isArray(run.pendingPermissions)) return;
+    for (const request of run.pendingPermissions) {
+      moduleState.pendingPermissionsById.delete(request.requestId);
+    }
+    run.pendingPermissions = [];
+  }
+
+  function activePermissionRequest() {
+    const conversationId = moduleState.activeConversationId;
+    if (!conversationId) return null;
+    const run = moduleState.cloudAgentRunsByConversation.get(conversationId);
+    const pending = Array.isArray(run?.pendingPermissions) ? run.pendingPermissions : [];
+    return pending[0] || null;
+  }
+
+  function permissionEngineLabel(engine) {
+    if (engine === "claude-code") return "Claude Code";
+    if (engine === "codex") return "Codex";
+    return engine || "Agent";
+  }
+
+  function compactPermissionPreview(preview) {
+    const text = String(preview || "").trim();
+    if (!text) return "";
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const preferred = parsed.command || parsed.path || parsed.filePath || parsed.file || parsed.description;
+        if (preferred) return String(preferred).trim();
+      }
+    } catch (_) {
+      // Plain text previews are expected for Codex and some tool adapters.
+    }
+    return text.replace(/\s+/g, " ");
+  }
+
+  function compactPermissionTitle(request = {}) {
+    const title = String(request.title || "").trim();
+    const fellowName = permissionFellowName(request);
+    if (!title || title === "需要权限审批") return fellowName ? `${fellowName}请求执行权限` : "请求执行权限";
+    const actionMatch = title.match(/^([^\s想\n]{1,32})\s+(想.+)$/);
+    if (actionMatch) return `${fellowName || actionMatch[1]}${actionMatch[2]}`;
+    const requestMatch = title.match(/^([^\s请\n]{1,32})\s+(请求.+)$/);
+    if (requestMatch) return `${fellowName || requestMatch[1]}${requestMatch[2]}`;
+    return title;
+  }
+
+  function permissionFellowName(request = {}) {
+    const explicit = String(request.fellowName || "").trim();
+    if (explicit) return explicit;
+    const key = String(request.fellowKey || "").trim();
+    if (!key) return "";
+    const fellow = moduleState.fellows.find((item) => {
+      const candidates = [item?.key, item?.id, item?.fellowId, item?.fellow_id].map((value) => String(value || "").trim());
+      return candidates.includes(key);
+    });
+    return String(fellow?.name || fellow?.displayName || fellow?.title || "").trim();
+  }
+
+  function isChatNearBottom(chatEl) {
+    if (!chatEl) return false;
+    return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < SCROLL_STICK_THRESHOLD_PX;
+  }
+
+  function stickChatToBottomAfterPermissionLayout(chatEl, shouldStick) {
+    if (!chatEl || !shouldStick) return;
+    const schedule = typeof global.requestAnimationFrame === "function"
+      ? global.requestAnimationFrame.bind(global)
+      : (fn) => setTimeout(fn, 16);
+    schedule(() => {
+      chatEl.scrollTop = chatEl.scrollHeight;
+    });
+  }
+
+  function renderAgentPermissionBanner() {
+    const banner = document.getElementById("agentPermissionBanner");
+    if (!banner) return;
+    const chatEl = document.getElementById("chat");
+    const shouldStickChat = isChatNearBottom(chatEl);
+    const request = activePermissionRequest();
+    if (!request) {
+      banner.classList.add("hidden");
+      banner.innerHTML = "";
+      if (banner.dataset) delete banner.dataset.requestId;
+      stickChatToBottomAfterPermissionLayout(chatEl, shouldStickChat);
+      return;
+    }
+    const preview = compactPermissionPreview(request.preview);
+    const previewHtml = preview
+      ? `<code class="agent-permission-preview">${escapeHtml(preview)}</code>`
+      : "";
+    const isDecisionInFlight = _permissionDecisionInFlight.has(request.requestId);
+    const disabledAttr = isDecisionInFlight ? " disabled" : "";
+    banner.classList.remove("hidden");
+    banner.dataset.requestId = request.requestId;
+    banner.innerHTML = `
+      <div class="agent-permission-heading">
+        <div class="agent-permission-source">
+          <span class="agent-permission-kicker">${escapeHtml(permissionEngineLabel(request.engine))} · ${escapeHtml(request.toolName)}</span>
+        </div>
+        <strong>${escapeHtml(compactPermissionTitle(request))}</strong>
+      </div>
+      ${request.description ? `<p class="agent-permission-description">${escapeHtml(request.description)}</p>` : ""}
+      ${previewHtml}
+      <div class="agent-permission-actions">
+        <button type="button" class="agent-permission-button ghost agent-permission-deny" data-permission-decision="deny"${disabledAttr}>
+          <span class="agent-permission-button-label">拒绝</span>
+          <span class="agent-permission-key">esc</span>
+        </button>
+        <div class="agent-permission-allow-actions">
+          <button type="button" class="agent-permission-button" data-permission-decision="allow_always"${disabledAttr}>
+            <span class="agent-permission-button-label">始终允许</span>
+          </button>
+          <button type="button" class="agent-permission-button primary" data-permission-decision="allow_once" aria-label="允许本次"${disabledAttr}>
+            <span class="agent-permission-button-label">允许</span>
+            <span class="agent-permission-key">↵</span>
+          </button>
+        </div>
+      </div>
+    `;
+    stickChatToBottomAfterPermissionLayout(chatEl, shouldStickChat);
+  }
+
+  async function submitPermissionDecision(button) {
+    const banner = document.getElementById("agentPermissionBanner");
+    const requestId = banner?.dataset?.requestId || "";
+    const decision = button?.dataset?.permissionDecision || "";
+    if (!requestId || !decision || !window.mia?.respondChatPermission) return;
+    if (_permissionDecisionInFlight.has(requestId)) return;
+    _permissionDecisionInFlight.add(requestId);
+    const buttons = banner.querySelectorAll("button[data-permission-decision]");
+    buttons.forEach((item) => { item.disabled = true; });
+    try {
+      const result = await window.mia.respondChatPermission({ requestId, decision });
+      if (!result || result.ok === false) throw new Error(result?.error || "权限审批失败");
+      removePermissionRequestById(requestId);
+      renderAgentPermissionBanner();
+    } catch (error) {
+      buttons.forEach((item) => { item.disabled = false; });
+      deps?.appendTransientChat?.("assistant", error?.message || String(error || "权限审批失败"));
+    } finally {
+      _permissionDecisionInFlight.delete(requestId);
+    }
+  }
+
+  function isTextEntryTarget(target) {
+    const tagName = String(target?.tagName || "").toLowerCase();
+    return tagName === "input" || tagName === "textarea" || target?.isContentEditable === true;
+  }
+
+  function permissionDecisionButton(decision) {
+    const banner = document.getElementById("agentPermissionBanner");
+    if (!banner || banner.classList.contains("hidden")) return null;
+    return banner.querySelector(`button[data-permission-decision="${decision}"]:not(:disabled)`);
+  }
+
+  function isPrimaryPointerActivation(event) {
+    if (event?.type !== "pointerdown" && event?.type !== "mousedown") return true;
+    return event.button == null || event.button === 0;
+  }
+
+  function closestPermissionDecisionButton(target) {
+    const element = target?.closest ? target : target?.parentElement;
+    return element?.closest?.("button[data-permission-decision]") || null;
+  }
+
+  function handlePermissionDecisionEvent(event) {
+    if (!isPrimaryPointerActivation(event)) return null;
+    const button = closestPermissionDecisionButton(event.target);
+    if (!button || button.disabled) return null;
+    event.preventDefault();
+    event.stopPropagation();
+    return submitPermissionDecision(button);
+  }
+
+  function wirePermissionBanner() {
+    if (_permissionBannerWired) return;
+    _permissionBannerWired = true;
+    const banner = document.getElementById("agentPermissionBanner");
+    banner?.addEventListener("pointerdown", handlePermissionDecisionEvent, true);
+    banner?.addEventListener("click", handlePermissionDecisionEvent);
+    document.addEventListener("keydown", (event) => {
+      if (!activePermissionRequest() || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        const button = permissionDecisionButton("deny");
+        if (!button) return;
+        event.preventDefault();
+        submitPermissionDecision(button);
+      } else if (event.key === "Enter" && !event.shiftKey && !isTextEntryTarget(event.target)) {
+        const button = permissionDecisionButton("allow_once");
+        if (!button) return;
+        event.preventDefault();
+        submitPermissionDecision(button);
+      }
+    });
+  }
+
+  function scheduleCloudRunRender(conversationId) {
+    if (conversationId !== moduleState.activeConversationId) return;
+    if (_cloudRunRenderFrame) return;
+    const schedule = typeof global.requestAnimationFrame === "function"
+      ? global.requestAnimationFrame.bind(global)
+      : (fn) => setTimeout(fn, 16);
+    _cloudRunRenderFrame = schedule(() => {
+      _cloudRunRenderFrame = 0;
+      _reRenderActiveChat();
+      renderAgentPermissionBanner();
+    });
   }
 
   // Parse dm:<a>:<b> and return the user-id that is NOT myUserId.
@@ -407,6 +708,22 @@
     moduleState.messageCache.set(conversationId, { messages: [], maxSeq: 0 });
   }
 
+  function fellowConversationRef(conversationId) {
+    const parts = String(conversationId || "").split(":");
+    if (parts.length < 3 || parts[0] !== "fellow") return "";
+    return parts.slice(2).join(":");
+  }
+
+  function isLegacyFellowSessionConversation(conversation) {
+    if (!conversation || conversation.type !== "fellow") return false;
+    return UUID_RE.test(fellowConversationRef(conversation.id));
+  }
+
+  function visibleSocialConversations(conversations) {
+    if (!Array.isArray(conversations)) return [];
+    return conversations.filter((conversation) => !isLegacyFellowSessionConversation(conversation));
+  }
+
   function upsertConversation(conversation) {
     if (!conversation || !conversation.id) return null;
     const idx = moduleState.conversations.findIndex((r) => r.id === conversation.id);
@@ -426,12 +743,13 @@
   function fellowConversationForKey(fellowKey) {
     const key = String(fellowKey || "").trim();
     if (!key) return null;
-    return moduleState.conversations.find((conversation) => {
+    const matches = moduleState.conversations.filter((conversation) => {
       const conversationId = String(conversation?.id || "");
       const decorated = String(conversation?.decorations?.fellowKey || conversation?.fellowKey || "").trim();
       return (conversation?.type === "fellow" || conversationId.startsWith("fellow:"))
         && (decorated === key || conversationId.split(":").slice(2).join(":") === key);
-    }) || null;
+    });
+    return matches.find((conversation) => !isLegacyFellowSessionConversation(conversation)) || matches[0] || null;
   }
 
   function currentState() {
@@ -515,7 +833,6 @@
         onConversation: upsertConversation
       });
       const conversation = result.conversation || null;
-      if (conversation) _schedulePersistSnapshot();
       return conversation;
     } catch (error) {
       console.warn("[social] ensure fellow conversation failed", fellowKey, error);
@@ -611,77 +928,58 @@
 
   function initSocialModule(d) {
     deps = d;
+    wirePermissionBanner();
+    renderAgentPermissionBanner();
   }
 
-  // ── local snapshot (cold-start cache) ──────────────────────────────────────
-  // The conversation list + last-message previews + group member tiles +
-  // unread counts are persisted to localStorage after every cloud sync so
-  // the next launch renders the full list with zero network wait. Cloud
-  // remains the source of truth; the snapshot is a render cache that the
-  // background bootstrap overwrites.
+  function currentCloudUserId() {
+    const runtime = currentState().runtime || {};
+    const cloudUser = runtime.cloud?.user || {};
+    return String(cloudUser.id || cloudUser.userId || moduleState.myUserId || "").trim();
+  }
 
-  const _SNAPSHOT_KEY = "mia.social.snapshot.v1";
-  let _snapshotTimer = 0;
+  async function warmMessagesFromLocalCache(api, conversations) {
+    if (!api || typeof api.getCachedConversationMessages !== "function") return;
+    await Promise.all((conversations || []).slice(0, INITIAL_CONVERSATIONS_CAP).map(async (conversation) => {
+      if (!conversation?.id) return;
+      if (!moduleState.messageCache.has(conversation.id)) {
+        moduleState.messageCache.set(conversation.id, { messages: [], maxSeq: 0 });
+      }
+      try {
+        const cachedRes = await api.getCachedConversationMessages(conversation.id, 50);
+        const cached = cachedRes?.ok ? (cachedRes.data?.messages || []) : [];
+        if (cached.length) _mergeMessagesIntoCache(conversation.id, cached);
+      } catch (err) {
+        console.warn("[social] cached bootstrap messages failed for", conversation.id, err?.message || err);
+      }
+    }));
+  }
 
-  function _persistSnapshot() {
+  async function hydrateCachedSocialBootstrap(api) {
+    const userId = currentCloudUserId();
+    if (!userId || !api || typeof api.getCachedSocialBootstrap !== "function") return false;
+    let snapshot = null;
     try {
-      if (typeof localStorage === "undefined" || !moduleState.myUserId) return;
-      const previews = {};
-      for (const [conversationId, entry] of moduleState.messageCache) {
-        const last = entry?.messages?.[entry.messages.length - 1];
-        if (last) {
-          previews[conversationId] = {
-            id: last.id, body_md: last.body_md, created_at: last.created_at,
-            seq: last.seq, sender_kind: last.sender_kind, sender_ref: last.sender_ref
-          };
-        }
-      }
-      const members = {};
-      for (const [conversationId, list] of _conversationMembersCache) members[conversationId] = list;
-      const snapshot = {
-        userId: moduleState.myUserId,
-        conversations: moduleState.conversations,
-        friends: moduleState.friends,
-        fellows: moduleState.fellows,
-        previews,
-        members,
-        unread: Object.fromEntries(moduleState.unreadByConversation),
-        ts: Date.now()
-      };
-      localStorage.setItem(_SNAPSHOT_KEY, JSON.stringify(snapshot));
-    } catch { /* quota / unavailable — cache is best-effort */ }
-  }
-
-  function _schedulePersistSnapshot() {
-    if (_snapshotTimer) return;
-    _snapshotTimer = setTimeout(() => { _snapshotTimer = 0; _persistSnapshot(); }, 400);
-  }
-
-  function _hydrateSnapshot() {
-    try {
-      if (typeof localStorage === "undefined") return false;
-      const raw = localStorage.getItem(_SNAPSHOT_KEY);
-      if (!raw) return false;
-      const snap = JSON.parse(raw);
-      if (!snap || !Array.isArray(snap.conversations)) return false;
-      moduleState.conversations = snap.conversations;
-      moduleState.friends = Array.isArray(snap.friends) ? snap.friends : [];
-      moduleState.fellows = Array.isArray(snap.fellows) ? snap.fellows : [];
-      moduleState.myUserId = snap.userId || "";
-      for (const [conversationId, last] of Object.entries(snap.previews || {})) {
-        moduleState.messageCache.set(conversationId, { messages: [last], maxSeq: last.seq || 0 });
-      }
-      for (const [conversationId, list] of Object.entries(snap.members || {})) {
-        if (Array.isArray(list)) _conversationMembersCache.set(conversationId, list);
-      }
-      for (const [conversationId, n] of Object.entries(snap.unread || {})) {
-        if (n > 0) moduleState.unreadByConversation.set(conversationId, n);
-      }
-      // We have a renderable list right now — open the sidebar gate so the
-      // first render paints from cache instead of waiting on the network.
-      moduleState.bootstrapped = true;
-      return true;
-    } catch { return false; }
+      const res = await api.getCachedSocialBootstrap(userId);
+      snapshot = res?.ok ? res.data : null;
+    } catch (err) {
+      console.warn("[social] getCachedSocialBootstrap failed:", err?.message || err);
+      return false;
+    }
+    if (!snapshot || snapshot.userId !== userId || !Array.isArray(snapshot.conversations) || !snapshot.conversations.length) return false;
+    moduleState.myUserId = userId;
+    moduleState.conversations = snapshot.conversations;
+    moduleState.friends = Array.isArray(snapshot.friends) ? snapshot.friends : [];
+    moduleState.fellows = Array.isArray(snapshot.fellows) ? snapshot.fellows : [];
+    _conversationMembersCache.clear();
+    for (const [conversationId, list] of Object.entries(snapshot.members || {})) {
+      if (Array.isArray(list)) _conversationMembersCache.set(conversationId, list);
+    }
+    await warmMessagesFromLocalCache(api, visibleSocialConversations(moduleState.conversations));
+    restoreLastActiveConversation();
+    moduleState.bootstrapped = true;
+    if (deps && typeof deps.render === "function") deps.render();
+    return true;
   }
 
   // ── bootstrapAfterLogin ───────────────────────────────────────────────────
@@ -693,6 +991,7 @@
     }
     const api = window.mia.social;
     try {
+      await hydrateCachedSocialBootstrap(api);
       const [meRes, friendsRes, incomingRes, outgoingRes, fellowsRes] = await Promise.all([
         api.myUsername(),
         api.listFriends(),
@@ -709,9 +1008,10 @@
       }
       if (meRes.ok) {
         const freshUserId = meRes.data.id || "";
-        // Account switch since the cached snapshot was written → drop the
+        // Account switch since the cached social bootstrap was written → drop the
         // stale render cache so we don't briefly show another user's conversations.
         if (moduleState.myUserId && freshUserId && moduleState.myUserId !== freshUserId) {
+          moduleState.conversations = [];
           moduleState.messageCache.clear();
           _conversationMembersCache.clear();
           moduleState.unreadByConversation.clear();
@@ -733,16 +1033,15 @@
       await bootstrapCloudSettings();
 
       // Fetch initial messages for up to INITIAL_CONVERSATIONS_CAP conversations.
-      const conversationsToFetch = moduleState.conversations.slice(0, INITIAL_CONVERSATIONS_CAP);
+      const conversationsToFetch = visibleSocialConversations(moduleState.conversations).slice(0, INITIAL_CONVERSATIONS_CAP);
       await Promise.all(conversationsToFetch.map(async (conversation) => {
         if (!moduleState.messageCache.has(conversation.id)) {
           moduleState.messageCache.set(conversation.id, { messages: [], maxSeq: 0 });
         }
-        // Warm from the local cache first (instant, offline-ok), then fetch only
-        // messages newer than what we already have — no full re-pull each launch.
-        // The cursor is the persisted cache's max seq (a contiguous tail), NOT the
-        // in-memory snapshot preview seq, which has a gap below it. When nothing is
-        // persisted yet the cursor is 0, so this is a full backfill.
+        // Warm from the SQLite cache first (instant, offline-ok), then fetch a
+        // bounded overlap from cloud so cached rows can pick up newer fields.
+        // The delta cursor comes from the persisted cache, not any stale renderer
+        // memory left from the current session.
         let cachedMaxSeq = 0;
         if (typeof api.getCachedConversationMessages === "function") {
           try {
@@ -757,7 +1056,8 @@
           }
         }
         try {
-          const msgRes = await api.listConversationMessages(conversation.id, cachedMaxSeq, 100);
+          const sinceSeq = Math.max(0, cachedMaxSeq - MESSAGE_BACKFILL_OVERLAP);
+          const msgRes = await api.listConversationMessages(conversation.id, sinceSeq, 100);
           if (msgRes.ok) {
             const fresh = (msgRes.data?.messages || []).map((m) => messageWithFallbackRunTrace(conversation.id, m));
             _mergeMessagesIntoCache(conversation.id, fresh);
@@ -785,12 +1085,12 @@
     } catch (err) {
       console.error("[social] bootstrapAfterLogin failed:", err);
     }
+    restoreLastActiveConversation();
     // Flip the bootstrap flag AFTER everything is in the cache so the
     // first render that includes cloud rows also has fellow personas —
     // the sidebar shows both data sources in one paint instead of
     // "personas now, conversations later" (the visible "割裂" the user reported).
     moduleState.bootstrapped = true;
-    _persistSnapshot();
     if (deps && typeof deps.render === "function") deps.render();
   }
 
@@ -849,7 +1149,6 @@
         { ...fellow, key },
         ...moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== key)
       ];
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -858,7 +1157,6 @@
       const fellowId = String(payload?.fellowId || payload?.id || "").trim();
       if (!fellowId) return;
       moduleState.fellows = moduleState.fellows.filter((item) => String(item?.key || item?.id || "") !== fellowId);
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -906,7 +1204,7 @@
       run.hermesRunId = payload.hermesRunId || run.hermesRunId || "";
       run.fellowId = payload.fellowId || run.fellowId || "";
       run.status = "running";
-      if (deps && typeof deps.render === "function") deps.render();
+      scheduleCloudRunRender(conversationId);
       return;
     }
 
@@ -917,7 +1215,7 @@
       const run = cloudRunFor(conversationId, payload.runId || "");
       run.fellowId = payload.fellowId || run.fellowId || "";
       applyCloudAgentRunEvent(run, hermesEvent);
-      if (deps && typeof deps.render === "function") deps.render();
+      scheduleCloudRunRender(conversationId);
       return;
     }
 
@@ -938,7 +1236,9 @@
       if (cachedMessage.seq > entry.maxSeq) entry.maxSeq = cachedMessage.seq;
       const { SenderKind } = conversationKinds();
       if (cachedMessage.sender_kind === SenderKind.Fellow) {
+        clearRunPermissions(moduleState.cloudAgentRunsByConversation.get(conversationId));
         moduleState.cloudAgentRunsByConversation.delete(conversationId);
+        renderAgentPermissionBanner();
         // First fellow reply in an untitled conversation → auto-title it.
         if (deps && typeof deps.maybeGenerateConversationTitle === "function") {
           Promise.resolve(deps.maybeGenerateConversationTitle(conversationId)).catch(() => {});
@@ -958,7 +1258,6 @@
       if (fresh && conversationId === moduleState.activeConversationId) {
         _appendMessageToActiveChat(message, { stick: isMine });
       }
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -969,7 +1268,6 @@
       upsertConversation(conversation);
       // H2: Invalidate member cache so next mention parse refetches newly-added fellows
       _conversationMembersCache.delete(conversation.id);
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -981,7 +1279,6 @@
       const { conversation } = payload || {};
       if (!conversation || !conversation.id) return;
       upsertConversation(conversation);
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -1000,7 +1297,6 @@
       // cleanup is needed here. Leftover pin entries (orphaned by a
       // conversation delete the server didn't broadcast for some reason) age
       // out at the next settings PUT or are tolerated harmlessly.
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -1015,7 +1311,6 @@
         entry.messages = entry.messages.filter((m) => m.id !== messageId);
       }
       if (conversationId === moduleState.activeConversationId) _removeMessageFromActiveChat(messageId);
-      _schedulePersistSnapshot();
       if (deps && typeof deps.render === "function") deps.render();
       return;
     }
@@ -1035,7 +1330,7 @@
   }
 
   function renderSidebarRows() {
-    const sidebarConversations = sessionHistoryShared().sidebarConversations(moduleState.conversations, {
+    const sidebarConversations = sessionHistoryShared().sidebarConversations(visibleSocialConversations(moduleState.conversations), {
       activeConversationId: moduleState.activeConversationId,
       messageCache: moduleState.messageCache
     });
@@ -1093,6 +1388,7 @@
     if (!containerEl) return;
     const conversationId = moduleState.activeConversationId;
     if (!conversationId) return;
+    renderAgentPermissionBanner();
 
     const entry = moduleState.messageCache.get(conversationId) || { messages: [], maxSeq: 0 };
     const conversation = moduleState.conversations.find((r) => r.id === conversationId);
@@ -1127,6 +1423,7 @@
       const streaming = _buildCloudAgentStreamingArticle(conversationId, color, members);
       if (streaming) containerEl.appendChild(streaming);
       window.miaAvatar?.hydrateAvatarVideos?.(containerEl);
+      markRenderedTraceBlocks(containerEl);
       applyScroll();
       if (!_conversationMembersCache.has(conversationId)) {
         _fetchAndCacheConversationMembers(conversationId);
@@ -1142,6 +1439,7 @@
     const streaming = _buildCloudAgentStreamingArticle(conversationId, color);
     if (streaming) containerEl.appendChild(streaming);
     window.miaAvatar?.hydrateAvatarVideos?.(containerEl);
+    markRenderedTraceBlocks(containerEl);
     applyScroll();
   }
 
@@ -1325,6 +1623,7 @@
   function _reRenderActiveChat() {
     const chatEl = document.getElementById("chat");
     if (chatEl && moduleState.activeConversationId) renderConversationChat(chatEl);
+    renderAgentPermissionBanner();
   }
 
   // Remove a single message's bubble from the open chat without a full repaint.
@@ -1392,7 +1691,6 @@
     const removed = entry ? entry.messages.find((m) => m.id === messageId) : null;
     if (entry) entry.messages = entry.messages.filter((m) => m.id !== messageId);
     if (conversationId === moduleState.activeConversationId) _removeMessageFromActiveChat(messageId);
-    _schedulePersistSnapshot();
     if (deps && typeof deps.render === "function") deps.render();
     let ok = false;
     try {
@@ -1406,7 +1704,6 @@
       // Restore the message and re-render so the user doesn't silently lose it.
       entry.messages.push(removed);
       entry.messages.sort((a, b) => a.seq - b.seq);
-      _schedulePersistSnapshot();
       if (conversationId === moduleState.activeConversationId) _reRenderActiveChat();
       if (deps && typeof deps.render === "function") deps.render();
     }
@@ -1862,9 +2159,19 @@
 
   function getActiveConversationId() { return moduleState.activeConversationId; }
   function getConversationById(conversationId) { return moduleState.conversations.find((r) => r.id === conversationId) || null; }
+
+  function mergeFetchedMessage(existing, incoming) {
+    if (!existing) return incoming;
+    const merged = { ...existing, ...incoming };
+    if (existing.translation && incoming.translation == null) merged.translation = existing.translation;
+    if (existing.trace_json && incoming.trace_json == null) merged.trace_json = existing.trace_json;
+    if (existing.trace && incoming.trace == null) merged.trace = existing.trace;
+    return merged;
+  }
+
   // Merge a batch of fetched/cached messages into a conversation's cache entry,
-  // de-duping by id and keeping seq order. Existing entries win on id collision
-  // (same as the WS append path); only genuinely new messages are added.
+  // de-duping by id and keeping seq order. Fetched server rows may be richer than
+  // the cold-start preview row, so collisions are merged instead of skipped.
   function _mergeMessagesIntoCache(conversationId, incoming) {
     if (!moduleState.messageCache.has(conversationId)) {
       moduleState.messageCache.set(conversationId, { messages: [], maxSeq: 0 });
@@ -1875,7 +2182,9 @@
     let changed = false;
     for (const msg of incoming) {
       if (!msg || !msg.id) continue;
-      if (!byId.has(msg.id)) { byId.set(msg.id, msg); changed = true; }
+      const existing = byId.get(msg.id);
+      byId.set(msg.id, mergeFetchedMessage(existing, msg));
+      changed = true;
       const seq = Number(msg.seq) || 0;
       if (seq > entry.maxSeq) entry.maxSeq = seq;
     }
@@ -1897,10 +2206,9 @@
     if (!conversationId || !api || _ensuringConversations.has(conversationId)) return;
     _ensuringConversations.add(conversationId);
     try {
-      // 1. Local persisted cache → instant paint. Its max seq is the delta cursor:
-      //    the cache holds a contiguous recent tail, so "since cachedMaxSeq" is safe.
-      //    The in-memory snapshot preview (a single latest message) must NOT be used
-      //    as the cursor — it has a gap below it and would skip the whole history.
+      // 1. SQLite cache → instant paint. Its max seq is the delta cursor because
+      //    it holds a contiguous recent tail. Stale renderer memory is deliberately
+      //    ignored for cursoring so it cannot skip the server backfill.
       let cachedMaxSeq = 0;
       if (typeof api.getCachedConversationMessages === "function") {
         try {
@@ -1916,10 +2224,12 @@
         }
       }
       // 2. Fetch from cloud: a full backfill when nothing is persisted yet
-      //    (cachedMaxSeq === 0 → since_seq 0), otherwise only the delta newer than
-      //    the persisted tail.
+      //    (cachedMaxSeq === 0 → since_seq 0), otherwise a small overlap newer
+      //    than cachedMaxSeq - MESSAGE_BACKFILL_OVERLAP so cached rows can pick
+      //    up newly-added fields like trace_json.
       try {
-        const res = await api.listConversationMessages(conversationId, cachedMaxSeq, 100);
+        const sinceSeq = Math.max(0, cachedMaxSeq - MESSAGE_BACKFILL_OVERLAP);
+        const res = await api.listConversationMessages(conversationId, sinceSeq, 100);
         if (res?.ok) {
           const fresh = (res.data?.messages || []).map((m) => messageWithFallbackRunTrace(conversationId, m));
           if (fresh.length) {
@@ -1930,7 +2240,6 @@
               // read mark past them (the initial open marked read at the stale seq).
               markConversationRead(conversationId);
             }
-            _schedulePersistSnapshot();
           }
         }
       } catch (err) {
@@ -1943,18 +2252,35 @@
 
   function setActiveConversationId(id) {
     const next = id || null;
+    // Re-selecting the already-active conversation has no observable effect but
+    // would otherwise re-write localStorage, re-POST a read mark, and re-trigger
+    // _ensureConversationMessages. Drop those redundant side effects up front.
+    if (next === moduleState.activeConversationId) return;
     // Any actual navigation (switching conversations, or leaving to a local fellow chat
     // that reuses #chat) invalidates the last-painted marker, so the next
     // renderConversationChat treats re-entry as a switch and lands at the latest message
     // instead of restoring a stale offset.
-    if (next !== moduleState.activeConversationId) _lastRenderedConversationId = null;
+    _lastRenderedConversationId = null;
     moduleState.activeConversationId = next;
     if (id) {
+      writeLastActiveConversationId(id);
       markConversationRead(id);
       // Fire-and-forget: keep the click snappy; cache paint + delta sync re-render async.
       _ensureConversationMessages(id);
     }
+    renderAgentPermissionBanner();
   }
+  // Relaunch restore: land on the conversation the user last had open. Skipped if
+  // the user already navigated during bootstrap, or if the saved conversation no
+  // longer exists (deleted, or belongs to a different signed-in account).
+  function restoreLastActiveConversation() {
+    if (moduleState.activeConversationId) return;
+    const savedId = readLastActiveConversationId();
+    if (!savedId) return;
+    if (!moduleState.conversations.some((conversation) => conversation.id === savedId)) return;
+    setActiveConversationId(savedId);
+  }
+
   function markConversationRead(conversationId) {
     if (!conversationId) return;
     moduleState.unreadByConversation.delete(conversationId);
@@ -2167,6 +2493,11 @@
     renderMsgBody: _renderMsgBody,
     renderAttachmentChips,
     renderSendStatus,
+    compactPermissionTitle,
+    cloudRunFor,
+    addRunPermission,
+    renderAgentPermissionBanner,
+    submitPermissionDecision,
     appendMessageToActiveChat: _appendMessageToActiveChat,
     adapterCtx
   };
@@ -2213,9 +2544,4 @@
     global.miaSocialGroups.attach(_internalCtx);
   }
 
-  // Hydrate the cold-start cache at module load — before app.js even calls
-  // initSocialModule — so the very first render() paints the full saved
-  // conversation list with zero flash (TG-style). bootstrapAfterLogin
-  // refreshes from cloud in the background and overwrites in place.
-  _hydrateSnapshot();
 })(typeof window !== "undefined" ? window : globalThis);
