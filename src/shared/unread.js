@@ -1,13 +1,10 @@
 // Shared unread-count + badge HTML helpers.
 //
-// Three call sites consume this module with structurally different
+// Cloud and task call sites consume this module with structurally different
 // state shapes (see docs/superpowers/plans/2026-05-23-shared-migration.md
 // Stage 3):
 //
-//   1. session-read-state.js — per-persona; walks message lists and
-//      compares each assistant message's createdAt against a stored
-//      `readAt` ISO timestamp.
-//   2. social.js / web/app.js — already track per-conversation counts in
+//   1. social.js / web/app.js — already track per-conversation counts in
 //      a Map<id, number>; the module just needs to read & sum them.
 //
 // Rather than fork into two modules we accept a polymorphic `readState`:

@@ -8,7 +8,6 @@
 //     avatar-crop editor; reverting "恢复默认" clears the override so the
 //     sidebar mosaic renders again.
 //   - 群名 (conversation.name)
-//   - 回复模式 (decorations.responseMode: "conductor" | "mentions-only")
 //   - 群目标 (decorations.pinnedGoal) — shown to the conductor's
 //     dispatch prompt as the group summary fallback.
 //   - 群主 (decorations.hostMember = { kind: "fellow", fellowId })
@@ -191,16 +190,6 @@
     }
   }
 
-  function renderResponseMode(el, conversation) {
-    if (!el) return;
-    const mode = conversation.decorations?.responseMode === "mentions-only" ? "mentions-only" : "conductor";
-    el.querySelectorAll("[data-group-response-mode]").forEach((btn) => {
-      const selected = btn.dataset.groupResponseMode === mode;
-      btn.classList.toggle("active", selected);
-      btn.setAttribute("aria-checked", selected ? "true" : "false");
-    });
-  }
-
   async function reload(conversationId) {
     const res = await global.mia.social.getConversation(conversationId);
     if (!res.ok) return;
@@ -234,7 +223,6 @@
     const goalInput = document.getElementById("groupInfoGoal");
     if (goalInput && document.activeElement !== goalInput) goalInput.value = conversation.decorations?.pinnedGoal || "";
 
-    renderResponseMode(document.getElementById("groupInfoResponseMode"), conversation);
     renderMembersSection(document.getElementById("groupInfoMembers"), conversation, members, fellows, _ctx.moduleState.friends || [], self);
   }
 
@@ -248,7 +236,6 @@
 
     const nameInput = document.getElementById("groupInfoName");
     const goalInput = document.getElementById("groupInfoGoal");
-    const responseModeEl = document.getElementById("groupInfoResponseMode");
     const closeBtn = document.getElementById("groupInfoClose");
     const resetCtxBtn = document.getElementById("groupInfoResetCtx");
     const avatarBtn = document.getElementById("groupInfoAvatarPreview");
@@ -277,7 +264,6 @@
       dialog.removeEventListener("click", onBackdrop);
       nameInput?.removeEventListener("change", onNameChange);
       goalInput?.removeEventListener("change", onGoalChange);
-      responseModeEl?.removeEventListener("click", onResponseModeClick);
       resetCtxBtn?.removeEventListener("click", onResetCtx);
       avatarBtn?.removeEventListener("click", onAvatarClick);
       avatarFile?.removeEventListener("change", onAvatarFile);
@@ -300,15 +286,6 @@
       const next = goalInput.value.trim();
       if (next === (conversation.decorations?.pinnedGoal || "")) return;
       const updated = await patchDecorations(conversation, { pinnedGoal: next || null });
-      if (updated) reload(conversationId);
-    }
-    async function onResponseModeClick(event) {
-      const btn = event.target.closest("[data-group-response-mode]");
-      if (!btn) return;
-      const conversation = _ctx.moduleState.conversations.find((r) => r.id === conversationId);
-      if (!conversation) return;
-      const next = btn.dataset.groupResponseMode === "mentions-only" ? "mentions-only" : "conductor";
-      const updated = await patchDecorations(conversation, { responseMode: next });
       if (updated) reload(conversationId);
     }
     async function onResetCtx() {
@@ -346,7 +323,6 @@
     dialog.addEventListener("click", onBackdrop);
     nameInput?.addEventListener("change", onNameChange);
     goalInput?.addEventListener("change", onGoalChange);
-    responseModeEl?.addEventListener("click", onResponseModeClick);
     resetCtxBtn?.addEventListener("click", onResetCtx);
     avatarBtn?.addEventListener("click", onAvatarClick);
     avatarFile?.addEventListener("change", onAvatarFile);

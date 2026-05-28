@@ -450,6 +450,34 @@ test("GET /api/conversations/:id returns conversation + members", async () => {
   } finally { await stopServer(ctx); }
 });
 
+test("GET /api/conversations/:id returns user member public identity without profile avatar payloads", async () => {
+  const ctx = await startServer();
+  try {
+    const alice = await register(ctx.port, "alice");
+    const bob = await register(ctx.port, "bob");
+    const avatarImage = "data:image/gif;base64," + "B".repeat(200_000);
+    const profile = await api(ctx.port, "PATCH", "/api/me/profile", {
+      token: bob.token,
+      body: {
+        avatarImage,
+        avatarCrop: { x: 1, y: 2, zoom: 3 },
+        avatarColor: "#111827"
+      }
+    });
+    assert.equal(profile.status, 200);
+
+    const conversation = await friendUp(ctx.port, alice, bob);
+    const r = await api(ctx.port, "GET", "/api/conversations/" + conversation.id, { token: alice.token });
+    assert.equal(r.status, 200);
+    const bobMember = r.body.members.find((member) => member.member_kind === "user" && member.member_ref === bob.user.id);
+    assert.equal(bobMember.user.id, bob.user.id);
+    assert.equal(bobMember.user.username, "bob");
+    assert.equal(Object.prototype.hasOwnProperty.call(bobMember.user, "avatarImage"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(bobMember.user, "avatarCrop"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(bobMember.user, "avatarColor"), false);
+  } finally { await stopServer(ctx); }
+});
+
 test("GET /api/conversations/:id returns fellow owner without profile avatar payloads", async () => {
   const ctx = await startServer();
   try {
@@ -633,7 +661,7 @@ test("POST /api/conversations creates group with creator + fellow + friend membe
       token: alice.token,
       body: {
         name: "Test Squad",
-        memberFellows: [{ fellowId: "codex" }],
+        memberFellows: [{ fellowId: "codex", runtimeKind: "cloud-hermes" }],
         memberFriendUserIds: [bob.user.id]
       }
     });
@@ -648,6 +676,7 @@ test("POST /api/conversations creates group with creator + fellow + friend membe
     assert.equal(fellowMembers.length, 1);
     assert.equal(fellowMembers[0].member_ref, "codex");
     assert.equal(fellowMembers[0].owner_id, alice.user.id);
+    assert.deepEqual(JSON.parse(fellowMembers[0].ai_perms_json), { runtimeKind: "cloud-hermes" });
   } finally { await stopServer(ctx); }
 });
 

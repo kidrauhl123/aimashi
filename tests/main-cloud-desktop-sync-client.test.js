@@ -66,19 +66,6 @@ function setup(overrides = {}) {
     readJson: (filePath) => filePath === "/profile.json"
       ? { avatarImage: "data:image/png;base64,user", avatarCrop: { y: 2 }, avatarColor: "#ffcc00" }
       : null,
-    loadChatStore: () => ({
-      sessions: {
-        codex: [{
-          id: "s_1",
-          title: "Codex chat",
-          messages: [
-            { id: "m_1", content: "hello", attachments: [{ name: "a.txt" }] },
-            { id: "m_empty", content: "   " },
-            { createdAt: "2026-05-25T00:00:00.000Z", text: "fallback text" }
-          ]
-        }]
-      }
-    }),
     startCloudEvents: () => { calls.startedEvents += 1; },
     startCloudBridge: () => { calls.startedBridge += 1; },
     stopCloudEvents: () => { calls.stoppedEvents += 1; },
@@ -117,11 +104,7 @@ test("login normalizes the cloud URL, resets local auth, then starts sockets wit
 });
 
 test("syncWorkspace syncs fellow identity and stable conversations without reading local sessions", async () => {
-  const { client, calls } = setup({
-    loadChatStore: () => {
-      throw new Error("local session store must not be read during login sync");
-    }
-  });
+  const { client, calls } = setup();
 
   await client.syncWorkspace();
 
@@ -146,26 +129,6 @@ test("syncWorkspace syncs fellow identity and stable conversations without readi
     runtimeKind: "desktop-local"
   });
   assert.deepEqual(calls.writes.at(-1), { user: { id: "u_1", username: "refreshed" } });
-});
-
-test("pushDesktopMessage keeps legacy local-mode fellow conversation message mirroring", async () => {
-  const { client, calls } = setup();
-
-  await client.pushDesktopMessage({
-    fellowKey: "codex",
-    session: { id: "s_2", title: "One-off" },
-    message: { id: "m_2", text: "single message", attachments: [] }
-  });
-
-  assert.deepEqual(calls.fetch.map((request) => [request.method, request.url]), [
-    ["PUT", "https://cloud.example/api/me/fellow-conversations/s_2"],
-    ["POST", "https://cloud.example/api/conversations/fellow%3Au_1%3As_2/messages"]
-  ]);
-  assert.deepEqual(calls.fetch[1].body, {
-    bodyMd: "single message",
-    attachments: [],
-    clientOpId: "op_fellow_msg_s_2_m_2"
-  });
 });
 
 test("pushAllFellows ensures a stable cloud conversation for each local fellow", async () => {

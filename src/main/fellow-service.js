@@ -9,8 +9,6 @@ function createFellowService({
   initializeRuntime,
   runtimePaths,
   fellowManifest,
-  loadChatStore,
-  saveChatStore,
   loadAgentSessionMap,
   saveAgentSessionMap,
   orphanTasksByFellow = () => 0,
@@ -193,11 +191,6 @@ function createFellowService({
     ]) {
       fs.rmSync(filePath, { force: true });
     }
-    const chatStore = loadChatStore();
-    delete chatStore.sessions[key];
-    if (chatStore.readAt) delete chatStore.readAt[key];
-    if (chatStore.manualUnread) delete chatStore.manualUnread[key];
-    saveChatStore(chatStore);
     const agentSessions = loadAgentSessionMap();
     for (const sessionKey of Object.keys(agentSessions)) {
       if (sessionKey.split(":")[1] === key) delete agentSessions[sessionKey];

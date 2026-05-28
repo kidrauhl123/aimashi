@@ -147,8 +147,8 @@ if [ "$DEPLOY_DRY_RUN" = "1" ]; then
 fi
 
 echo "==> Uploading $ARCHIVE to $REMOTE:$REMOTE_TMP"
-scp "$ARCHIVE" "$REMOTE:$REMOTE_TMP"
-scp "$ARCHIVE_SHA" "$REMOTE:$REMOTE_TMP.sha256"
+rsync -av --checksum --partial "$ARCHIVE" "$REMOTE:$REMOTE_TMP"
+rsync -av --checksum --partial "$ARCHIVE_SHA" "$REMOTE:$REMOTE_TMP.sha256"
 
 echo "==> Installing release on $REMOTE"
 ssh "$REMOTE" "bash -s" <<REMOTE_SCRIPT

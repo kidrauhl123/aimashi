@@ -30,17 +30,11 @@ function setup(t, overrides = {}) {
     cloudPushes: [],
     cloudDeletes: [],
     logs: [],
-    savedChatStores: [],
     savedAgentSessions: [],
     orphaned: [],
     taskEvents: [],
     rescans: 0,
     recalledPets: []
-  };
-  let chatStore = {
-    sessions: {},
-    readAt: {},
-    manualUnread: {}
   };
   let agentSessions = {};
   const fellowManifest = createFellowManifest({
@@ -53,12 +47,6 @@ function setup(t, overrides = {}) {
     initializeRuntime: () => { calls.initialize += 1; },
     runtimePaths: () => paths,
     fellowManifest,
-    loadChatStore: () => JSON.parse(JSON.stringify(chatStore)),
-    saveChatStore: (store) => {
-      chatStore = JSON.parse(JSON.stringify(store));
-      calls.savedChatStores.push(chatStore);
-      return chatStore;
-    },
     loadAgentSessionMap: () => ({ ...agentSessions }),
     saveAgentSessionMap: (store) => {
       agentSessions = { ...store };
@@ -84,8 +72,6 @@ function setup(t, overrides = {}) {
     paths,
     fellowManifest,
     service,
-    setChatStore: (store) => { chatStore = store; },
-    getChatStore: () => chatStore,
     setAgentSessions: (store) => { agentSessions = store; },
     getAgentSessions: () => agentSessions
   };
@@ -154,8 +140,6 @@ test("deleteFellow removes files and cleans dependent local state", async (t) =>
     paths,
     fellowManifest,
     service,
-    setChatStore,
-    getChatStore,
     setAgentSessions,
     getAgentSessions
   } = setup(t);
@@ -164,11 +148,6 @@ test("deleteFellow removes files and cleans dependent local state", async (t) =>
   const manifest = fellowManifest.loadFellowManifest();
   manifest.default_fellow = "bob";
   fellowManifest.saveFellowManifest(manifest);
-  setChatStore({
-    sessions: { bob: [{ id: "s_1" }], mia: [{ id: "s_2" }] },
-    readAt: { bob: "2026-01-01T00:00:00.000Z", mia: "2026-01-02T00:00:00.000Z" },
-    manualUnread: { bob: true, mia: true }
-  });
   setAgentSessions({
     "codex:bob:s_1": "external_bob",
     "codex:mia:s_2": "external_mia"
@@ -181,11 +160,6 @@ test("deleteFellow removes files and cleans dependent local state", async (t) =>
   assert.equal(fellowManifest.loadFellowManifest().default_fellow, "mia");
   assert.equal(fs.existsSync(path.join(paths.fellowDir, "bob.md")), false);
   assert.equal(fs.existsSync(path.join(paths.fellowDir, "bob.fellow.json")), false);
-  assert.deepEqual(getChatStore(), {
-    sessions: { mia: [{ id: "s_2" }] },
-    readAt: { mia: "2026-01-02T00:00:00.000Z" },
-    manualUnread: { mia: true }
-  });
   assert.deepEqual(getAgentSessions(), { "codex:mia:s_2": "external_mia" });
   assert.deepEqual(calls.orphaned, ["bob"]);
   assert.deepEqual(calls.taskEvents, [{ event: "orphaned", payload: { fellowId: "bob", count: 2 } }]);

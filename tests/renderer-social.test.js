@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const sessionHistory = require("../src/shared/session-history");
+const { avatarAssetForKey } = require("../src/shared/avatar-resolve");
 
 function loadSocial(options = {}) {
   const src = fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "social", "social.js"), "utf8");
@@ -76,11 +77,13 @@ function loadSocial(options = {}) {
 function installCloudConversationSource(mockWindow) {
   const root = path.join(__dirname, "..");
   const sharedSpec = fs.readFileSync(path.join(root, "src", "shared", "message-spec.js"), "utf8");
+  const sharedAvatarResolve = fs.readFileSync(path.join(root, "src", "shared", "avatar-resolve.js"), "utf8");
   const sharedContact = fs.readFileSync(path.join(root, "src", "shared", "contact.js"), "utf8");
   const sharedKinds = fs.readFileSync(path.join(root, "src", "shared", "conversation-kinds.js"), "utf8");
   const source = fs.readFileSync(path.join(root, "src", "renderer", "message-sources", "cloud-conversation-source.js"), "utf8");
   const context = vm.createContext({ window: mockWindow, globalThis: mockWindow, console });
   vm.runInContext("globalThis.miaMessageSpec = (function(){ const module = { exports: {} }; " + sharedSpec + "; return module.exports; })();", context);
+  vm.runInContext(sharedAvatarResolve, context);
   vm.runInContext("globalThis.miaContact = (function(){ const module = { exports: {} }; " + sharedContact + "; return module.exports; })();", context);
   vm.runInContext(sharedKinds, context);
   vm.runInContext(source, context);
@@ -768,6 +771,55 @@ test("sendInActiveConversation reconciles the websocket echo before the POST rep
   assert.equal(posted[0].body.turnId, localTurnId);
 });
 
+test("sendInActiveConversation reconciles a self websocket echo even when turn_id is absent", async () => {
+  const s = loadSocial();
+  const post = deferred();
+  s.moduleState.myUserId = "u_me";
+  s.__mockWindow.mia.social = {
+    postConversationMessage: async () => post.promise
+  };
+  s.moduleState.activeConversationId = "g_echo_missing_turn";
+  s.moduleState.conversations = [{ id: "g_echo_missing_turn", type: "group", name: "Echo" }];
+  s.moduleState.messageCache.set("g_echo_missing_turn", { messages: [], maxSeq: 0 });
+
+  const sendPromise = s.sendInActiveConversation("hello once");
+  const entry = s.moduleState.messageCache.get("g_echo_missing_turn");
+
+  s.handleCloudEvent({
+    type: "conversation.message_appended",
+    payload: {
+      conversationId: "g_echo_missing_turn",
+      message: {
+        id: "m_server_echo_no_turn",
+        seq: 1,
+        sender_kind: "user",
+        sender_ref: "u_me",
+        body_md: "hello once"
+      }
+    }
+  });
+
+  assert.deepEqual(entry.messages.map((m) => m.id), ["m_server_echo_no_turn"]);
+  assert.equal(entry.messages[0]._localPending, undefined);
+  assert.equal(entry.maxSeq, 1);
+
+  post.resolve({
+    ok: true,
+    data: {
+      message: {
+        id: "m_server_echo_no_turn",
+        seq: 1,
+        sender_kind: "user",
+        sender_ref: "u_me",
+        body_md: "hello once"
+      }
+    }
+  });
+  await sendPromise;
+
+  assert.deepEqual(entry.messages.map((m) => m.id), ["m_server_echo_no_turn"]);
+});
+
 test("sendInActiveConversation keeps a failed outgoing cloud message visible", async () => {
   const s = loadSocial();
   const posted = [];
@@ -929,7 +981,7 @@ test("renderConversationChat uses cloud fellow avatar when no local fellow exist
   assert.doesNotMatch(chat.children[0].innerHTML, /asset:mia/);
 });
 
-test("renderConversationChat self letter falls back to local profile, not cloud username", () => {
+test("renderConversationChat self identity prefers local profile, not cloud username", () => {
   const s = loadSocial();
   installCloudConversationSource(s.__mockWindow);
   s.__mockWindow.miaAvatar = {
@@ -969,8 +1021,10 @@ test("renderConversationChat self letter falls back to local profile, not cloud 
   s.renderConversationChat(chat);
 
   assert.equal(chat.children.length, 1);
-  assert.match(chat.children[0].innerHTML, />B<\/div>/);
+  assert.match(chat.children[0].innerHTML, /title="Boss"/);
+  assert.match(chat.children[0].innerHTML, new RegExp(avatarAssetForKey("u_me").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(chat.children[0].innerHTML, />7<\/div>/);
+  assert.doesNotMatch(chat.children[0].innerHTML, /title="7"/);
 });
 
 test("sendInActiveConversation posts group mentions in cloud fellow format", async () => {
@@ -1206,7 +1260,7 @@ test("handleCloudEvent does not infer group typing state from conductor-mode use
   const s = loadSocial();
   s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
   s.moduleState.myUserId = "u_me";
-  s.moduleState.conversations = [{ id: "g_typing", type: "group", decorations: { responseMode: "conductor" } }];
+  s.moduleState.conversations = [{ id: "g_typing", type: "group" }];
   s._internalCtx.conversationMembersCache.set("g_typing", [
     { member_kind: "user", member_ref: "u_me" },
     { member_kind: "fellow", member_ref: "codex", fellow_name: "小栗" }
@@ -1223,9 +1277,22 @@ test("handleCloudEvent does not infer group typing state from conductor-mode use
   assert.equal(s.moduleState.cloudAgentRunsByConversation.has("g_typing"), false);
 });
 
-test("renderConversationChat shows typing as soon as an agent run starts", () => {
-  const s = loadSocial();
-  s.initSocialModule({ getState: () => ({}), render: () => {}, els: {}, appendTransientChat: () => {} });
+test("cloud agent run start exposes typing state to the conversation header", () => {
+  const scheduled = [];
+  let headerPaints = 0;
+  const s = loadSocial({
+    requestAnimationFrame: (fn) => {
+      scheduled.push(fn);
+      return scheduled.length;
+    }
+  });
+  s.initSocialModule({
+    getState: () => ({}),
+    render: () => {},
+    els: {},
+    appendTransientChat: () => {},
+    paintHeaderStatus: () => { headerPaints += 1; }
+  });
   s.moduleState.activeConversationId = "fellow:u_a:mia";
   s.moduleState.conversations = [{ id: "fellow:u_a:mia", type: "fellow", decorations: { fellowKey: "mia" } }];
   s.moduleState.messageCache.set("fellow:u_a:mia", { messages: [], maxSeq: 0 });
@@ -1233,6 +1300,11 @@ test("renderConversationChat shows typing as soon as an agent run starts", () =>
     type: "cloud_agent_run_started",
     payload: { conversationId: "fellow:u_a:mia", runId: "car_1", fellowId: "mia" },
   });
+
+  assert.equal(s.activeConversationRun().status, "running");
+  assert.equal(s.activeConversationRun().fellowId, "mia");
+  scheduled.forEach((fn) => fn());
+  assert.equal(headerPaints, 1);
 
   const chat = {
     children: [],
@@ -1245,9 +1317,7 @@ test("renderConversationChat shows typing as soon as an agent run starts", () =>
   };
   s.renderConversationChat(chat);
 
-  assert.equal(chat.children.length, 1);
-  assert.match(chat.children[0].innerHTML, /typing-status/);
-  assert.match(chat.children[0].innerHTML, /正在输入/);
+  assert.equal(chat.children.length, 0);
 });
 
 test("renderConversationChat does not label tool-only agent activity as typing", () => {

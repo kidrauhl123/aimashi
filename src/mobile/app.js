@@ -19,7 +19,7 @@ const legacyCredentialKeys = {
 };
 const DEFAULT_AVATAR_VERSION = "white-circle-1";
 const fallbackSlashCommands = [
-  { command: "/new", description: "Start a new session (fresh session ID + history)" },
+  { command: "/new", description: "Start a fresh agent context" },
   { command: "/topic", description: "Enable or inspect Telegram DM topic sessions" },
   { command: "/retry", description: "Retry the last message (resend to agent)" },
   { command: "/undo", description: "Remove the last user/assistant exchange" },
@@ -777,9 +777,8 @@ async function loadData() {
   }
   await loadHealth();
   try {
-    const [fellowsResult, sessionsResult, runtimeResult, catalogResult, capsResult, commandsResult, codexModelsResult] = await Promise.allSettled([
+    const [fellowsResult, runtimeResult, catalogResult, capsResult, commandsResult, codexModelsResult] = await Promise.allSettled([
       request("/api/fellows"),
-      request("/api/chat/sessions"),
       request("/api/runtime/status"),
       request("/api/model/catalog"),
       request("/api/engine/capabilities"),
@@ -787,16 +786,9 @@ async function loadData() {
       request("/api/codex/models")
     ]);
     if (fellowsResult.status === "rejected") throw fellowsResult.reason;
-    if (sessionsResult.status === "rejected") throw sessionsResult.reason;
     const fellows = fellowsResult.value || {};
-    const sessions = sessionsResult.value || {};
     state.fellows = Array.isArray(fellows.fellows) ? fellows.fellows : [];
     state.defaultFellow = fellows.defaultFellow || state.fellows[0]?.key || "";
-    state.sessions = {
-      schema_version: sessions.schema_version || 1,
-      readAt: sessions.readAt || {},
-      sessions: sessions.sessions || {}
-    };
     if (runtimeResult.status === "fulfilled") applyRuntimeStatus(runtimeResult.value);
     if (catalogResult.status === "fulfilled") {
       const rows = Array.isArray(catalogResult.value?.models) ? catalogResult.value.models : catalogResult.value;
@@ -858,13 +850,31 @@ function activeSession() {
   return sessions.find((session) => session.id === state.activeSessionId) || sessions[0] || null;
 }
 
+function createEphemeralSession(fellowKey) {
+  const now = new Date().toISOString();
+  return {
+    id: `mobile:${fellowKey || "fellow"}:${randomId()}`,
+    personaKey: fellowKey,
+    title: "新对话",
+    createdAt: now,
+    updatedAt: now,
+    messages: []
+  };
+}
+
 function upsertSession(fellowKey, session) {
   if (!session?.id) return;
   const current = Array.isArray(state.sessions.sessions[fellowKey])
     ? state.sessions.sessions[fellowKey]
     : [];
+  const existing = current.find((item) => item.id === session.id);
+  const existingMessages = Array.isArray(existing?.messages) ? existing.messages : [];
+  const nextMessages = Array.isArray(session.messages) ? session.messages : [];
+  const merged = existing
+    ? { ...existing, ...session, messages: [...existingMessages, ...nextMessages] }
+    : session;
   state.sessions.sessions[fellowKey] = [
-    session,
+    merged,
     ...current.filter((item) => item.id !== session.id)
   ];
 }
@@ -1585,6 +1595,7 @@ function render() {
 
 function openChat(fellowKey) {
   state.activeFellowKey = fellowKey;
+  if (!sessionsFor(fellowKey).length) upsertSession(fellowKey, createEphemeralSession(fellowKey));
   state.activeSessionId = sessionsFor(fellowKey)[0]?.id || "";
   render();
 }
@@ -1599,15 +1610,8 @@ function closeChat() {
 async function createNewSession() {
   const fellow = activeFellow();
   if (!fellow) return;
-  const store = await request("/api/chat/session", {
-    method: "POST",
-    body: JSON.stringify({ personaKey: fellow.key })
-  });
-  state.sessions = {
-    schema_version: store.schema_version || 1,
-    readAt: store.readAt || {},
-    sessions: store.sessions || {}
-  };
+  const session = createEphemeralSession(fellow.key);
+  upsertSession(fellow.key, session);
   state.activeSessionId = sessionsFor(fellow.key)[0]?.id || "";
   render();
 }
@@ -1888,7 +1892,7 @@ async function relayStreamMessage({ fellowKey, sessionId, text, displayText, att
   let finalResult = null;
   const result = await relayRequest("/api/chat/stream", {
     method: "POST",
-    body: JSON.stringify({ fellowKey, sessionId, text, displayText, attachments })
+    body: JSON.stringify({ fellowKey, conversationId: sessionId, text, displayText, attachments })
   }, (message) => {
     if (message.event === "chat") {
       const envelope = message.data || {};
@@ -1916,7 +1920,7 @@ async function streamMessage({ fellowKey, sessionId, text, displayText, attachme
       "Content-Type": "application/json",
       Authorization: `Bearer ${state.token}`
     },
-    body: JSON.stringify({ fellowKey, sessionId, text, displayText, attachments })
+    body: JSON.stringify({ fellowKey, conversationId: sessionId, text, displayText, attachments })
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -1925,7 +1929,7 @@ async function streamMessage({ fellowKey, sessionId, text, displayText, attachme
   if (!response.body?.getReader) {
     const result = await request("/api/chat/send", {
       method: "POST",
-      body: JSON.stringify({ fellowKey, sessionId, text, displayText, attachments })
+      body: JSON.stringify({ fellowKey, conversationId: sessionId, text, displayText, attachments })
     });
     return result;
   }

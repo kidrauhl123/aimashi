@@ -54,7 +54,6 @@ function createRuntimePaths(deps = {}) {
       petRemoteSettings: path.join(home, "mia-pet-remote.json"),
       appearanceSettings: path.join(home, "mia-appearance.json"),
       windowSettings: path.join(home, "mia-window.json"),
-      chatSessions: path.join(home, "mia-sessions.json"),
       tasks: path.join(home, "mia-tasks.json"),
       attachmentsDir: path.join(home, "attachments"),
       groupsDir: path.join(home, "groups"),

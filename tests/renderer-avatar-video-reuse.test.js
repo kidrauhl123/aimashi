@@ -51,6 +51,10 @@ function makeEl() {
 }
 
 function loadAvatar() {
+  const resolveSrc = fs.readFileSync(
+    path.join(__dirname, "..", "src", "shared", "avatar-resolve.js"),
+    "utf8"
+  );
   const src = fs.readFileSync(
     path.join(__dirname, "..", "src", "renderer", "helpers", "avatar-helpers.js"),
     "utf8"
@@ -58,6 +62,7 @@ function loadAvatar() {
   const window = {};
   const document = { createElement: (tag) => (tag === "video" ? makeVideoEl() : makeEl()) };
   const ctx = vm.createContext({ window, globalThis: window, document, console });
+  vm.runInContext(resolveSrc, ctx);
   vm.runInContext(src, ctx);
   // Treat any .mp4 as a video; trim helpers are pass-through for the test.
   window.miaAvatarMedia = {

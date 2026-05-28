@@ -153,7 +153,7 @@
     const messageIndex = Number(index);
     const target = messageAtIndex(messageIndex);
     if (!text || !target) return;
-    if (state.isGenerating) {
+    if (window.miaIsActiveRunRunning?.()) {
       target.translation = {
         status: "error",
         error: "请等当前回复生成结束后再翻译。",

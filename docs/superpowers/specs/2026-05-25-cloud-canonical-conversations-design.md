@@ -27,7 +27,7 @@ Mia 当前已经有一部分 cloud-canonical 基础：
 1. 登录态下，所有用户可见 conversation 都以 cloud `rooms/messages` 为唯一权威源。
 2. Fellow 私聊变成 `room.type='fellow'` 的 cloud room，桌面、Web、移动端读取同一份消息。
 3. 桌面端发送 Fellow 私聊消息时先写 cloud，再由本地或云端 Agent 将回复写回同一个 room。
-4. `mia-sessions.json` 不再作为登录态聊天真相，只保留未登录本地模式和一次性迁移输入。
+4. `mia-sessions.json` 不再作为聊天真相；既不初始化，也不参与普通启动、daemon、relay/mobile 路径。
 5. 桌面侧边栏不再隐藏 fellow rooms；用户看到的 Fellow 私聊来自 cloud room。
 6. 删除、清空、重启、跨端登录后，旧本地 JSON 不会再把历史私聊推回云端。
 7. 保留本地 Agent runtime 能力：Claude Code、Codex、Hermes 的外部 thread/session id 仍存在本机，因为这些运行态绑定物理机器。
@@ -35,7 +35,7 @@ Mia 当前已经有一部分 cloud-canonical 基础：
 ## 3. 非目标
 
 - 本期不重写 cloud agent worker 隔离模型。
-- 本期不把未登录本地模式删掉。
+- 本期要求未登录不再进入本地 conversation 模式；未登录只引导登录或保留非 conversation 的本机运行态设置。
 - 本期不实现端到端加密。
 - 本期不把所有 renderer 文件一次性重构到理想大小。
 - 本期不解决多服务器部署；仍按当前单 cloud 服务 + SQLite 模型。
@@ -52,12 +52,12 @@ Mia 当前已经有一部分 cloud-canonical 基础：
 - Conversation 列表来自 `GET /api/rooms`。
 - Conversation 消息来自 `GET /api/rooms/:id/messages` 和 `room.message_appended` events。
 - New chat、send、rename、delete、pin、read mark 等用户可见 conversation 操作都写 cloud。
-- 本地 `mia-sessions.json` 不参与登录态 UI 合并，不做登录态自动 backfill。
+- 本地 `mia-sessions.json` 不参与 UI 合并，不做自动 backfill，也不再作为新安装默认文件创建。
 
 未登录态下：
 
-- 桌面端继续使用本地 `mia-sessions.json`，保持离线 Fellow 私聊可用。
-- 用户登录后，后续新消息走 cloud；历史迁移作为显式动作，不在普通启动时自动执行。
+- 不存在本地 Fellow 私聊 conversation 模式；用户需要登录 Mia Cloud。
+- 本地仍保留缓存和运行态数据，例如 cloud message cache、bootstrap cache、agent runtime session id、任务和设置。
 
 ### 4.2 Fellow 私聊 room 模型
 
@@ -106,21 +106,21 @@ room_members:
 - 旧本地消息可能已经在 cloud 有镜像，自动合并容易重复。
 - 本期目标是停止继续分裂，不是无损考古。
 
-提供一个显式迁移入口：
+如需要保留旧历史，迁移应作为独立一次性工具执行，而不是普通启动/runtime 路径：
 
 - 只在用户点击“迁移本机历史到云端”时执行。
 - 以 Fellow key 分组，把本地 messages 追加到 stable fellow room。
 - 每条消息使用稳定 `clientOpId`，重复点击不会重复写。
 - 迁移完成后本地原始 JSON 保留为备份，不再参与 UI。
 
-当前测试环境已清空，因此本期可以先实现迁移函数和测试，不一定暴露完整 UI。
+当前 runtime 已移除 `mia-sessions.json` 读写入口；旧文件如存在只作为用户备份留在磁盘上。
 
 ### 4.6 Renderer 数据流
 
-桌面 renderer 只保留两种 conversation source：
+桌面 renderer 只保留一种用户可见 conversation source：
 
 - 登录态：cloud room source。
-- 未登录态：local fellow session source。
+- 未登录态：登录引导，不创建本地 conversation。
 
 登录态侧边栏显示：
 
@@ -156,8 +156,8 @@ Fellow room 的标题和头像从 cloud fellow identity 或本地 fellow manifes
   - 继续负责本地 Agent 回复 cloud room。
   - 使用 room id 作为 Agent resume key。
 
-- `src/main/social/group-conductor.js`
-  - 群聊和 Fellow room 都是 room message 流；是否触发多个 Fellow 由 room type 和 mentions/协调者策略决定。
+- `src/cloud-agent/group-orchestrator.js`
+  - 群聊回复选择只在 cloud 侧执行一次；桌面端只执行明确的 `conversation.fellow_invocation_requested`。
 
 - `src/main/chat-store.js` 与 `src/main/chat-session-service.js`
   - 保留未登录模式。
@@ -172,14 +172,14 @@ Fellow room 的标题和头像从 cloud fellow identity 或本地 fellow manifes
 - `src/renderer/app.js`
   - 登录态 Fellow 点击打开 cloud fellow room。
   - 登录态 submit 走 `window.miaSocial.sendInActiveRoom()`。
-  - 未登录态仍走本地 `sendChat()` + `saveChatSession()`。
+  - 未登录态不进入本地 conversation；显示登录引导。
 
 - `src/renderer/message-sources/cloud-room-source.js`
   - 继续负责统一渲染 DM/group/fellow rooms。
 
 ## 6. 错误处理
 
-- Cloud 未登录或 token 失效：桌面回到未登录本地模式，并提示用户登录后多端同步才可用。
+- Cloud 未登录或 token 失效：桌面显示登录引导，不创建本地 conversation。
 - Cloud 写消息失败：输入框内容恢复，显示错误，不写本地 session 作为假成功。
 - Agent 回复失败：在同一个 room 写入失败状态消息或错误事件，不能把错误写到本地私聊。
 - WebSocket 断线：客户端使用已有 event log / rooms pull 重新拉取，不从本地 session 补消息。
@@ -206,7 +206,7 @@ Fellow room 的标题和头像从 cloud fellow identity 或本地 fellow manifes
 
 - 群聊发送仍走同一个 room send path。
 - DM 发送不受 Fellow 私聊改动影响。
-- 未登录本地 Fellow 私聊仍可发送和保存。
+- 未登录不会创建或保存本地 Fellow 私聊。
 - 已修复的异步回复串会话问题保持不回归。
 
 ## 8. 验收标准

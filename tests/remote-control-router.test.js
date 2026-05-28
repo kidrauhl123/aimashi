@@ -15,16 +15,11 @@ function setup(overrides = {}) {
     isDaemonProcess: false,
     getRuntimeStatus: () => ({ runtime: true }),
     loadFellowManifest: () => ({ fellows: [{ key: "codex" }], default_fellow: "codex" }),
-    loadChatSessions: () => ({ sessions: [] }),
     loadHermesModelCatalog: async () => ["hermes-model"],
     loadCodexModels: () => ["codex-model"],
     loadEngineCapabilities: async () => ({ hermes: true }),
     loadHermesSlashCommands: async () => [{ name: "/help" }],
     loadExternalAgentCommands: async (input) => ({ commands: [], input }),
-    newChatSession: (body) => ({ newSession: body }),
-    saveChatSession: (body) => ({ savedSession: body }),
-    saveChatReadState: (body) => ({ readState: body }),
-    renameChatSession: (body) => ({ renamed: body }),
     saveChatAttachment: (body) => ({ attachment: body }),
     readLocalFileAttachment: (body) => ({ file: body }),
     executeExternalAgentCommand: (body) => ({ command: body }),
@@ -107,21 +102,12 @@ test("returns handled=false for unknown routes instead of choosing an adapter re
   assert.deepEqual(await router.route({ method: "GET", path: "/api/nope" }), { handled: false });
 });
 
-test("routes chat-store writes so the daemon stays the single writer", async () => {
+test("does not expose legacy local chat session store routes", async () => {
   const { router } = setup();
 
-  // saveChatSession + create already existed; read-state and rename were added so
-  // the foreground app can route ALL chat-store writes through the daemon.
-  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/session/save", body: { personaKey: "f", session: { id: "s" } } }), {
-    handled: true,
-    data: { savedSession: { personaKey: "f", session: { id: "s" } } }
-  });
-  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/read-state/save", body: { readAt: { f: "t" } } }), {
-    handled: true,
-    data: { readState: { readAt: { f: "t" } } }
-  });
-  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/session/rename", body: { personaKey: "f", sessionId: "s", title: "x" } }), {
-    handled: true,
-    data: { renamed: { personaKey: "f", sessionId: "s", title: "x" } }
-  });
+  assert.deepEqual(await router.route({ method: "GET", path: "/api/chat/sessions" }), { handled: false });
+  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/session", body: { personaKey: "f" } }), { handled: false });
+  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/session/save", body: { personaKey: "f" } }), { handled: false });
+  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/session/rename", body: { personaKey: "f" } }), { handled: false });
+  assert.deepEqual(await router.route({ method: "POST", path: "/api/chat/read-state/save", body: { readAt: { f: "t" } } }), { handled: false });
 });

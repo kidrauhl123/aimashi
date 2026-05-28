@@ -59,7 +59,6 @@ function createExternalAgentCommandService(deps = {}) {
   const setAgentSessionEntry = deps.setAgentSessionEntry || (() => {});
   const ensureClaudeBridgePlugin = deps.ensureClaudeBridgePlugin || (() => ({ fingerprint: "" }));
   const loadAgentSessionMap = deps.loadAgentSessionMap || (() => ({}));
-  const loadChatStore = deps.loadChatStore || (() => ({ sessions: {} }));
   const listExternalAgentSessions = deps.listExternalAgentSessions || defaultListExternalAgentSessions;
   const relaySettings = deps.relaySettings || (() => ({}));
 
@@ -148,26 +147,13 @@ function createExternalAgentCommandService(deps = {}) {
     ].filter(Boolean).join("\n");
   }
 
-  function miaSessionTitleForAgentBinding(localSessionId, fellow) {
-    const id = String(localSessionId || "").trim();
+  function miaConversationTitleForAgentBinding(localConversationId, fellow) {
+    const id = String(localConversationId || "").trim();
     const fellowKey = String(fellow?.key || "").trim();
     if (!id || id.startsWith("title:") || id.startsWith("utility:")) return null;
     if (id.startsWith("group:")) return null;
-    try {
-      const sessions = loadChatStore().sessions?.[fellowKey] || [];
-      const session = sessions.find((item) => item.id === id);
-      if (session) {
-        return {
-          title: session.title || "Mia 对话",
-          preview: `${fellow?.name || fellowKey || "当前 Fellow"} 的 Mia 对话`,
-          updatedAt: Date.parse(session.updatedAt || session.createdAt || "") || 0
-        };
-      }
-    } catch {
-      // Fall through to a generic label.
-    }
     return {
-      title: "Mia 对话",
+      title: id.startsWith("fellow:") ? "Mia 云端对话" : "Mia 对话",
       preview: `${fellow?.name || fellowKey || "当前 Fellow"} 的 Mia 对话`,
       updatedAt: 0
     };
@@ -183,10 +169,10 @@ function createExternalAgentCommandService(deps = {}) {
     const rowsByExternalId = new Map();
     for (const [key, entry] of Object.entries(loadAgentSessionMap())) {
       if (!key.startsWith(prefix)) continue;
-      const localSessionId = key.slice(prefix.length);
+      const localConversationId = key.slice(prefix.length);
       const externalId = agentSessionEntryId(entry);
       if (!externalId || rowsByExternalId.has(externalId)) continue;
-      const local = miaSessionTitleForAgentBinding(localSessionId, fellow);
+      const local = miaConversationTitleForAgentBinding(localConversationId, fellow);
       if (!local) continue;
       const external = metadata.get(externalId) || {};
       rowsByExternalId.set(externalId, {

@@ -14,7 +14,7 @@ function skillZipBase64(bodyText) {
   return zip.toBuffer().toString("base64");
 }
 
-async function startServer() {
+async function startServer(extraEnv = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-test-"));
   const port = await freePort();
   return new Promise((resolve, reject) => {
@@ -24,6 +24,8 @@ async function startServer() {
         MIA_CLOUD_HOST: "127.0.0.1",
         MIA_CLOUD_PORT: String(port),
         MIA_CLOUD_DATA: tmpDir,
+        MIA_HERMES_SKILLS_MARKET: "0",
+        ...extraEnv,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -34,6 +36,46 @@ async function startServer() {
     proc.on("error", reject);
     setTimeout(done, 1500);
   });
+}
+
+async function startHermesFixtureServer() {
+  const port = await freePort();
+  const archive = new AdmZip();
+  archive.addFile("repo-main/skills/demo-remote/SKILL.md", Buffer.from("---\nname: demo-remote\n---\n# Demo Remote\n"));
+  archive.addFile("repo-main/skills/demo-remote/references/notes.md", Buffer.from("# Notes\n"));
+  const server = http.createServer((req, res) => {
+    if (req.url === "/index.json") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        version: 1,
+        generated_at: "2026-05-28T03:27:06.731039+00:00",
+        skill_count: 1,
+        skills: [{
+          name: "demo-remote",
+          description: "Remote GitHub skill",
+          source: "github",
+          identifier: "owner/repo/skills/demo-remote",
+          trust_level: "community",
+          repo: "owner/repo",
+          path: "skills/demo-remote",
+          tags: ["software"],
+          extra: {}
+        }]
+      }));
+    }
+    if (req.url === "/github-archive/owner/repo/zip/HEAD") {
+      const buf = archive.toBuffer();
+      res.writeHead(200, { "content-type": "application/zip", "content-length": buf.length });
+      return res.end(buf);
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("not found");
+  });
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => server.close(resolve))
+  };
 }
 
 async function stopServer(ctx) {
@@ -145,6 +187,36 @@ test("POST install bumps count once per user, returns download info; package dow
     const i3 = await api(ctx.port, "POST", "/api/skills/commit-craft/install", { token: bob.token });
     assert.equal(i3.body.skill.installCount, 2);
   } finally { await stopServer(ctx); }
+});
+
+test("Hermes remote skills appear in market and install as real packages", async () => {
+  const fixture = await startHermesFixtureServer();
+  const ctx = await startServer({
+    MIA_HERMES_SKILLS_MARKET: "1",
+    MIA_HERMES_SKILLS_INDEX_URL: `${fixture.url}/index.json`,
+    MIA_HERMES_GITHUB_ARCHIVE_BASE_URL: `${fixture.url}/github-archive`
+  });
+  try {
+    const alice = await register(ctx.port, "alice");
+    const list = await api(ctx.port, "GET", "/api/skills", { token: alice.token });
+    assert.equal(list.status, 200);
+    const remote = list.body.skills.find((skill) => skill.name === "demo-remote");
+    assert.ok(remote, "remote Hermes skill is listed");
+    assert.equal(remote.sourceLabel, "GitHub");
+    assert.equal(remote.upstreamId, "owner/repo/skills/demo-remote");
+
+    const inst = await api(ctx.port, "POST", `/api/skills/${encodeURIComponent(remote.id)}/install`, { token: alice.token });
+    assert.equal(inst.status, 200);
+    assert.equal(inst.body.skill.id, remote.id);
+    assert.ok(inst.body.download.url.includes("/api/hermes-skills/"));
+    assert.match(inst.body.download.checksum, /^[a-f0-9]{64}$/);
+
+    const pkg = await api(ctx.port, "GET", inst.body.download.url, { token: alice.token });
+    assert.equal(pkg.status, 200);
+  } finally {
+    await stopServer(ctx);
+    await fixture.close();
+  }
 });
 
 test("POST /api/skills publishes a user skill; it appears in the market and is installable", async () => {

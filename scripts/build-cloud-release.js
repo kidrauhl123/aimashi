@@ -330,10 +330,12 @@ function verifyRelease() {
     "api/src/cloud/messages-store.js",
     "api/src/cloud/dm-conversation.js",
     "api/src/cloud/desktop-bridge-permission.js",
+    "api/src/cloud/hermes-skills-source.js",
     "api/src/cloud-agent/runtime-bindings-store.js",
     "api/src/cloud-agent/cloud-agent-runs-store.js",
     "api/src/cloud-agent/default-fellow.js",
     "api/src/cloud-agent/attachment-materializer.js",
+    "api/src/cloud-agent/group-orchestrator.js",
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
@@ -342,6 +344,7 @@ function verifyRelease() {
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
     "api/src/permission-modes.js",
+    "api/skills/commit-craft/SKILL.md",
     "web/index.html",
     "web/admin-model.html",
     "web/admin-model.js",
@@ -381,10 +384,12 @@ function verifyRelease() {
     "api/src/cloud/messages-store.js",
     "api/src/cloud/dm-conversation.js",
     "api/src/cloud/desktop-bridge-permission.js",
+    "api/src/cloud/hermes-skills-source.js",
     "api/src/cloud-agent/runtime-bindings-store.js",
     "api/src/cloud-agent/cloud-agent-runs-store.js",
     "api/src/cloud-agent/default-fellow.js",
     "api/src/cloud-agent/attachment-materializer.js",
+    "api/src/cloud-agent/group-orchestrator.js",
     "api/src/cloud-agent/hermes-worker-manager.js",
     "api/src/cloud-agent/hermes-runs-client.js",
     "api/src/cloud-agent/dispatcher.js",
@@ -510,6 +515,7 @@ function verifyRelease() {
     require(${JSON.stringify(assertFile("api/src/cloud-agent/cloud-agent-runs-store.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/default-fellow.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/attachment-materializer.js"))});
+    require(${JSON.stringify(assertFile("api/src/cloud-agent/group-orchestrator.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-worker-manager.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/hermes-runs-client.js"))});
     require(${JSON.stringify(assertFile("api/src/cloud-agent/dispatcher.js"))});
@@ -550,6 +556,7 @@ function main() {
   copyFile("src/shared/group-fellow-routing.js", path.join(apiDir, "src", "shared", "group-fellow-routing.js"));
   copyFile("src/shared/skill-safety.js", path.join(apiDir, "src", "shared", "skill-safety.js"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
+  copyDir("skills", path.join(apiDir, "skills"));
   copyDir("src/web", webDir);
   copyDesktopDownloadArtifacts();
   copyDir("src/renderer/assets/model-icons", path.join(webDir, "assets", "model-icons"));

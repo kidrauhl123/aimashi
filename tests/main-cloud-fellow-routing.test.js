@@ -16,11 +16,9 @@ test("main routes cloud conversation AI events to main-process responders", () =
     : main;
 
   assert.match(main, /createLocalFellowResponder/);
-  assert.match(main, /createMainGroupConductor/);
+  assert.doesNotMatch(main, /createMainGroupConductor/);
   assert.match(main, /createMainFellowConversationResponder/);
   assert.match(main, /createMainFellowRuntimeDispatcher/);
-  assert.match(main, /getFellowRuntime:\s*async\s*\(fellowId,\s*runtimeKind\)/);
-  assert.match(main, /socialApi\.getFellowRuntime\(fellowId,\s*runtimeKind\)/);
   assert.match(main, /sendChat,\s*\n\s*postConversationMessageAsFellow/s);
   assert.match(
     routedSource,
@@ -32,7 +30,7 @@ test("main routes cloud conversation AI events to main-process responders", () =
   );
   const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
   assert.match(dispatcher, /localFellowResponder\.respond/);
-  assert.match(dispatcher, /mainGroupConductor\.handleConversationMessageAppended/);
+  assert.doesNotMatch(dispatcher, /mainGroupConductor/);
   assert.match(dispatcher, /mainFellowConversationResponder\.handleConversationMessageAppended/);
 });
 

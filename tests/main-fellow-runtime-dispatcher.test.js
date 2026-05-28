@@ -6,7 +6,6 @@ const { createMainFellowRuntimeDispatcher } = require("../src/main/social/fellow
 function setup(overrides = {}) {
   const calls = {
     responder: [],
-    group: [],
     fellowConversation: [],
     logs: []
   };
@@ -18,9 +17,6 @@ function setup(overrides = {}) {
         calls.responder.push(args);
         return true;
       }
-    },
-    mainGroupConductor: {
-      handleConversationMessageAppended: async (args) => calls.group.push(args)
     },
     mainFellowConversationResponder: {
       handleConversationMessageAppended: async (args) => calls.fellowConversation.push(args)
@@ -50,7 +46,7 @@ test("explicit fellow invocation goes through the unified runtime dispatcher", a
   assert.match(calls.responder[0].systemPrompt, /背景/);
 });
 
-test("conversation message events fan out through one fellow runtime dispatcher", async () => {
+test("conversation message events only wake explicit local responders, not group coordination", async () => {
   const { dispatcher, calls } = setup();
   const message = { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" };
 
@@ -60,7 +56,6 @@ test("conversation message events fan out through one fellow runtime dispatcher"
     message
   });
 
-  assert.deepEqual(calls.group, [{ conversationId: "g_1", message }]);
   assert.deepEqual(calls.fellowConversation, [{ conversationId: "g_1", message }]);
   assert.equal(calls.responder.length, 0);
 });
@@ -81,7 +76,6 @@ test("dispatcher gate prevents duplicate foreground and daemon replies", async (
   });
 
   assert.deepEqual(calls.responder, []);
-  assert.deepEqual(calls.group, []);
   assert.deepEqual(calls.fellowConversation, []);
 });
 

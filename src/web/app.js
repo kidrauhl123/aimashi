@@ -6,7 +6,7 @@ const API_BASE = "";
 const { formatConversationTime, formatMessageTime } = window.miaTimeFormat;
 const { computeUnreadForConversation, totalUnreadFromConversations, unreadBadgeHtml } = window.miaUnread;
 const { prepareOutgoingMessage } = window.miaSendPipeline;
-const { SenderKind } = window.miaConversationKinds;
+const { MemberKind, SenderKind } = window.miaConversationKinds;
 const sessionHistory = window.miaSessionHistory || {};
 const fellowRuntimeControl = window.miaFellowRuntimeControl || {};
 const engineContracts = window.miaEngineContracts || {};
@@ -1820,7 +1820,10 @@ function buildConversationMessageArticle(msg, conversation) {
 }
 
 function buildCloudAgentStreamingArticle(conversation, run) {
-  if (!conversation || !run || (run.status === "complete" && !run.text && !run.tools.length)) return "";
+  if (!conversation || !run) return "";
+  // Typing-only state ("running" with no body yet) renders as header dots,
+  // not a placeholder bubble in the message stream. See renderActiveChat.
+  if (!run.text && !run.tools.length && !run.reasoning) return "";
   const fellowKey = run.fellowId || conversation.decorations?.fellowKey || (conversation.id?.startsWith("fellow:") ? conversation.id.split(":")[2] : "mia");
   const msg = {
     id: `cloud-agent-stream-${run.runId || conversation.id}`,
@@ -1843,16 +1846,13 @@ function buildCloudAgentStreamingArticle(conversation, run) {
     text: (spec.authorName?.[0] || "?").toUpperCase()
   });
   const textHtml = run.text ? `<div class="bubble">${renderMarkdown(run.text)}</div>` : "";
-  const statusHtml = run.status === "running"
-    ? `<div class="bubble"><span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span></div>`
-    : "";
   const toolsHtml = run.tools.length
     ? `<div class="message-attachments">${run.tools.slice(-3).map((tool) => `<span class="message-attachment"><span>TOOL</span><strong>${escapeHtml(tool.name || "工具")}</strong><em>${escapeHtml(tool.status || "")}</em></span>`).join("")}</div>`
     : "";
   return `
     <article class="message assistant streaming">
       ${avatarMarkup}
-      <div class="message-stack">${textHtml}${statusHtml}${toolsHtml}</div>
+      <div class="message-stack">${textHtml}${toolsHtml}</div>
     </article>
   `;
 }

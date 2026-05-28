@@ -19,7 +19,6 @@ function createRuntimeInitializerService(deps = {}) {
   const defaultRelaySettings = deps.defaultRelaySettings || (() => ({}));
   const defaultUserProfile = deps.defaultUserProfile || (() => ({}));
   const defaultAppearanceSettings = deps.defaultAppearanceSettings || (() => ({}));
-  const defaultChatStore = deps.defaultChatStore || (() => ({ sessions: [] }));
   const loadFellowManifest = deps.loadFellowManifest || (() => ({ fellows: [] }));
   const saveFellowManifest = deps.saveFellowManifest || (() => {});
   const fellowPersonaBody = deps.fellowPersonaBody || ((name, bio) => `${name || "Mia"}\n\n${bio || ""}`);
@@ -136,10 +135,6 @@ function createRuntimeInitializerService(deps = {}) {
 
     if (writeFileIfMissing(p.appearanceSettings, JSON.stringify(defaultAppearanceSettings(), null, 2) + "\n")) {
       created.push("runtime/engine-home/mia-appearance.json");
-    }
-
-    if (writeFileIfMissing(p.chatSessions, JSON.stringify(defaultChatStore(), null, 2) + "\n", 0o600)) {
-      created.push("runtime/engine-home/mia-sessions.json");
     }
 
     if (writeFileIfMissing(p.soul, [

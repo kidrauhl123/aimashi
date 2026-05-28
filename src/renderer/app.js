@@ -314,17 +314,44 @@ function showNarrowSidebar() {
 applySidebarWidth(state.sidebarWidth);
 syncNarrowLayout();
 
+function isActiveRunRunning() {
+  return window.miaSocial?.activeConversationRun?.()?.status === "running";
+}
+window.miaIsActiveRunRunning = isActiveRunRunning;
+
+const TYPING_DOTS_HTML = `<span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span>`;
+
+// Reconcile #activeChatMeta with the active cloud-agent run state. While the
+// run is running we show typing dots; otherwise we restore the base meta
+// (私聊 / 群聊 / etc.) so a run that ends via run.failed / run.cancelled
+// (no message_appended to trigger a full render) doesn't leave stale dots.
+function paintHeaderStatus() {
+  if (!els.activeChatMeta) return;
+  if (isActiveRunRunning()) {
+    els.activeChatMeta.innerHTML = TYPING_DOTS_HTML;
+    return;
+  }
+  const social = window.miaSocial;
+  const conversationId = social?.getActiveConversationId?.();
+  if (!conversationId) return;
+  const conversation = social?.getConversationById?.(conversationId);
+  if (!conversation) return;
+  const personas = state.runtime?.fellows || state.runtime?.personas || [];
+  paintActiveCloudConversationHeader(conversation, { personas, social });
+}
+
 function renderSendButton() {
   if (!els.sendChat) return;
   const hasContent = Boolean(String(els.chatInput?.value || "").trim()) || state.pendingAttachments.length > 0;
   const cloudSignedIn = Boolean(state.runtime?.cloud?.enabled);
   const hasActiveCloudConversation = Boolean(window.miaSocial?.getActiveConversationId?.());
   const canSend = hasContent && (!cloudSignedIn || hasActiveCloudConversation);
-  els.sendChat.classList.toggle("stop", state.isGenerating);
-  els.sendChat.textContent = state.isGenerating ? "" : "↗";
-  els.sendChat.title = state.isGenerating ? "停止生成" : "发送";
-  els.sendChat.setAttribute("aria-label", state.isGenerating ? "停止生成" : "发送");
-  els.sendChat.disabled = !state.isGenerating && !canSend;
+  const generating = isActiveRunRunning();
+  els.sendChat.classList.toggle("stop", generating);
+  els.sendChat.textContent = generating ? "" : "↗";
+  els.sendChat.title = generating ? "停止生成" : "发送";
+  els.sendChat.setAttribute("aria-label", generating ? "停止生成" : "发送");
+  els.sendChat.disabled = !generating && !canSend;
 }
 
 
@@ -1116,14 +1143,8 @@ function render() {
       || [...syncedFellowKeys][0]
       || "";
   }
-  window.miaSessionReadState.initializeReadStateForPersonas(personas);
-  // Passive render-time read mark: advance the read pointer but never clear an
-  // explicit "标为未读" the user just set on the active fellow.
-  window.miaSessionReadState.markPersonaRead(state.activeKey, false, { clearManual: false });
-  // Muted fellows are excluded from the aggregate badge, mirroring muted cloud conversations.
-  const unreadTotal = window.miaSessionReadState.totalUnreadCount(personas.filter((p) => !p.muted));
-  els.personaCount.textContent = window.miaUnread.unreadBadgeText(unreadTotal);
-  els.personaCount.classList.toggle("hidden", unreadTotal <= 0);
+  els.personaCount.textContent = "";
+  els.personaCount.classList.add("hidden");
   const active = cloudSignedIn ? null : (personas.find((persona) => persona.key === state.activeKey) || personas[0]);
   const activeCloudConversation = activeCloudConversationId
     ? social?.getConversationById?.(activeCloudConversationId)
@@ -1132,6 +1153,7 @@ function render() {
   const composerBottom = document.querySelector(".composer-bottom");
   if (activeCloudConversation) {
     paintActiveCloudConversationHeader(activeCloudConversation, { personas, social: window.miaSocial });
+    paintHeaderStatus();
     const activeCloudConversationType = conversationTypeForComposer(activeCloudConversation, activeCloudConversation.id || activeCloudConversationId);
     const activeIsGroup = activeCloudConversationType === "group";
     const showPrivateAiControls = activeCloudConversationType === "fellow";
@@ -1154,7 +1176,12 @@ function render() {
     }
     window.miaAvatar.applyFellowAvatar(els.activeChatAvatar, active);
     setText(els.activeChatName, active.name || "Mia");
-    renderHeaderStatus();
+    if (els.activeChatMeta) {
+      const startupLoading = state.startupTasks[0]?.label;
+      els.activeChatMeta.innerHTML = startupLoading
+        ? `正在${window.miaMarkdown.escapeHtml(startupLoading)}`
+        : "在线";
+    }
     if (groupInfoBtn) groupInfoBtn.classList.add("hidden");
     if (els.sessionMenuButton) els.sessionMenuButton.classList.remove("hidden");
     if (composerBottom) composerBottom.classList.remove("hidden");
@@ -1557,9 +1584,9 @@ async function maybeGenerateCloudConversationTitle(conversationId) {
       role: message.sender_kind === SenderKind.Fellow ? "assistant" : "user",
       content: message.body_md
     }));
-    const result = await window.mia.generateSessionTitle({
-      personaKey: fellowKeyForConversation(conversation),
-      sessionId: `title:${conversationId}`,
+    const result = await window.mia.generateConversationTitle({
+      fellowKey: fellowKeyForConversation(conversation),
+      conversationId,
       messages: titleMessages
     });
     const title = String(result?.title || "").trim();
@@ -2144,13 +2171,6 @@ async function initializeRuntime() {
   // needs fontPresets / state / els injected first. If group init runs before
   // settings-appearance init, fontPresets is undefined and render() throws
   // "Cannot read properties of undefined (reading 'pingfang')".
-  if (window.miaSessionReadState && window.miaSessionReadState.initSessionReadState) {
-    window.miaSessionReadState.initSessionReadState({
-      state,
-      mia: window.mia,
-      nowIso,
-    });
-  }
   if (window.miaSettingsRemote && window.miaSettingsRemote.initSettingsRemote) {
     window.miaSettingsRemote.initSettingsRemote({
       state,
@@ -2327,6 +2347,7 @@ async function initializeRuntime() {
       appendTransientChat,
       maybeGenerateConversationTitle: maybeGenerateCloudConversationTitle,
       onCloudAuthExpired: handleCloudAuthExpired,
+      paintHeaderStatus,
     });
     // Bootstrap social data if signed in to cloud (token present).
     // (cloud.enabled, not cloud.loggedIn — the latter never existed, so
@@ -3625,7 +3646,7 @@ els.chatInput?.addEventListener("paste", (event) => {
   window.miaComposer.addComposerFiles(event.clipboardData.files);
 });
 els.sendChat.addEventListener("click", async (event) => {
-  if (!state.isGenerating) return;
+  if (!isActiveRunRunning()) return;
   event.preventDefault();
   event.stopPropagation();
   await window.mia.stopChat?.();
@@ -3807,17 +3828,6 @@ els.chatForm.addEventListener("submit", async (event) => {
   // shows the login guide for signed-out users.
 });
 
-let pendingStreamRender = false;
-function scheduleStreamRender() {
-  if (pendingStreamRender) return;
-  pendingStreamRender = true;
-  requestAnimationFrame(() => {
-    pendingStreamRender = false;
-    if (state.streaming) renderChat();
-    renderHeaderStatus();
-  });
-}
-
 function advanceOnboarding(step) {
   state.onboardingStep = step;
   try { localStorage.setItem("mia.onboardingStep", step); } catch { /* ignore */ }
@@ -3898,114 +3908,6 @@ function openInitialFellowDialog() {
   }
 }
 
-function renderHeaderStatus() {
-  if (!els.activeChatMeta) return;
-  const personas = state.runtime?.fellows || state.runtime?.personas || [];
-  const active = personas.find((persona) => persona.key === state.activeKey) || personas[0];
-  if (!active) return;
-  if (state.isGenerating) {
-    els.activeChatMeta.innerHTML = `<span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span>`;
-    return;
-  }
-  const startupLoading = state.startupTasks[0]?.label;
-  const trailing = startupLoading ? `正在${window.miaMarkdown.escapeHtml(startupLoading)}` : "在线";
-  els.activeChatMeta.innerHTML = trailing;
-}
-
-window.mia.onChatEvent((envelope) => {
-  if (!envelope || typeof envelope !== "object") return;
-  const { runId, sessionId, kind, data } = envelope;
-  if (!kind) return;
-  if (!state.streaming || state.streaming.runId !== runId) {
-    if (kind !== "session_started") return;
-    state.streaming = {
-      runId,
-      sessionId: sessionId || "",
-      createdAt: nowIso(),
-      status: "正在输入",
-      text: "",
-      textBlockId: null,
-      reasoning: "",
-      tools: [],
-      toolsById: new Map(),
-      toolsByName: new Map()
-    };
-    scheduleStreamRender();
-    return;
-  }
-  const s = state.streaming;
-  switch (kind) {
-    case "status":
-      s.status = String(data?.text || "");
-      break;
-    case "text_delta":
-      if (!s.textBlockId) s.textBlockId = data?.id || `text_${runId}`;
-      s.text += String(data?.text || "");
-      break;
-    case "reasoning_delta":
-      s.reasoning += String(data?.text || "");
-      if (s.reasoning && !s.reasoning.endsWith("\n")) s.reasoning += "\n";
-      break;
-    case "tool_call_started": {
-      const tool = {
-        id: String(data?.id || `tool_${s.tools.length}`),
-        name: String(data?.name || "工具"),
-        preview: String(data?.preview || ""),
-        status: "running",
-        duration: null,
-        error: false
-      };
-      s.tools.push(tool);
-      s.toolsById.set(tool.id, tool);
-      const queue = s.toolsByName.get(tool.name) || [];
-      queue.push(tool);
-      s.toolsByName.set(tool.name, queue);
-      break;
-    }
-    case "tool_call_delta": {
-      const id = String(data?.id || "");
-      const name = String(data?.name || "");
-      let tool = id ? s.toolsById.get(id) : null;
-      if (!tool) {
-        const queue = s.toolsByName.get(name);
-        tool = queue && queue.find((t) => t.status === "running");
-      }
-      if (tool) tool.preview = String(data?.preview || tool.preview || "");
-      break;
-    }
-    case "tool_call_completed": {
-      const id = String(data?.id || "");
-      const name = String(data?.name || "");
-      let tool = id ? s.toolsById.get(id) : null;
-      if (!tool) {
-        const queue = s.toolsByName.get(name);
-        tool = queue && queue.find((t) => t.status === "running");
-      }
-      if (tool) {
-        tool.status = data?.error ? "error" : "completed";
-        tool.duration = typeof data?.duration === "number" ? data.duration : null;
-        tool.error = Boolean(data?.error);
-        if (data?.preview) tool.preview = String(data.preview);
-      }
-      break;
-    }
-    case "complete":
-      // Intentionally do NOT clear state.streaming here. The chatForm submit
-      // takes a snapshot AFTER chat:send resolves and BEFORE it clears
-      // state.streaming — that's the single source of truth for trace
-      // persistence. If we cleared on complete (which can arrive before
-      // chat:send resolves), the snapshot would be empty.
-      if (s.status) s.status = "";
-      break;
-    case "error":
-      if (s.status) s.status = "";
-      break;
-    default:
-      break;
-  }
-  scheduleStreamRender();
-});
-
 window.miaMessageHelpers.resizeChatInput();
 function startAfterFirstPaint() {
   const start = () => {
@@ -4031,7 +3933,6 @@ function startAfterFirstPaint() {
 }
 startAfterFirstPaint();
 renderSendButton();
-renderHeaderStatus();
 setInterval(refreshRuntime, 2000);
 
 (function wireTrafficLights() {

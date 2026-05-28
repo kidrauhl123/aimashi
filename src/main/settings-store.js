@@ -3,11 +3,9 @@
 // model / profile / appearance / permission / effort / daemon / relay /
 // cloud — including defaults, normalization, read, and write.
 //
-// CloudWorkspace JSON cache lives here too (used by the desktop-sync
-// merge path).  daemonToken stays in main.js because it's an auth
-// primitive that wires into HTTP/IPC authorization, not a user setting.
-// mergeCloudWorkspaceIntoChatStore stays in main.js for now because it
-// touches the chat store.
+// CloudWorkspace JSON cache lives here too. daemonToken stays in main.js
+// because it's an auth primitive that wires into HTTP/IPC authorization, not a
+// user setting.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");

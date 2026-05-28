@@ -64,7 +64,7 @@
 - `src/renderer/app.js` still merges local persona rows into the logged-in message list and explicitly hides `room.type === "fellow"` rooms.
 - `src/renderer/social/social.js` handles `room.updated` by mapping existing rooms only, so a new room event can be dropped.
 - `src/main/social/local-fellow-responder.js` uses stateless chat, so local agent context is not keyed to stable room ids.
-- `src/main/social/group-conductor.js` ignores non-group rooms, so fellow cloud rooms need a main-process responder path.
+- Group reply selection now belongs to `src/cloud-agent/group-orchestrator.js`; desktop main process handles only explicit desktop-local invocation events and fellow-room local replies.
 
 ---
 

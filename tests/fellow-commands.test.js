@@ -81,13 +81,12 @@ test("saveFellow saves a desktop-local fellow through the local runtime command"
     social: {},
     runtimeKind: "desktop-local",
     isCreate: true,
-    loadChatSessions: async () => calls.push(["sessions"]),
     fellow: { name: "Alice", agentEngine: "codex" }
   });
 
   assert.equal(result.key, "alice");
   assert.equal(result.runtime, runtime);
-  assert.deepEqual(calls.map((call) => call[0]), ["local", "sessions"]);
+  assert.deepEqual(calls.map((call) => call[0]), ["local"]);
   assert.equal(calls[0][1].agentEngine, "codex");
 });
 
@@ -139,13 +138,12 @@ test("deleteFellow removes a desktop-local fellow through the local runtime comm
     state: { runtime: {} },
     api,
     social: {},
-    loadChatSessions: async () => calls.push(["sessions"]),
     fellow: { key: "alice", runtimeKind: "desktop-local" }
   });
 
   assert.equal(result.deleted, true);
   assert.equal(result.runtime, runtime);
-  assert.deepEqual(calls, [["localDelete", { key: "alice" }], ["sessions"]]);
+  assert.deepEqual(calls, [["localDelete", { key: "alice" }]]);
 });
 
 test("saveFellowCapabilities updates cloud-hermes identity and local fellow cache", async () => {

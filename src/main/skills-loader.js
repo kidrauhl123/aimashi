@@ -129,6 +129,15 @@ function createSkillsLoader(deps = {}) {
     return count;
   }
 
+  function readMarketMarker(skillDir) {
+    try {
+      const marker = JSON.parse(fs.readFileSync(path.join(skillDir, ".mia-market.json"), "utf8"));
+      return marker && typeof marker === "object" ? marker : null;
+    } catch {
+      return null;
+    }
+  }
+
   function simpleYamlValue(text, key) {
     const match = String(text || "").match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
     return match ? cleanYamlScalar(match[1]) : "";
@@ -222,7 +231,7 @@ function createSkillsLoader(deps = {}) {
   // Extract a downloaded skill package (zip buffer) into the private source
   // <home>/skills/<id>. The dir is cleared first so re-install/update replaces
   // cleanly. Multi-file skills (scripts/references/assets) land intact.
-  async function installMarketplaceSkill({ id, zipBuffer, marketVersion = "" } = {}) {
+  async function installMarketplaceSkill({ id, zipBuffer, marketVersion = "", marketMeta = null } = {}) {
     if (!id || !zipBuffer) {
       throw new Error("installMarketplaceSkill: id and zipBuffer required");
     }
@@ -249,7 +258,18 @@ function createSkillsLoader(deps = {}) {
     // so the UI hides "发布到市场" for it. Also records the installed version.
     fs.writeFileSync(
       path.join(skillDir, ".mia-market.json"),
-      JSON.stringify({ id: String(id), version: String(marketVersion || "") }),
+      JSON.stringify({
+        id: String(id),
+        version: String(marketVersion || ""),
+        ...(marketMeta && typeof marketMeta === "object" ? {
+          sourceLabel: String(marketMeta.sourceLabel || ""),
+          upstreamSource: String(marketMeta.upstreamSource || ""),
+          upstreamId: String(marketMeta.upstreamId || ""),
+          upstreamRepo: String(marketMeta.upstreamRepo || ""),
+          upstreamPath: String(marketMeta.upstreamPath || ""),
+          trustLevel: String(marketMeta.trustLevel || "")
+        } : {})
+      }),
       "utf8"
     );
     return loadLocalSkills();
@@ -354,7 +374,14 @@ function createSkillsLoader(deps = {}) {
           skill.pluginSource = plugin.source;
           skill.extensionId = plugin.extensionId || "";
           skill.sourceKind = plugin.kind || "skill-source";
-          skill.fromMarket = fs.existsSync(path.join(path.dirname(filePath), ".mia-market.json"));
+          const marketMarker = readMarketMarker(path.dirname(filePath));
+          skill.fromMarket = Boolean(marketMarker);
+          if (marketMarker) {
+            skill.marketSourceLabel = marketMarker.sourceLabel || "";
+            skill.marketUpstreamSource = marketMarker.upstreamSource || "";
+            skill.marketUpstreamId = marketMarker.upstreamId || "";
+            skill.marketTrustLevel = marketMarker.trustLevel || "";
+          }
           skills.push(skill);
           pluginSkills += 1;
         } catch (error) {

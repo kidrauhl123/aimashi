@@ -32,15 +32,23 @@ test("installMarketplaceSkill extracts a multi-file zip into <home>/skills and i
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
   try {
     const loader = makeLoader(home);
-    const library = await loader.installMarketplaceSkill({ id: "demo-skill", zipBuffer: makeZip() });
+    const library = await loader.installMarketplaceSkill({
+      id: "demo-skill",
+      zipBuffer: makeZip(),
+      marketMeta: { sourceLabel: "GitHub", upstreamId: "owner/repo/skills/demo-skill", trustLevel: "community" }
+    });
 
     const dir = path.join(home, "skills", "demo-skill");
     assert.ok(fs.existsSync(path.join(dir, "SKILL.md")), "SKILL.md extracted");
     assert.ok(fs.existsSync(path.join(dir, "scripts", "run.py")), "nested file extracted");
+    const marker = JSON.parse(fs.readFileSync(path.join(dir, ".mia-market.json"), "utf8"));
+    assert.equal(marker.sourceLabel, "GitHub");
+    assert.equal(marker.upstreamId, "owner/repo/skills/demo-skill");
 
     const found = library.skills.find((s) => s.name === "demo-skill");
     assert.ok(found, "installed skill appears in local scan");
     assert.equal(found.source, "mia");
+    assert.equal(found.marketSourceLabel, "GitHub");
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

@@ -3,15 +3,18 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { avatarAssetForKey } = require("../src/shared/avatar-resolve");
 
 function loadSource() {
   const sharedSpec = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "message-spec.js"), "utf8");
+  const sharedAvatarResolve = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "avatar-resolve.js"), "utf8");
   const sharedContact = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "contact.js"), "utf8");
   const sharedKinds = fs.readFileSync(path.join(__dirname, "..", "src", "shared", "conversation-kinds.js"), "utf8");
   const src = fs.readFileSync(path.join(__dirname, "..", "src", "renderer", "message-sources", "cloud-conversation-source.js"), "utf8");
   const window = {};
   const ctx = vm.createContext({ window, globalThis: window, console });
   vm.runInContext("globalThis.miaMessageSpec = (function(){ const module = { exports: {} }; " + sharedSpec + "; return module.exports; })();", ctx);
+  vm.runInContext(sharedAvatarResolve, ctx);
   vm.runInContext("globalThis.miaContact = (function(){ const module = { exports: {} }; " + sharedContact + "; return module.exports; })();", ctx);
   vm.runInContext(sharedKinds, ctx);
   vm.runInContext(src, ctx);
@@ -97,7 +100,7 @@ test("CloudConversationSource falls back to stable fellow avatar asset", () => {
   const source = src.createCloudConversationSource({ conversation, messages, members: [], ctx });
   const spec = source.listMessages()[0];
   assert.equal(spec.authorName, "Mia");
-  assert.equal(spec.avatar.image, "asset:mia");
+  assert.equal(spec.avatar.image, avatarAssetForKey("mia"));
 });
 
 test("CloudConversationSource system message gets role=system", () => {

@@ -121,6 +121,7 @@ test("release builder includes operator README with safe install verification", 
   assert.match(source, /function writeNginxConfigs\(\)/);
   assert.match(source, /copyDir\("src\/cloud-agent", path\.join\(apiDir, "src", "cloud-agent"\)\)/);
   assert.match(source, /"api\/src\/cloud-agent\/attachment-materializer\.js"/);
+  assert.match(source, /"api\/src\/cloud-agent\/group-orchestrator\.js"/);
   assert.match(source, /"api\/src\/cloud-agent\/dispatcher\.js"/);
   assert.match(source, /"README\.md"/);
   assert.match(source, /"nginx\/mia-websocket-map\.conf"/);

@@ -207,7 +207,71 @@
 
 /* 市场卡片：标题行带「添加」按钮 */
 .market-card {
+  grid-template-columns: minmax(0, 1fr);
   cursor: default;
+}
+
+.market-card .skill-card-head,
+.market-card .skill-card-source {
+  grid-column: 1;
+}
+
+.market-card .skill-card-source {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.skill-card-source-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-source-logo {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #0f172a;
+}
+
+.skill-source-logo img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.skill-source-logo-skills-sh img,
+.skill-source-logo-clawhub img {
+  border-radius: 5px;
+}
+
+.skill-source-logo-mask {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.skill-source-logo-hermes {
+  color: #0f172a;
+}
+
+.skill-source-logo-hermes .skill-source-logo-mask {
+  -webkit-mask-image: url("../assets/engine-icons/hermesagent.svg");
+  mask-image: url("../assets/engine-icons/hermesagent.svg");
+}
+
+.skill-source-logo-github .skill-source-logo-mask {
+  -webkit-mask-image: url("../assets/provider-icons/github.svg");
+  mask-image: url("../assets/provider-icons/github.svg");
 }
 
 .skill-card-titlerow {

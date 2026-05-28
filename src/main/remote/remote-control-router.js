@@ -4,16 +4,11 @@ const REMOTE_ROUTES = new Set([
   "GET /health",
   "GET /api/runtime/status",
   "GET /api/fellows",
-  "GET /api/chat/sessions",
   "GET /api/model/catalog",
   "GET /api/codex/models",
   "GET /api/engine/capabilities",
   "GET /api/commands/slash",
   "GET /api/commands/agent-list",
-  "POST /api/chat/session",
-  "POST /api/chat/session/save",
-  "POST /api/chat/session/rename",
-  "POST /api/chat/read-state/save",
   "POST /api/chat/attachment",
   "POST /api/file/fetch",
   "POST /api/commands/agent-execute",
@@ -41,16 +36,11 @@ function createRemoteControlRouter({
   isDaemonProcess = false,
   getRuntimeStatus,
   loadFellowManifest,
-  loadChatSessions,
   loadHermesModelCatalog,
   loadCodexModels,
   loadEngineCapabilities,
   loadHermesSlashCommands,
   loadExternalAgentCommands,
-  newChatSession,
-  saveChatSession,
-  saveChatReadState,
-  renameChatSession,
   saveChatAttachment,
   readLocalFileAttachment,
   executeExternalAgentCommand,
@@ -86,9 +76,6 @@ function createRemoteControlRouter({
       const manifest = loadFellowManifest();
       return { handled: true, data: { fellows: manifest.fellows || [], defaultFellow: manifest.default_fellow || "mia" } };
     }
-    if (routeInfo.method === "GET" && routeInfo.pathname === "/api/chat/sessions") {
-      return { handled: true, data: loadChatSessions() };
-    }
     if (routeInfo.method === "GET" && routeInfo.pathname === "/api/model/catalog") {
       return { handled: true, data: { models: await loadHermesModelCatalog() } };
     }
@@ -106,18 +93,6 @@ function createRemoteControlRouter({
         handled: true,
         data: await loadExternalAgentCommands({ engine: routeInfo.searchParams.get("engine") || "" })
       };
-    }
-    if (routeInfo.method === "POST" && routeInfo.pathname === "/api/chat/session") {
-      return { handled: true, data: newChatSession(body) };
-    }
-    if (routeInfo.method === "POST" && routeInfo.pathname === "/api/chat/session/save") {
-      return { handled: true, data: saveChatSession(body) };
-    }
-    if (routeInfo.method === "POST" && routeInfo.pathname === "/api/chat/session/rename") {
-      return { handled: true, data: renameChatSession(body) };
-    }
-    if (routeInfo.method === "POST" && routeInfo.pathname === "/api/chat/read-state/save") {
-      return { handled: true, data: saveChatReadState(body) };
     }
     if (routeInfo.method === "POST" && routeInfo.pathname === "/api/chat/attachment") {
       return { handled: true, data: saveChatAttachment(body) };

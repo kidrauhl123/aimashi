@@ -47,6 +47,14 @@ try {
 } catch {
   ({ loadSkillsCatalog } = require("./src/cloud/skills-catalog.js"));
 }
+let createHermesSkillsSource = null;
+try {
+  ({ createHermesSkillsSource } = require("../src/cloud/hermes-skills-source.js"));
+} catch {
+  ({ createHermesSkillsSource } = require("./src/cloud/hermes-skills-source.js"));
+}
+const DEFAULT_SKILL_MARKET_LIMIT = 5000;
+const MAX_SKILL_MARKET_LIMIT = 10000;
 let skillSafety = null;
 try {
   skillSafety = require("../src/shared/skill-safety.js");
@@ -263,6 +271,11 @@ function conversationMemberOwnerPublic(user) {
   return identity;
 }
 
+function normalizeMemberRuntimeKind(value) {
+  const runtimeKind = String(value || "").trim();
+  return runtimeKind === "cloud-hermes" || runtimeKind === "desktop-local" ? runtimeKind : "";
+}
+
 function normalizeOrigin(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -273,6 +286,20 @@ function normalizeOrigin(value) {
   } catch {
     return "";
   }
+}
+
+function mergeCategoryCounts(...groups) {
+  const counts = new Map();
+  for (const group of groups) {
+    for (const entry of Array.isArray(group) ? group : []) {
+      const category = String(entry?.category || "").trim();
+      if (!category) continue;
+      counts.set(category, (counts.get(category) || 0) + (Number(entry.count) || 0));
+    }
+  }
+  return [...counts.entries()]
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
 }
 
 function allowedOriginsFromOptions(options = {}) {
@@ -1378,7 +1405,14 @@ async function handleRequest(req, res, context) {
       for (const fellow of memberFellows) {
         const fellowId = String(fellow.fellowId || "").trim();
         if (!fellowId) continue;
-        context.socialStore.addConversationMember({ conversationId, memberKind: "fellow", memberRef: fellowId, ownerId: auth.user.id });
+        const runtimeKind = normalizeMemberRuntimeKind(fellow.runtimeKind);
+        context.socialStore.addConversationMember({
+          conversationId,
+          memberKind: "fellow",
+          memberRef: fellowId,
+          ownerId: auth.user.id,
+          aiPerms: runtimeKind ? { runtimeKind } : null
+        });
       }
       for (const friendId of memberFriendUserIds) {
         context.socialStore.addConversationMember({ conversationId, memberKind: "user", memberRef: String(friendId) });
@@ -1431,7 +1465,14 @@ async function handleRequest(req, res, context) {
       if (ownerId !== auth.user.id) {
         return writeError(res, 403, "you can only add your own fellows");
       }
-      context.socialStore.addConversationMember({ conversationId, memberKind: "fellow", memberRef, ownerId: auth.user.id });
+      const runtimeKind = normalizeMemberRuntimeKind(body.runtimeKind);
+      context.socialStore.addConversationMember({
+        conversationId,
+        memberKind: "fellow",
+        memberRef,
+        ownerId: auth.user.id,
+        aiPerms: runtimeKind ? { runtimeKind } : null
+      });
       const member = context.socialStore.getConversationMember(conversationId, "fellow", memberRef);
       return writeJson(res, 201, { ok: true, member });
     }
@@ -1507,8 +1548,12 @@ async function handleRequest(req, res, context) {
       const conversation = context.socialStore.getConversation(conversationId);
       if (!conversation) return writeError(res, 404, "conversation not found");
       const members = context.socialStore.listConversationMembers(conversationId);
-      // M1: enrich fellow members with owner public user so renderer shows username
+      // Enrich members with public identity so clients and conductors can
+      // resolve display names without profile-avatar payloads.
       const enriched = members.map((m) => {
+        if (m.member_kind === "user") {
+          return { ...m, user: conversationMemberOwnerPublic(context.cloudStore.getUserPublic(m.member_ref)) };
+        }
         if (m.member_kind === "fellow" && m.owner_id) {
           return { ...m, owner: conversationMemberOwnerPublic(context.cloudStore.getUserPublic(m.owner_id)) };
         }
@@ -1631,43 +1676,6 @@ async function handleRequest(req, res, context) {
         if (m.member_kind === "user") {
           broadcastPersistedEvent(context, m.member_ref, { type: "conversation.message_appended", conversationId, message });
         }
-      }
-      // 2. Handle fellow mentions — dispatch invocation request to fellow
-      //    owner. Includes self-owned fellows; the local agent runtime
-      //    lives on the owner's machine regardless of whether the sender
-      //    is the owner. (Skipping owner === sender meant every fellow in
-      //    a single-user group was silently dropped.)
-      const mentions = Array.isArray(body.mentions) ? body.mentions : [];
-      for (const mention of mentions) {
-        if (!mention || mention.kind !== "fellow") continue;
-        const fellowId = String(mention.fellowId || "").trim();
-        if (!fellowId) continue;
-        const fellowMember = context.socialStore.getConversationMember(conversationId, "fellow", fellowId);
-        if (!fellowMember) continue;
-        if (context.cloudAgentDispatcher?.canHandleFellow?.({
-          userId: fellowMember.owner_id,
-          fellowId,
-          runtimeKind: "cloud-hermes"
-        })) {
-          context.cloudAgentDispatcher.invokeFellow({
-            userId: fellowMember.owner_id,
-            conversationId,
-            fellowId,
-            message
-          }).catch((error) => {
-            console.warn("[cloud-agent] fellow invocation failed:", error?.message || error);
-          });
-          continue;
-        }
-        const recentMessages = context.messagesStore.listMessagesSince(conversationId, Math.max(0, message.seq - 6), 6);
-        broadcastPersistedEvent(context, fellowMember.owner_id, {
-          type: "conversation.fellow_invocation_requested",
-          conversationId,
-          fellowId,
-          invokedBy: context.cloudStore.getUserPublic(auth.user.id),
-          triggeringMessage: message,
-          recentMessages,
-        });
       }
       if (context.cloudAgentDispatcher) {
         context.cloudAgentDispatcher.handleUserMessage({
@@ -2070,9 +2078,15 @@ async function handleRequest(req, res, context) {
     if (req.method === "GET" && url.pathname === "/api/skills") {
       const category = url.searchParams.get("category") || "";
       const q = url.searchParams.get("q") || "";
-      const limit = Number(url.searchParams.get("limit") || 60);
-      const skills = context.skillsStore.listSkills({ category, q, limit });
-      const categories = context.skillsStore.listCategories();
+      const requestedLimit = Number(url.searchParams.get("limit") || DEFAULT_SKILL_MARKET_LIMIT);
+      const limit = Math.min(Math.max(Math.floor(Number.isFinite(requestedLimit) ? requestedLimit : DEFAULT_SKILL_MARKET_LIMIT), 1), MAX_SKILL_MARKET_LIMIT);
+      const localSkills = context.skillsStore.listSkills({ category, q, limit });
+      let remote = { skills: [], categories: [] };
+      if (context.hermesSkillsSource) {
+        remote = await context.hermesSkillsSource.listSkills({ category, q, limit }).catch(() => remote);
+      }
+      const skills = [...localSkills, ...(remote.skills || [])].slice(0, limit);
+      const categories = mergeCategoryCounts(context.skillsStore.listCategories(), remote.categories);
       return writeJson(res, 200, { skills, categories });
     }
     // Open publish: any signed-in user can publish a packaged skill version.
@@ -2117,6 +2131,18 @@ async function handleRequest(req, res, context) {
         return writeError(res, 400, error.message || "publish failed.");
       }
     }
+    const hermesSkillPackageMatch = url.pathname.match(/^\/api\/hermes-skills\/([A-Za-z0-9._-]+)\/package\/([a-f0-9]{64})\.zip$/);
+    if (req.method === "GET" && hermesSkillPackageMatch) {
+      const absPath = context.hermesSkillsSource?.packageAbsPath?.(hermesSkillPackageMatch[1], hermesSkillPackageMatch[2]) || "";
+      if (!absPath || !fs.existsSync(absPath)) return writeError(res, 404, "Package not found.");
+      const buf = fs.readFileSync(absPath);
+      res.writeHead(200, {
+        "Content-Type": "application/zip",
+        "Content-Length": buf.length,
+        "X-Skill-Checksum": hermesSkillPackageMatch[2]
+      });
+      return res.end(buf);
+    }
     const skillPackageMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/versions\/([A-Za-z0-9._-]+)\/package$/);
     if (req.method === "GET" && skillPackageMatch) {
       const version = context.skillsStore.getVersion(skillPackageMatch[1], skillPackageMatch[2]);
@@ -2132,6 +2158,10 @@ async function handleRequest(req, res, context) {
     }
     const skillInstallMatch = url.pathname.match(/^\/api\/skills\/([A-Za-z0-9._-]+)\/install$/);
     if (req.method === "POST" && skillInstallMatch) {
+      if (context.hermesSkillsSource && String(skillInstallMatch[1]).startsWith("hermes.")) {
+        const prepared = await context.hermesSkillsSource.prepareInstall(skillInstallMatch[1]).catch(() => null);
+        if (prepared) return writeJson(res, 200, { skill: prepared.skill, download: prepared.download });
+      }
       const skill = context.skillsStore.recordInstall(skillInstallMatch[1], auth.user.id);
       if (!skill) return writeError(res, 404, "Skill not found.");
       const download = skill.version ? {
@@ -2223,7 +2253,8 @@ function createMiaCloudServer(options = {}) {
     messagesStore: null,
     runtimeBindingsStore: null,
     cloudAgentRunsStore: null,
-    cloudAgentDispatcher: null
+    cloudAgentDispatcher: null,
+    hermesSkillsSource: null
   };
   context.socialStore = createSocialStore(context.cloudStore.getDb());
   context.messagesStore = createMessagesStore(context.cloudStore.getDb());
@@ -2235,6 +2266,13 @@ function createMiaCloudServer(options = {}) {
   });
   context.skillsStore.backfillBodyVersions();
   context.skillsStore.seedFromCatalog(loadSkillsCatalog());
+  const hermesSkillsEnabled = options.hermesSkillsSource
+    || options.hermesSkillsMarketEnabled === true
+    || (options.hermesSkillsMarketEnabled !== false && process.env.MIA_HERMES_SKILLS_MARKET !== "0");
+  context.hermesSkillsSource = options.hermesSkillsSource
+    || (hermesSkillsEnabled && createHermesSkillsSource
+      ? createHermesSkillsSource({ dataDir: context.cloudStore.dataDir })
+      : null);
   context.runtimeBindingsStore = createRuntimeBindingsStore(context.cloudStore.getDb());
   context.cloudAgentRunsStore = createCloudAgentRunsStore(context.cloudStore.getDb());
   // Inject fellowsStore so listConversationMembers can enrich fellow members
@@ -2270,6 +2308,7 @@ function createMiaCloudServer(options = {}) {
     workerManager,
     hermesRunsClient,
     attachmentMaterializer,
+    getUserPublic: (userId) => context.cloudStore.getUserPublic(userId),
     broadcastTransientEvent: (userId, payload) => broadcastTransientEvent(context.eventHub, userId, payload),
     broadcastPersistedEvent: (userId, payload) => broadcastPersistedEvent(context, userId, payload)
   });

@@ -208,3 +208,137 @@ test("POST group mention invokes cloud-hermes fellow without desktop-local event
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test("POST group message routes named fellow only and gives the agent group identity", async () => {
+  const dataDir = tempDir("mia-cloud-agent-named-group-");
+  const hermesCalls = [];
+  const server = createMiaCloudServer({
+    dataDir,
+    cloudAgentWorkerManager: {
+      async ensureWorker(userId) {
+        return {
+          userId,
+          baseUrl: "http://worker",
+          apiKey: "k",
+          paths: { attachments: path.join(dataDir, "agent-users", userId, "attachments") }
+        };
+      }
+    },
+    cloudAgentHermesClient: {
+      async runChat(args) {
+        hermesCalls.push(args);
+        args.onRunCreated?.(`hr_${args.fellow.id}`);
+        return { runId: `hr_${args.fellow.id}`, content: `${args.fellow.name} reply`, events: [] };
+      }
+    }
+  });
+  const baseUrl = await listen(server);
+  try {
+    const account = await jsonFetch(baseUrl, "/api/auth/register", {
+      method: "POST",
+      body: { username: "alice", password: "123456" }
+    });
+    const authHeaders = { authorization: `Bearer ${account.token}` };
+    await jsonFetch(baseUrl, "/api/me/fellows/kongling", {
+      method: "PUT",
+      headers: authHeaders,
+      body: {
+        name: "空铃",
+        capabilities: ["chat"],
+        personaText: "你是空铃，群聊里的 Fellow。"
+      }
+    });
+    await jsonFetch(baseUrl, "/api/me/fellows/kongling/runtime", {
+      method: "PUT",
+      headers: authHeaders,
+      body: {
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "mia-default" }
+      }
+    });
+    const group = await jsonFetch(baseUrl, "/api/conversations", {
+      method: "POST",
+      headers: authHeaders,
+      body: {
+        name: "Cloud Group",
+        memberFellows: [
+          { fellowId: "mia", runtimeKind: "cloud-hermes" },
+          { fellowId: "kongling", runtimeKind: "cloud-hermes" }
+        ]
+      }
+    });
+
+    await jsonFetch(baseUrl, `/api/conversations/${group.conversation.id}/messages`, {
+      method: "POST",
+      headers: authHeaders,
+      body: {
+        bodyMd: "空铃在干啥",
+        clientOpId: "op_cloud_named_group_1"
+      }
+    });
+    await server.mia.cloudAgentDispatcher.idle();
+
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].fellow.id, "kongling");
+    assert.match(hermesCalls[0].input, /你是 空铃/);
+    assert.match(hermesCalls[0].input, /群成员/);
+    assert.match(hermesCalls[0].input, /Mia/);
+    assert.match(hermesCalls[0].input, /空铃/);
+  } finally {
+    await close(server);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("POST group short acknowledgement stays silent through the HTTP entrypoint", async () => {
+  const dataDir = tempDir("mia-cloud-agent-ack-group-");
+  const hermesCalls = [];
+  const server = createMiaCloudServer({
+    dataDir,
+    cloudAgentWorkerManager: {
+      async ensureWorker(userId) {
+        return {
+          userId,
+          baseUrl: "http://worker",
+          apiKey: "k",
+          paths: { attachments: path.join(dataDir, "agent-users", userId, "attachments") }
+        };
+      }
+    },
+    cloudAgentHermesClient: {
+      async runChat(args) {
+        hermesCalls.push(args);
+        return { runId: "hr_unexpected", content: "unexpected", events: [] };
+      }
+    }
+  });
+  const baseUrl = await listen(server);
+  try {
+    const account = await jsonFetch(baseUrl, "/api/auth/register", {
+      method: "POST",
+      body: { username: "alice", password: "123456" }
+    });
+    const authHeaders = { authorization: `Bearer ${account.token}` };
+    const group = await jsonFetch(baseUrl, "/api/conversations", {
+      method: "POST",
+      headers: authHeaders,
+      body: { name: "Cloud Group", memberFellows: [{ fellowId: "mia", runtimeKind: "cloud-hermes" }] }
+    });
+
+    await jsonFetch(baseUrl, `/api/conversations/${group.conversation.id}/messages`, {
+      method: "POST",
+      headers: authHeaders,
+      body: {
+        bodyMd: "ok",
+        clientOpId: "op_cloud_ack_group_1"
+      }
+    });
+    await server.mia.cloudAgentDispatcher.idle();
+
+    assert.equal(hermesCalls.length, 0);
+  } finally {
+    await close(server);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});

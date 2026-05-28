@@ -422,6 +422,8 @@ body {
 }
 
 .conversation-item > span {
+  display: grid;
+  place-items: center;
   width: 38px;
   height: 38px;
   border-radius: 12px;
@@ -434,6 +436,78 @@ body {
 
 .conversation-item:nth-child(3) > span {
   background: linear-gradient(135deg, #d6ebff, var(--blue));
+}
+
+.conversation-item:nth-child(4) > span {
+  background:
+    radial-gradient(circle at 35% 35%, #fff 0 18%, transparent 19%),
+    linear-gradient(135deg, rgba(94, 92, 230, 0.82), rgba(48, 209, 88, 0.82));
+}
+
+.engine-logo,
+.engine-avatar::before {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.engine-logo img,
+.engine-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.engine-logo.claude,
+.engine-avatar.claude {
+  color: #d97757;
+}
+
+.engine-logo.claude,
+.engine-avatar.claude::before {
+  -webkit-mask-image: url("./assets/engine-icons/claudecode.svg");
+  mask-image: url("./assets/engine-icons/claudecode.svg");
+}
+
+.engine-logo.hermes,
+.engine-avatar.hermes {
+  color: var(--accent);
+}
+
+.engine-logo.hermes,
+.engine-avatar.hermes::before {
+  -webkit-mask-image: url("./assets/engine-icons/hermesagent.svg");
+  mask-image: url("./assets/engine-icons/hermesagent.svg");
+}
+
+.engine-avatar::before {
+  content: "";
+  width: 23px;
+  height: 23px;
+}
+
+.engine-avatar.codex {
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.engine-logo.codex {
+  width: 18px;
+  height: 18px;
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+}
+
+.sync-avatar {
+  background:
+    radial-gradient(circle at 34% 34%, #fff 0 17%, transparent 18%),
+    linear-gradient(135deg, rgba(94, 92, 230, 0.82), rgba(48, 209, 88, 0.82));
 }
 
 .conversation-item strong,
@@ -482,11 +556,32 @@ body {
   font-weight: 780;
 }
 
+.engine-dock {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.engine-dock span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(94, 92, 230, 0.16);
+  border-radius: 999px;
+  padding: 0 11px;
+  background: rgba(94, 92, 230, 0.08);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+}
+
 .chat-bubbles {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 42px;
+  margin-top: 24px;
 }
 
 .chat-bubbles p {
@@ -505,6 +600,11 @@ body {
   align-self: flex-end;
   background: var(--accent);
   color: #fff;
+}
+
+.chat-bubbles p.agent {
+  background: rgba(48, 209, 88, 0.13);
+  color: #165a2d;
 }
 
 .permission-sheet {
@@ -575,7 +675,7 @@ body {
 
 .visual-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-top: -8px;
   padding-bottom: 44px;
@@ -599,7 +699,8 @@ body {
 }
 
 .mini-profile,
-.mini-permission,
+.mini-engine,
+.mini-device,
 .mini-conversation {
   position: relative;
   margin-top: 22px;
@@ -616,7 +717,7 @@ body {
 
 .mini-profile b,
 .mini-conversation i,
-.mini-permission i {
+.mini-device i {
   display: block;
   border-radius: 999px;
   background: rgba(25, 22, 44, 0.12);
@@ -633,19 +734,57 @@ body {
   margin-top: 14px;
 }
 
-.mini-permission {
+.mini-engine {
   display: grid;
-  align-content: end;
+  gap: 9px;
+  align-content: center;
+}
+
+.mini-engine i {
+  display: flex;
+  align-items: center;
   gap: 10px;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 6px 12px 6px 10px;
+  background: rgba(25, 22, 44, 0.08);
+  color: var(--ink);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 760;
 }
 
-.mini-permission i {
-  width: 100%;
-  height: 34px;
-}
-
-.mini-permission i:first-child {
+.mini-engine i:nth-child(2) {
   background: var(--ink);
+  color: #fff;
+}
+
+.mini-engine i:nth-child(2) .engine-logo.codex {
+  background: #fff;
+  border-radius: 50%;
+}
+
+.mini-device {
+  display: grid;
+  grid-template-columns: 1fr 0.46fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.mini-device i:first-child {
+  height: 78px;
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.5) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(94, 92, 230, 0.26), rgba(63, 140, 255, 0.2));
+  background-size: 18px 18px, 18px 18px, auto;
+}
+
+.mini-device i:last-child {
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(48, 209, 88, 0.25), rgba(94, 92, 230, 0.18));
 }
 
 .mini-conversation {

@@ -12,26 +12,26 @@
 
   const stageCopy = {
     select: {
-      title: "选择 Fellow",
-      subtitle: "Model, owner and permission mode are visible",
-      status: "Ready",
-      permission: "identity visible"
+      title: "创建伙伴",
+      subtitle: "Each Fellow has identity, skills and engine",
+      status: "3 Fellows online",
+      permission: "fellow profile"
     },
     route: {
-      title: "路由任务",
-      subtitle: "Cloud conversation mention routes back to owner desktop",
-      status: "Routing",
-      permission: "owner desktop"
+      title: "选择内核",
+      subtitle: "Claude Code / Codex / Hermes",
+      status: "Engine ready",
+      permission: "engine selected"
     },
     approve: {
-      title: "权限确认",
-      subtitle: "Claude Sonnet 4.6 / Codex",
+      title: "聊天执行",
+      subtitle: "Messages, files and tools in one GUI",
       status: "Bridge online",
       permission: "ask before shell"
     },
     reply: {
-      title: "同步结果",
-      subtitle: "Reply returns to the same cloud conversation",
+      title: "多端同步",
+      subtitle: "Desktop and Web share the same conversation",
       status: "Synced",
       permission: "conversation message"
     }

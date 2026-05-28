@@ -7,7 +7,6 @@ function createMainFellowRuntimeDispatcher({
   shouldHandle = () => true,
   listFellows = () => [],
   localFellowResponder,
-  mainGroupConductor,
   mainFellowConversationResponder,
   log = () => {}
 } = {}) {
@@ -36,12 +35,6 @@ function createMainFellowRuntimeDispatcher({
       message: message.message
     };
     const tasks = [];
-    if (mainGroupConductor && typeof mainGroupConductor.handleConversationMessageAppended === "function") {
-      tasks.push(
-        mainGroupConductor.handleConversationMessageAppended(args)
-          .catch((error) => log(`Cloud group conductor failed: ${error?.message || error}`))
-      );
-    }
     if (mainFellowConversationResponder && typeof mainFellowConversationResponder.handleConversationMessageAppended === "function") {
       tasks.push(
         mainFellowConversationResponder.handleConversationMessageAppended(args)

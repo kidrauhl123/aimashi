@@ -36,6 +36,10 @@ function makeEl() {
 }
 
 function loadAvatar() {
+  const resolveSrc = fs.readFileSync(
+    path.join(__dirname, "..", "src", "shared", "avatar-resolve.js"),
+    "utf8"
+  );
   const src = fs.readFileSync(
     path.join(__dirname, "..", "src", "renderer", "helpers", "avatar-helpers.js"),
     "utf8"
@@ -43,6 +47,7 @@ function loadAvatar() {
   const window = {};
   const document = { createElement: (tag) => (tag === "img" ? makeImg() : makeEl()) };
   const ctx = vm.createContext({ window, globalThis: window, document, console });
+  vm.runInContext(resolveSrc, ctx);
   vm.runInContext(src, ctx);
   return window.miaAvatar;
 }

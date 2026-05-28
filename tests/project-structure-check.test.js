@@ -72,16 +72,18 @@ test("remote control API routes are shared by daemon HTTP and relay adapters", (
   assert.doesNotMatch(relaySource, /requestPath === "\/api\/model\/save"/, "relay must not duplicate remote model route matching");
 });
 
-test("chat session mutations live behind a main chat-session service", () => {
+test("cloud-only conversation path has no local chat-session persistence service", () => {
   const mainSource = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
-  const sessionSource = fs.readFileSync(path.join(root, "src/main/chat-session-service.js"), "utf8");
-  assert.match(sessionSource, /function createChatSessionService/, "chat session service should exist");
-  assert.match(mainSource, /createChatSessionService/, "main should instantiate the chat session service");
-  assert.doesNotMatch(mainSource, /function saveChatSession/, "main must not own chat session save logic");
-  assert.doesNotMatch(mainSource, /function saveChatReadState/, "main must not own read-state persistence");
-  assert.doesNotMatch(mainSource, /function newChatSession/, "main must not own new-session pruning");
-  assert.doesNotMatch(mainSource, /function renameChatSession/, "main must not own rename persistence");
-  assert.doesNotMatch(mainSource, /async function generateSessionTitle/, "main must not own title-generation orchestration");
+  const titleSource = fs.readFileSync(path.join(root, "src/main/conversation-title-service.js"), "utf8");
+  const routerSource = fs.readFileSync(path.join(root, "src/main/remote/remote-control-router.js"), "utf8");
+  const ipcSource = fs.readFileSync(path.join(root, "src/shared/ipc-channels.js"), "utf8");
+  const mobileSource = fs.readFileSync(path.join(root, "src/mobile/app.js"), "utf8");
+  assert.match(titleSource, /function createConversationTitleService/, "conversation title service should exist");
+  assert.match(mainSource, /createConversationTitleService/, "main should instantiate the conversation title service");
+  assert.doesNotMatch(mainSource, /createChatSessionService|createChatStore|loadChatStore|saveChatStore|routeChatWrite/);
+  assert.doesNotMatch(routerSource, /api\/chat\/sessions|api\/chat\/session|read-state\/save/);
+  assert.doesNotMatch(ipcSource, /ChatSessionsLoad|ChatSessionSave|ChatReadStateSave|ChatSessionCreate|ChatSessionRename/);
+  assert.doesNotMatch(mobileSource, /api\/chat\/sessions|api\/chat\/session|read-state\/save/);
 });
 
 test("chat attachment normalization and transfer live behind a main chat-attachments module", () => {

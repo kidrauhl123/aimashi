@@ -290,6 +290,7 @@
         kind: "fellow",
         id,
         name: fellow.name || id,
+        runtimeKind: fellow.runtimeKind || fellow.runtime_kind || "cloud-hermes",
         color: fellow.color || "#5e5ce6",
         // Cloud fellows (e.g. mia) have no inline avatarImage; fall back to the
         // key-derived preset asset, same as the conversation list / applyFellowAvatar.
@@ -327,7 +328,10 @@
       confirmBtn.disabled = true;
       try {
         // Phase 5 cutover: every group is a cloud conversation. Login required.
-        const memberFellows = fellowEntries.map((e) => ({ fellowId: e.id }));
+        const memberFellows = fellowEntries.map((e) => ({
+          fellowId: e.id,
+          runtimeKind: e.runtimeKind || "cloud-hermes"
+        }));
         const res = await window.mia.social.createConversation({ name, memberFellows, memberFriendUserIds });
         if (!res.ok) { alert("创建失败：" + (res.error || "")); confirmBtn.disabled = false; return; }
         const newConversation = res.data?.conversation || res.data;

@@ -32,7 +32,6 @@ const { createRuntimeInitializerService } = require("./main/runtime-initializer-
 const { createRuntimeLifecycleService } = require("./main/runtime-lifecycle-service.js");
 const { createStartupTimer } = require("./main/startup-timing.js");
 const { createChatAttachments } = require("./main/chat-attachments.js");
-const { createChatStore } = require("./main/chat-store.js");
 const { createFellowManifest } = require("./main/fellow-manifest.js");
 const { createFellowService } = require("./main/fellow-service.js");
 const { createRuntimePaths } = require("./main/runtime-paths.js");
@@ -51,7 +50,6 @@ const {
   createLocalFellowResponder,
   shouldHandleLocalCloudConversationAi
 } = require("./main/social/local-fellow-responder.js");
-const { createMainGroupConductor } = require("./main/social/group-conductor.js");
 const { createMainFellowConversationResponder } = require("./main/social/fellow-conversation-responder.js");
 const { createMainFellowRuntimeDispatcher } = require("./main/social/fellow-runtime-dispatcher.js");
 const { createCloudEventsClient } = require("./main/cloud/cloud-events-client.js");
@@ -60,7 +58,7 @@ const { createCloudDesktopSyncClient } = require("./main/cloud/desktop-sync-clie
 const { createRelayClient, relayPairingLink } = require("./main/relay/relay-client.js");
 const { createRemoteControlRouter } = require("./main/remote/remote-control-router.js");
 const { createModelSettingsService } = require("./main/model-settings-service.js");
-const { createChatSessionService } = require("./main/chat-session-service.js");
+const { createConversationTitleService } = require("./main/conversation-title-service.js");
 const { createDaemonControlServer } = require("./main/daemon/control-server.js");
 const { createDaemonTasksClient } = require("./main/daemon/tasks-client.js");
 const { createProviderConnections } = require("./main/provider-connections.js");
@@ -339,19 +337,6 @@ const hermesSlashCommandService = createHermesSlashCommandService({
   env: process.env
 });
 
-const chatStoreModule = createChatStore({
-  runtimePaths,
-  readJson,
-  normalizeAttachments,
-});
-const {
-  defaultChatStore,
-  fallbackSessionTitle,
-  loadChatStore,
-  saveChatStore,
-  ensurePersonaSession,
-} = chatStoreModule;
-
 const runtimeInitializerService = createRuntimeInitializerService({
   runtimePaths,
   randomBytes: (size) => crypto.randomBytes(size),
@@ -366,7 +351,6 @@ const runtimeInitializerService = createRuntimeInitializerService({
   defaultRelaySettings: () => settingsStore.defaultRelaySettings(),
   defaultUserProfile: () => settingsStore.defaultUserProfile(),
   defaultAppearanceSettings: () => settingsStore.defaultAppearanceSettings(),
-  defaultChatStore,
   loadFellowManifest,
   saveFellowManifest,
   fellowPersonaBody,
@@ -407,7 +391,6 @@ const externalAgentCommandService = createExternalAgentCommandService({
   setAgentSessionEntry: agentSessionStore.setEntry,
   ensureClaudeBridgePlugin: () => claudeBridgePluginService.ensureInstalled(),
   loadAgentSessionMap: agentSessionStore.loadMap,
-  loadChatStore,
   relaySettings: () => settingsStore.relaySettings()
 });
 let authService = null;
@@ -488,11 +471,8 @@ function daemonToken() {
   return fs.readFileSync(p.daemonToken, "utf8").trim();
 }
 
-// (mergeCloudWorkspaceIntoChatStore removed in Phase 4 cutover —
-//  the cloud workspace snapshot is no longer the conversation source.
-//  Fellow chats now sync via conversations+messages; the merge-into-chat-store
-//  path is replaced by the cloud-conversation cache which never overwrites the
-//  local chat-store.)
+// Cloud conversations are authoritative; local storage is limited to caches
+// and agent runtime metadata, never a second conversation source.
 
 function broadcastRendererEvent(channel, payload) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -730,21 +710,13 @@ function normalizeRemoteUserMessage(input) {
   };
 }
 
-function resolveRemoteChatSession({ fellowKey, sessionId }) {
+function resolveRemoteChatFellow({ fellowKey }) {
   initializeRuntime();
   const manifest = loadFellowManifest();
   const fellows = Array.isArray(manifest.fellows) ? manifest.fellows : [];
   const key = String(fellowKey || manifest.default_fellow || fellows[0]?.key || "mia").trim();
   const fellow = fellows.find((item) => item.key === key) || fellows[0] || defaultFellowManifest().fellows[0];
-  const store = loadChatStore();
-  if (!store.sessions[fellow.key]) store.sessions[fellow.key] = [];
-  let session = sessionId
-    ? store.sessions[fellow.key].find((item) => item.id === String(sessionId))
-    : null;
-  if (!session) {
-    session = ensurePersonaSession(store, fellow.key);
-  }
-  return { fellow, store, session };
+  return { fellow };
 }
 
 function collectChatTraceEnvelope(trace, envelope = {}) {
@@ -811,15 +783,13 @@ async function runRemoteChatRequest(body, eventSink = null) {
     throw new Error("text or a user message is required.");
   }
 
-  const { fellow, store, session } = resolveRemoteChatSession({
-    fellowKey: body?.fellowKey || body?.personaKey,
-    sessionId: body?.sessionId
-  });
+  const { fellow } = resolveRemoteChatFellow({ fellowKey: body?.fellowKey || body?.personaKey });
+  const conversationId = String(body?.conversationId || body?.sessionId || "").trim();
+  const agentSessionId = String(body?.agentSessionId || conversationId || `remote:${crypto.randomUUID()}`);
   const now = new Date().toISOString();
-  const history = Array.isArray(session.messages) ? session.messages : [];
   const runMessages = explicitMessages.length
     ? explicitMessages
-    : [...history, userMessage].map((message) => ({
+    : [userMessage].map((message) => ({
       role: message.role,
       content: message.content,
       attachments: normalizeAttachments(message.attachments)
@@ -840,10 +810,11 @@ async function runRemoteChatRequest(body, eventSink = null) {
 
   const response = await sendChat({
     fellowKey: fellow.key,
-    sessionId: session.id,
+    sessionId: agentSessionId,
     messages: runMessages,
     webContents: tracedEventSink,
-    background: Boolean(body?.background)
+    background: Boolean(body?.background),
+    persistAgentSession: true
   });
   const responseMessage = response?.choices?.[0]?.message || {};
   const assistantText = responseMessageContent(response);
@@ -882,73 +853,38 @@ async function runRemoteChatRequest(body, eventSink = null) {
     ...(savedAssistant.reasoning ? { reasoning: savedAssistant.reasoning } : {}),
     ...(Array.isArray(savedAssistant.tools) && savedAssistant.tools.length ? { tools: savedAssistant.tools } : {})
   };
-  // Persist by RELOADING the store after the await and appending only the two new
-  // messages to the target session. The pre-await `store` snapshot is stale — any
-  // writes that landed during `await sendChat` (foreground chat, another task) are
-  // on disk now, and overwriting with the snapshot would drop them. Reload→append→
-  // save is fully synchronous, so within this (daemon) process it is atomic; the
-  // foreground app routes its writes through the daemon too, so there is a single
-  // writer. If the session was created fresh this turn it isn't on disk yet, so
-  // recreate it in the reloaded store rather than losing the messages.
-  const fresh = loadChatStore();
-  if (!fresh.sessions[fellow.key]) fresh.sessions[fellow.key] = [];
-  let target = fresh.sessions[fellow.key].find((item) => item.id === session.id);
-  if (!target) {
-    target = {
-      id: session.id,
-      personaKey: fellow.key,
-      title: session.title || "新对话",
-      titleGenerated: Boolean(session.titleGenerated),
-      createdAt: session.createdAt || now,
-      updatedAt: now,
-      messages: []
-    };
-    fresh.sessions[fellow.key].unshift(target);
-  }
-  target.messages = [
-    ...(Array.isArray(target.messages) ? target.messages : []),
-    savedUser,
-    savedAssistant
-  ];
-  target.updatedAt = new Date().toISOString();
-  if (!target.titleGenerated) {
-    target.title = fallbackSessionTitle(target.messages);
-  }
-  saveChatStore(fresh);
-  notifyChatSessionsChanged();
+  const responseConversation = {
+    id: agentSessionId,
+    conversationId,
+    personaKey: fellow.key,
+    messages: [savedUser, savedAssistant],
+    updatedAt: savedAssistant.createdAt
+  };
   // When signed into Mia Cloud, the conversation the user sees IS a per-fellow
-  // cloud conversation keyed by FELLOW (`fellow:<userId>:<fellowKey>`), not by session. A
+  // cloud conversation keyed by FELLOW (`fellow:<userId>:<fellowKey>`). A
   // scheduled task runs locally, so post its reply into that conversation AS the fellow —
   // the same path web/cloud fellow replies use — so it shows up and notifies in
   // the message list (and syncs to web / other devices). Only for background
   // (task) runs; foreground and web chats already reach the conversation themselves.
-  // (The earlier session-keyed mirror wrote to a phantom conversation and never showed.)
   if (body?.background && assistantText.trim()) {
     const cloud = settingsStore.cloudSettings();
     if (cloud.enabled && cloud.token && cloud.user?.id) {
-      const conversationId = `fellow:${cloud.user.id}:${fellow.key}`;
-      Promise.resolve(socialApi.postConversationMessageAsFellow(conversationId, {
+      const targetConversationId = conversationId || `fellow:${cloud.user.id}:${fellow.key}`;
+      Promise.resolve(socialApi.postConversationMessageAsFellow(targetConversationId, {
         fellowId: fellow.key,
         bodyMd: assistantText,
         ...(Object.keys(assistantTracePayload).length ? { trace: assistantTracePayload } : {}),
-        clientOpId: `op_task_${target.id}_${assistantMessageId}`
+        clientOpId: `op_task_${body?.meta?.taskRunId || agentSessionId}_${assistantMessageId}`
       })).catch((error) => appendDaemonLog(`Task reply conversation post failed: ${error?.message || error}`));
     }
   }
-  return { fellow, session: target, response, userMessageId, assistantMessageId };
+  return { fellow, session: responseConversation, response, userMessageId, assistantMessageId };
 }
 
 let tasksStore = null;
 let tasksEvents = null;
 let scheduler = null;
 let tasksRoutes = null;
-
-// Broadcast that the chat store changed (e.g. a task fire appended its reply) so
-// the foreground app reloads it. Rides the task-event bus and its SSE stream out
-// to the desktop tasks-client and renderer, the same channel task events use.
-function notifyChatSessionsChanged(payload = {}) {
-  try { if (tasksEvents) tasksEvents.emit("sessions_changed", payload); } catch { /* bus unavailable */ }
-}
 
 function initSchedulerSubsystem() {
   if (tasksStore) return; // idempotent
@@ -1482,6 +1418,11 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, group, web
     activeChatAbortController = abortController;
   }
   const { signal } = abortController;
+  // chat:event drives background/remote trace capture (see runRemoteChatRequest's
+  // tracedEventSink). Interactive cloud-conversation chats publish their own
+  // cloud:event stream via local-fellow-responder — those
+  // callers either pass externalEmit or set utility/group/background to skip
+  // this emitter.
   const { emit } = typeof externalEmit === "function"
     ? { emit: externalEmit }
     : !utility
@@ -1610,9 +1551,7 @@ const modelSettingsService = createModelSettingsService({
   getRuntimeStatus
 });
 
-const chatSessionService = createChatSessionService({
-  initializeRuntime,
-  chatStore: chatStoreModule,
+const conversationTitleService = createConversationTitleService({
   randomUUID: () => crypto.randomUUID(),
   sendChat
 });
@@ -1621,8 +1560,6 @@ const fellowService = createFellowService({
   initializeRuntime,
   runtimePaths,
   fellowManifest: fellowManifestModule,
-  loadChatStore,
-  saveChatStore,
   loadAgentSessionMap: agentSessionStore.loadMap,
   saveAgentSessionMap: agentSessionStore.saveMap,
   orphanTasksByFellow: (key) => {
@@ -1643,16 +1580,11 @@ remoteControlRouter = createRemoteControlRouter({
   isDaemonProcess: IS_DAEMON_PROCESS,
   getRuntimeStatus,
   loadFellowManifest,
-  loadChatSessions: () => chatSessionService.loadChatSessions(),
   loadHermesModelCatalog: () => engineCatalogService.loadHermesModelCatalog(),
   loadCodexModels: () => engineCatalogService.loadCodexModels(),
   loadEngineCapabilities: () => engineCatalogService.loadEngineCapabilities(),
   loadHermesSlashCommands: () => engineCatalogService.loadHermesSlashCommands(),
   loadExternalAgentCommands: (body) => externalAgentCommandService.loadCommands(body),
-  newChatSession: (body) => chatSessionService.newChatSession(body),
-  saveChatSession: (body) => chatSessionService.saveChatSession(body),
-  saveChatReadState: (body) => chatSessionService.saveChatReadState(body),
-  renameChatSession: (body) => chatSessionService.renameChatSession(body),
   saveChatAttachment,
   readLocalFileAttachment,
   executeExternalAgentCommand: (body) => externalAgentCommandService.executeCommand(body),
@@ -1856,12 +1788,10 @@ cloudDesktopSyncRuntime = createCloudDesktopSyncClient({
   readFellowPersona,
   runtimePaths,
   readJson,
-  loadChatStore,
   startCloudEvents,
   startCloudBridge,
   stopCloudEvents,
-  stopCloudBridge,
-  now: () => Date.now()
+  stopCloudBridge
 });
 cloudBridgeRuntime = createCloudBridgeClient({
   WebSocketImpl: WebSocket,
@@ -1891,19 +1821,6 @@ function shouldHandleCloudConversationAi() {
     daemonEnabled: settingsStore.daemonSettings().enabled
   });
 }
-const mainGroupConductor = createMainGroupConductor({
-  getCurrentUserId: () => settingsStore.cloudSettings().user?.id || "",
-  listFellows: () => loadFellowManifest().fellows || [],
-  loadPrompts: loadConductorPrompts,
-  getConversationDetails: (conversationId) => socialApi.getConversation(conversationId),
-  listRecentMessages: async (conversationId, sinceSeq, limit) => {
-    const data = await socialApi.listConversationMessages(conversationId, sinceSeq, limit);
-    return data?.messages || [];
-  },
-  sendChatStateless,
-  responder: localFellowResponder,
-  log: (line) => appendCloudLog(line)
-});
 const mainFellowConversationResponder = createMainFellowConversationResponder({
   getCurrentUserId: () => settingsStore.cloudSettings().user?.id || "",
   getConversationDetails: (conversationId) => socialApi.getConversation(conversationId),
@@ -1926,7 +1843,6 @@ const mainFellowRuntimeDispatcher = createMainFellowRuntimeDispatcher({
   shouldHandle: shouldHandleCloudConversationAi,
   listFellows: () => loadFellowManifest().fellows || [],
   localFellowResponder,
-  mainGroupConductor,
   mainFellowConversationResponder,
   log: (line) => appendCloudLog(line)
 });
@@ -1995,38 +1911,7 @@ ipcMain.handle(IpcChannel.ChatFileFetch, (_event, payload) => safeFetchFileAttac
 ipcMain.handle(IpcChannel.CommandsSlash, () => engineCatalogService.loadHermesSlashCommands());
 ipcMain.handle(IpcChannel.CommandsAgentList, async (_event, payload) => externalAgentCommandService.loadCommands(payload));
 ipcMain.handle(IpcChannel.CommandsAgentExecute, (_event, payload) => externalAgentCommandService.executeCommand(payload));
-// The daemon is the single writer of the chat store: whenever it's enabled, the
-// foreground app routes its chat-store WRITES through the daemon's control server
-// so the daemon's task fires and the user's chats never clobber each other across
-// processes. Reads stay local — they hit the same on-disk file the daemon wrote.
-// If the daemon is enabled but unreachable, fall back to a local write: an absent
-// daemon isn't writing, so there's no competing writer to race.
-async function routeChatWrite(localFn, daemonPath, body) {
-  if (IS_DAEMON_PROCESS || !settingsStore.daemonSettings().enabled) return localFn();
-  try {
-    return await daemonTasksClient.call(daemonPath, { method: "POST", body: JSON.stringify(body || {}) });
-  } catch (error) {
-    // Fall back to a LOCAL write only when the daemon is genuinely down — then it
-    // isn't writing, so there's no competing writer. If the daemon is alive and
-    // the call merely blipped, a local write would re-introduce the cross-process
-    // race, so surface the error instead and let the caller retry on the next save.
-    let daemonRunning = true;
-    try { daemonRunning = Boolean((await getObservedDaemonStatus(400))?.running); } catch { daemonRunning = false; }
-    if (daemonRunning) throw error;
-    appendDaemonLog(`Chat write skipped daemon (down) at ${daemonPath}, writing locally: ${error?.message || error}`);
-    return localFn();
-  }
-}
-ipcMain.handle(IpcChannel.ChatSessionsLoad, () => chatSessionService.loadChatSessions());
-ipcMain.handle(IpcChannel.ChatSessionSave, (_event, payload) =>
-  routeChatWrite(() => chatSessionService.saveChatSession(payload), "/api/chat/session/save", payload));
-ipcMain.handle(IpcChannel.ChatReadStateSave, (_event, payload) =>
-  routeChatWrite(() => chatSessionService.saveChatReadState(payload), "/api/chat/read-state/save", payload));
-ipcMain.handle(IpcChannel.ChatSessionCreate, (_event, payload) =>
-  routeChatWrite(() => chatSessionService.newChatSession(payload), "/api/chat/session", payload));
-ipcMain.handle(IpcChannel.ChatSessionRename, (_event, payload) =>
-  routeChatWrite(() => chatSessionService.renameChatSession(payload), "/api/chat/session/rename", payload));
-ipcMain.handle(IpcChannel.ChatTitleGenerate, (_event, payload) => chatSessionService.generateSessionTitle(payload));
+ipcMain.handle(IpcChannel.ConversationTitleGenerate, (_event, payload) => conversationTitleService.generateTitle(payload));
 ipcMain.handle(IpcChannel.ModelCatalog, () => engineCatalogService.loadHermesModelCatalog());
 ipcMain.handle(IpcChannel.CodexListModels, () => engineCatalogService.loadCodexModels());
 ipcMain.handle(IpcChannel.EngineCapabilities, () => engineCatalogService.loadEngineCapabilities());
@@ -2048,7 +1933,19 @@ ipcMain.handle(IpcChannel.SkillsMarketInstall, async (_event, skillId) => {
   if (checksum !== download.checksum) {
     throw new Error("技能包校验失败（checksum 不匹配），已中止安装。");
   }
-  const library = await skillsLoader.installMarketplaceSkill({ id: skill.id, zipBuffer, marketVersion: download.version });
+  const library = await skillsLoader.installMarketplaceSkill({
+    id: skill.id,
+    zipBuffer,
+    marketVersion: download.version,
+    marketMeta: {
+      sourceLabel: skill.sourceLabel || skill.ownerLabel || "",
+      upstreamSource: skill.upstreamSource || "",
+      upstreamId: skill.upstreamId || "",
+      upstreamRepo: skill.upstreamRepo || "",
+      upstreamPath: skill.upstreamPath || "",
+      trustLevel: skill.trustLevel || ""
+    }
+  });
   return { skill, library };
 });
 ipcMain.handle(IpcChannel.SkillsPublish, async (_event, payload) => {

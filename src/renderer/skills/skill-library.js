@@ -12,6 +12,16 @@
   let closeGroupContextMenu, showNarrowContent;
   let deleteSkill, openSkillDirectory;
 
+  const MARKET_SOURCE_LOGOS = {
+    hermes: { label: "Hermes", mask: true },
+    github: { label: "GitHub", mask: true },
+    "skills-sh": { label: "skills.sh", src: "./assets/provider-icons/skills-sh.png" },
+    clawhub: { label: "ClawHub", src: "./assets/provider-icons/clawhub.png" },
+    "browse-sh": { label: "browse.sh", src: "./assets/provider-icons/browse-sh.svg" },
+    claude: { label: "Claude", src: "./assets/provider-icons/claude.svg" },
+    lobehub: { label: "LobeHub", src: "./assets/provider-icons/lobehub.svg" }
+  };
+
   function initSkillLibrary(deps) {
     state = deps.state;
     els = deps.els;
@@ -83,6 +93,9 @@
   function renderSkillCard(skill) {
     const tone = window.miaSkillHelpers.skillTone(skill);
     const initials = window.miaSkillHelpers.skillInitials(skill.name);
+    const sourceText = skill.marketSourceLabel
+      ? `本机安装 · ${skill.marketSourceLabel}`
+      : (skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill));
     return `
       <article class="skill-card${skill.id === state.selectedSkillId ? " featured" : ""}" data-skill-select="${escapeHtml(skill.id)}">
         <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
@@ -93,7 +106,7 @@
           </div>
           <p>${escapeHtml(window.miaSkillHelpers.skillSummaryZh(skill))}</p>
         </div>
-        <span class="skill-card-source">${escapeHtml(skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill))}</span>
+        <span class="skill-card-source">${escapeHtml(sourceText)}</span>
       </article>
     `;
   }
@@ -186,7 +199,10 @@
     els.skillPreviewMark.className = `skill-dot ${window.miaSkillHelpers.skillTone(skill)}`;
     els.skillPreviewMark.textContent = window.miaSkillHelpers.skillInitials(skill.name);
     setText(els.skillPreviewTitle, window.miaSkillHelpers.skillDisplayName(skill));
-    setText(els.skillPreviewMeta, `${skill.name || "Skill"} · ${skill.sourceLabel || "Local"} · ${skill.relPath || skill.category || ""}`);
+    const previewSource = skill.marketSourceLabel
+      ? `${skill.sourceLabel || "Local"} · ${skill.marketSourceLabel}`
+      : (skill.sourceLabel || "Local");
+    setText(els.skillPreviewMeta, `${skill.name || "Skill"} · ${previewSource} · ${skill.relPath || skill.category || ""}`);
     els.skillPreviewBody.innerHTML = skill.body
       ? window.miaSkillHelpers.renderSkillMarkdownSource(skill.body)
       : `<div class="skill-empty-state">正在读取 SKILL.md...</div>`;
@@ -308,9 +324,48 @@
     });
   }
 
+  function normalizedMarketSourceValues(skill) {
+    return [skill?.upstreamSource, skill?.sourceLabel, skill?.ownerLabel, skill?.category]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  function marketSourceKey(skill) {
+    const values = new Set(normalizedMarketSourceValues(skill));
+    if (values.has("official") || values.has("hermes") || values.has("hermes 官方") || values.has("hermes hub")) return "hermes";
+    if (values.has("skills.sh") || values.has("skills-sh")) return "skills-sh";
+    if (values.has("github")) return "github";
+    if (values.has("clawhub")) return "clawhub";
+    if (values.has("browse.sh") || values.has("browse-sh")) return "browse-sh";
+    if (
+      values.has("claude")
+      || values.has("anthropic")
+      || values.has("claude marketplace")
+      || values.has("claude-marketplace")
+      || values.has("anthropics/skills")
+      || values.has("anthropic/skills")
+    ) return "claude";
+    if (values.has("lobehub")) return "lobehub";
+    return "";
+  }
+
+  function marketSourceLogo(skill, sourceKey = marketSourceKey(skill)) {
+    return MARKET_SOURCE_LOGOS[sourceKey] || null;
+  }
+
+  function marketSourceLogoHtml(skill) {
+    const sourceKey = marketSourceKey(skill);
+    const logo = marketSourceLogo(skill, sourceKey);
+    if (!logo) return "";
+    const className = `skill-source-logo skill-source-logo-${sourceKey}`;
+    const title = logo.label ? ` title="${escapeHtml(logo.label)}"` : "";
+    if (logo.mask) {
+      return `<span class="${escapeHtml(className)}" aria-hidden="true"${title}><span class="skill-source-logo-mask"></span></span>`;
+    }
+    return `<span class="${escapeHtml(className)}" aria-hidden="true"${title}><img src="${escapeHtml(logo.src)}" alt=""></span>`;
+  }
+
   function renderMarketCard(skill) {
-    const tone = window.miaSkillHelpers.skillTone(skill);
-    const initials = window.miaSkillHelpers.skillInitials(skill.name);
     const installed = marketSkillInstalled(skill);
     const installing = state.installingSkillIds.has(skill.id);
     const action = installed
@@ -319,7 +374,6 @@
     const meta = [skill.sourceLabel, formatInstallCount(skill.installCount)].filter(Boolean).join(" · ");
     return `
       <article class="skill-card market-card" data-market-id="${escapeHtml(skill.id)}">
-        <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
         <div class="skill-card-head">
           <div class="skill-card-titlerow">
             <strong>${escapeHtml(skill.name)}</strong>
@@ -327,7 +381,7 @@
           </div>
           <p>${escapeHtml(skill.description || "")}</p>
         </div>
-        <span class="skill-card-source">${escapeHtml(meta)}</span>
+        <span class="skill-card-source">${marketSourceLogoHtml(skill)}<span class="skill-card-source-text">${escapeHtml(meta)}</span></span>
       </article>
     `;
   }

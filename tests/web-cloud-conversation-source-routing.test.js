@@ -19,6 +19,7 @@ function loadInBrowserLikeContext() {
   const ctx = vm.createContext({ window, globalThis: window, console });
   const files = [
     "src/shared/message-spec.js",
+    "src/shared/avatar-resolve.js",
     "src/shared/contact.js",
     "src/shared/conversation-kinds.js",
     "src/renderer/message-sources/cloud-conversation-source.js"

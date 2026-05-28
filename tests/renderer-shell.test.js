@@ -237,7 +237,9 @@ test("desktop avatar picker supports video avatars with one trim row", () => {
 
 test("desktop avatar helpers tolerate null crop values", () => {
   const avatarSource = fs.readFileSync(path.join(root, "src/renderer/helpers/avatar-helpers.js"), "utf8");
+  const resolveSource = fs.readFileSync(path.join(root, "src/shared/avatar-resolve.js"), "utf8");
   const context = vm.createContext({ window: {}, console });
+  vm.runInContext(resolveSource, context);
   vm.runInContext(avatarSource, context);
 
   const crop = context.window.miaAvatar.normalizeCrop(null);
@@ -250,6 +252,7 @@ test("desktop avatar helpers tolerate null crop values", () => {
 test("desktop avatar video crop updates do not restart playback unless trim changes", () => {
   const avatarSource = fs.readFileSync(path.join(root, "src/renderer/helpers/avatar-helpers.js"), "utf8");
   const mediaSource = fs.readFileSync(path.join(root, "src/shared/avatar-media.js"), "utf8");
+  const resolveSource = fs.readFileSync(path.join(root, "src/shared/avatar-resolve.js"), "utf8");
   const context = vm.createContext({
     window: {},
     console,
@@ -257,6 +260,7 @@ test("desktop avatar video crop updates do not restart playback unless trim chan
   });
   context.globalThis = context.window;
   vm.runInContext(mediaSource, context, { filename: "src/shared/avatar-media.js" });
+  vm.runInContext(resolveSource, context, { filename: "src/shared/avatar-resolve.js" });
   vm.runInContext(avatarSource, context, { filename: "src/renderer/helpers/avatar-helpers.js" });
 
   const seeks = [];

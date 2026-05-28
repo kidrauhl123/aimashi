@@ -52,17 +52,10 @@ contextBridge.exposeInMainWorld("mia", {
       return file?.path || "";
     }
   },
-  onChatEvent: (callback) => {
-    const listener = (_event, envelope) => {
-      try { callback(envelope); } catch { /* renderer handler error swallowed */ }
-    };
-    ipcRenderer.on(IpcChannel.ChatEvent, listener);
-    return () => ipcRenderer.removeListener(IpcChannel.ChatEvent, listener);
-  },
   loadSlashCommands: () => ipcRenderer.invoke(IpcChannel.CommandsSlash),
   loadAgentCommands: (payload) => ipcRenderer.invoke(IpcChannel.CommandsAgentList, payload),
   executeAgentCommand: (payload) => ipcRenderer.invoke(IpcChannel.CommandsAgentExecute, payload),
-  generateSessionTitle: (payload) => ipcRenderer.invoke(IpcChannel.ChatTitleGenerate, payload),
+  generateConversationTitle: (payload) => ipcRenderer.invoke(IpcChannel.ConversationTitleGenerate, payload),
   loadModelCatalog: () => ipcRenderer.invoke(IpcChannel.ModelCatalog),
   loadCodexModels: () => ipcRenderer.invoke(IpcChannel.CodexListModels),
   loadEngineCapabilities: () => ipcRenderer.invoke(IpcChannel.EngineCapabilities),

@@ -10,6 +10,14 @@ function fellowKey(fellow) {
   return key;
 }
 
+function fellowDisplayName(fellow, fallback) {
+  return String(fellow?.name || fellow?.displayName || fellow?.display_name || fallback || "").trim();
+}
+
+function fellowInstructions(fellow) {
+  return String(fellow?.personaText || fellow?.persona_text || "").trim();
+}
+
 function parseErrorMessage(text) {
   try {
     return JSON.parse(text).error?.message || text;
@@ -83,6 +91,9 @@ function createHermesRunsClient(deps = {}) {
 
   async function runChat(args = {}) {
     const key = fellowKey(args.fellow);
+    const displayName = fellowDisplayName(args.fellow, key);
+    const instructions = String(args.instructions || "").trim()
+      || (args.metadataRole === "group-conductor" ? "" : fellowInstructions(args.fellow));
     const userId = String(args.userId || "").trim();
     const conversationId = String(args.conversationId || "").trim();
     if (!userId) throw new Error("userId required");
@@ -108,6 +119,7 @@ function createHermesRunsClient(deps = {}) {
         persona_key: key,
         account_id: userId,
         route_profile: "cloud-hermes",
+        display_name: displayName,
         role: args.metadataRole || "chat",
         effort_level: args.effortLevel || "medium",
         permission_mode: args.permissionMode || "ask",
@@ -122,6 +134,7 @@ function createHermesRunsClient(deps = {}) {
           : []
       }
     };
+    if (instructions) body.instructions = instructions;
     const headers = {
       "X-Mia-Fellow": key,
       "X-Alkaka-Fellow": key,

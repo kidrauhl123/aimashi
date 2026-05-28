@@ -14,12 +14,10 @@ function createCloudDesktopSyncClient({
   readFellowPersona,
   runtimePaths,
   readJson,
-  loadChatStore,
   startCloudEvents,
   startCloudBridge,
   stopCloudEvents,
-  stopCloudBridge,
-  now = Date.now
+  stopCloudBridge
 }) {
   function settings() {
     return typeof getCloudSettings === "function" ? getCloudSettings() : {};
@@ -136,91 +134,6 @@ function createCloudDesktopSyncClient({
     }
   }
 
-  async function legacyBackfillFellowSessionsToCloudConversations() {
-    const current = settings();
-    if (!current.enabled || !current.token || !current.user?.id) return;
-    let store;
-    try {
-      store = loadChatStore();
-    } catch (error) {
-      log(`Cloud fellow-conversation backfill: failed to read chat store (${error?.message || error})`);
-      return;
-    }
-    const manifest = loadFellowManifest();
-    const fellowByKey = new Map((manifest.fellows || []).map((fellow) => [fellow.key, fellow]));
-    for (const [personaKey, sessions] of Object.entries(store.sessions || {})) {
-      if (!Array.isArray(sessions)) continue;
-      const fellow = fellowByKey.get(personaKey) || { key: personaKey, name: personaKey };
-      for (const session of sessions) {
-        await mirrorFellowSessionMessages(current, session, fellow);
-      }
-    }
-  }
-
-  async function mirrorFellowSessionMessages(current, session, fellow) {
-    if (!session?.id || !fellow?.key) return;
-    try {
-      await cloudApi(`/api/me/fellow-conversations/${encodeURIComponent(session.id)}`, {
-        method: "PUT",
-        body: {
-          fellowKey: fellow.key,
-          title: session.title || fellow.name || "对话",
-          clientOpId: `op_fellow_conversation_${current.user.id}_${session.id}`
-        }
-      });
-    } catch (error) {
-      log(`Cloud fellow-conversation upsert failed (${session.id}): ${error?.message || error}`);
-      return;
-    }
-    const conversationId = `fellow:${current.user.id}:${session.id}`;
-    const messages = Array.isArray(session.messages) ? session.messages : [];
-    for (const message of messages) {
-      const text = String(message?.content || message?.text || "").trim();
-      if (!text) continue;
-      const clientOpId = `op_fellow_msg_${session.id}_${message.id || message.createdAt || ""}`;
-      try {
-        await cloudApi(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-          method: "POST",
-          body: { bodyMd: text, attachments: message.attachments || null, clientOpId }
-        });
-      } catch (error) {
-        log(`Cloud fellow-conversation message backfill failed (${conversationId}): ${error?.message || error}`);
-        break;
-      }
-    }
-  }
-
-  async function mirrorFellowSessionToCloudConversation(session, fellow, message) {
-    if (!session?.id || !fellow?.key) return;
-    const current = settings();
-    if (!current.enabled || !current.token || !current.user?.id) return;
-    try {
-      await cloudApi(`/api/me/fellow-conversations/${encodeURIComponent(session.id)}`, {
-        method: "PUT",
-        body: {
-          fellowKey: fellow.key,
-          title: session.title || fellow.name || "对话",
-          clientOpId: `op_fellow_conversation_${current.user.id}_${session.id}`
-        }
-      });
-    } catch (error) {
-      log(`Cloud fellow-conversation upsert failed (${session.id}): ${error?.message || error}`);
-      return;
-    }
-    const conversationId = `fellow:${current.user.id}:${session.id}`;
-    const text = String(message?.content || message?.text || "").trim();
-    if (!text) return;
-    const clientOpId = `op_fellow_msg_${session.id}_${message.id || message.createdAt || now()}`;
-    try {
-      await cloudApi(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-        method: "POST",
-        body: { bodyMd: text, attachments: message.attachments || null, clientOpId }
-      });
-    } catch (error) {
-      log(`Cloud fellow-conversation message push failed (${conversationId}): ${error?.message || error}`);
-    }
-  }
-
   async function syncWorkspace() {
     const current = settings();
     if (!current.enabled || !current.token) return status(false);
@@ -232,16 +145,6 @@ function createCloudDesktopSyncClient({
     } catch (error) {
       log(`Mia Cloud /api/me refresh failed: ${error?.message || error}`);
     }
-    return status(false);
-  }
-
-  async function pushDesktopMessage({ session, message, fellowKey = "" } = {}) {
-    const current = settings();
-    if (!current.enabled || !current.token || !session?.id || !message) return status(false);
-    const fellow = (loadFellowManifest().fellows || []).find((item) => item.key === fellowKey || item.id === fellowKey) || {};
-    await mirrorFellowSessionToCloudConversation(session, fellow, message).catch((error) =>
-      log(`Cloud fellow-conversation push failed: ${error?.message || error}`)
-    );
     return status(false);
   }
 
@@ -337,7 +240,6 @@ function createCloudDesktopSyncClient({
     logout,
     putUserSettings,
     pushAllFellows,
-    pushDesktopMessage,
     pushFellow,
     pushUserProfile,
     syncWorkspace

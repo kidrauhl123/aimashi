@@ -29,7 +29,6 @@ function makeService(overrides = {}) {
     setAgentSessionEntry: (...args) => calls.push(["set-entry", ...args]),
     ensureClaudeBridgePlugin: () => ({ fingerprint: "bridge_fp" }),
     loadAgentSessionMap: () => ({}),
-    loadChatStore: () => ({ sessions: {} }),
     listExternalAgentSessions: () => [],
     relaySettings: () => ({ deviceId: "device_1" }),
     ...overrides
@@ -131,20 +130,8 @@ test("runSlashCommand lists Mia-bound external sessions before raw CLI history",
   const { service } = makeService({
     getAgentSessionId: () => currentId,
     loadAgentSessionMap: () => ({
-      [`codex:alice:local_2`]: candidateId,
+      [`codex:alice:fellow:u_1:alice`]: candidateId,
       [`codex:bob:local_3`]: "33333333-2222-4333-8444-555555555555"
-    }),
-    loadChatStore: () => ({
-      sessions: {
-        alice: [
-          {
-            id: "local_2",
-            title: "Mia 里的旧会话",
-            createdAt: "2026-05-20T00:00:00.000Z",
-            updatedAt: "2026-05-21T00:00:00.000Z"
-          }
-        ]
-      }
     }),
     listExternalAgentSessions: () => [
       { id: candidateId, title: "Raw CLI title", preview: "raw", project: "/repo", updatedAt: 1 }
@@ -163,10 +150,10 @@ test("runSlashCommand lists Mia-bound external sessions before raw CLI history",
   assert.deepEqual(result.commandResult.rows, [
     {
       id: candidateId,
-      title: "Mia 里的旧会话",
+      title: "Mia 云端对话",
       preview: "Alice 的 Mia 对话 · /repo",
       project: "/repo",
-      updatedAt: Date.parse("2026-05-21T00:00:00.000Z")
+      updatedAt: 1
     }
   ]);
 });

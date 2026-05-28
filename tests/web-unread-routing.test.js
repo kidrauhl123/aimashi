@@ -302,6 +302,20 @@ test("scripts/build-cloud-release.js copies cloud shared modules into the api tr
   assert.match(build, /api\/src\/shared\/skill-safety\.js/);
 });
 
+test("scripts/build-cloud-release.js ships the git-versioned skill catalog", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(
+    build,
+    /copyDir\(["']skills["'],\s*path\.join\(apiDir,\s*["']skills["']\)\)/,
+    "cloud release must include top-level skills/ so fresh DB seeding is not empty"
+  );
+  assert.match(
+    build,
+    /api\/skills\/commit-craft\/SKILL\.md/,
+    "release verifier must fail if seeded marketplace skills are missing"
+  );
+});
+
 test("cloud release and local web server expose desktop model icon assets", () => {
   const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
   const serveWeb = fs.readFileSync(path.join(ROOT, "scripts/serve-web.js"), "utf8");

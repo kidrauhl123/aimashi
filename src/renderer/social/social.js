@@ -664,7 +664,16 @@
       _cloudRunRenderFrame = 0;
       _reRenderActiveChat();
       renderAgentPermissionBanner();
+      // Header typing dots (replaces the old in-bubble "正在输入" status) — host
+      // app owns the header DOM, so it provides the repaint callback via deps.
+      if (deps && typeof deps.paintHeaderStatus === "function") deps.paintHeaderStatus();
     });
+  }
+
+  function activeConversationRun() {
+    const conversationId = moduleState.activeConversationId;
+    if (!conversationId) return null;
+    return moduleState.cloudAgentRunsByConversation.get(conversationId) || null;
   }
 
   // Parse dm:<a>:<b> and return the user-id that is NOT myUserId.
@@ -1546,7 +1555,9 @@
 
   function _buildCloudAgentStreamingArticle(conversationId, accentColor, members = []) {
     const run = moduleState.cloudAgentRunsByConversation.get(conversationId);
-    if (!run || (!run.text && !run.reasoning && !run.tools.length && run.status !== "running")) return null;
+    // Typing-only state ("running" with no text/reasoning/tools yet) shows in the
+    // conversation header instead of a placeholder bubble — see paintHeaderStatus.
+    if (!run || (!run.text && !run.reasoning && !run.tools.length)) return null;
     const conversation = moduleState.conversations.find((r) => r.id === conversationId) || { id: conversationId };
     const fellowKey = run.fellowId || conversation.decorations?.fellowKey || (conversation.id?.startsWith("fellow:") ? conversation.id.split(":")[2] : "mia");
     const synthetic = {
@@ -1580,13 +1591,6 @@
       expanded: true,
       scopeKey: `cloud-run:${run.runId || conversationId}`
     });
-    const isGroupConversation = conversationTypeFor(conversation, conversationId) === "group";
-    const typingText = isGroupConversation
-      ? `${run.typingLabel || authorName || fellowKey}正在输入`
-      : "正在输入";
-    const statusHtml = run.status === "running" && (run.text || (!run.tools.length && !run.reasoning))
-      ? `<span class="typing-status">${escapeHtml(typingText)}<span class="typing-dots"><i></i><i></i><i></i></span></span>`
-      : "";
     const toolsHtml = !traceHtml && run.tools.length
       ? `<div class="message-attachments">${run.tools.slice(-3).map((tool) => `<span class="message-attachment"><span>TOOL</span><strong>${escapeHtml(tool.name || "工具")}</strong><em>${escapeHtml(tool.status || "")}</em></span>`).join("")}</div>`
       : "";
@@ -1597,7 +1601,6 @@
       <div class="message-stack">
         ${traceHtml}
         ${bodyHtml ? `<div class="bubble">${bodyHtml}</div>` : ""}
-        ${statusHtml ? `<div class="bubble">${statusHtml}</div>` : ""}
         ${toolsHtml}
       </div>
     `;
@@ -1806,11 +1809,50 @@
     return true;
   }
 
+  function _messageAttachmentsFingerprint(message) {
+    const raw = Array.isArray(message?.attachments)
+      ? message.attachments
+      : (() => {
+        try { return JSON.parse(message?.attachments_json || "[]"); } catch { return []; }
+      })();
+    if (!Array.isArray(raw) || !raw.length) return "[]";
+    return JSON.stringify(raw.map((item) => ({
+      id: item?.id || "",
+      url: item?.url || "",
+      name: item?.name || "",
+      path: item?.path || "",
+      size: item?.size || 0
+    })));
+  }
+
+  function _messageLooksFromSelf(message) {
+    const senderRef = String(message?.sender_ref || "").trim();
+    return Boolean(senderRef && moduleState.myUserId && senderRef === moduleState.myUserId) || _isMessageFromSelf(message);
+  }
+
+  function _localPendingEchoIndexWithoutTurnId(entry, sentMsg) {
+    if (sentMsg.turn_id || sentMsg.sender_kind !== conversationKinds().SenderKind.User || !_messageLooksFromSelf(sentMsg)) return -1;
+    const sentBody = String(sentMsg.body_md || "");
+    const sentAttachments = _messageAttachmentsFingerprint(sentMsg);
+    const matches = [];
+    for (let i = 0; i < entry.messages.length; i++) {
+      const message = entry.messages[i];
+      if (!message?._localPending) continue;
+      if (message.sender_kind !== conversationKinds().SenderKind.User) continue;
+      if (String(message.body_md || "") !== sentBody) continue;
+      if (_messageAttachmentsFingerprint(message) !== sentAttachments) continue;
+      matches.push(i);
+    }
+    return matches.length === 1 ? matches[0] : -1;
+  }
+
   function _reconcileEchoedConversationMessage(conversationId, sentMsg) {
-    if (!conversationId || !sentMsg || !sentMsg.id || !sentMsg.turn_id) return false;
+    if (!conversationId || !sentMsg || !sentMsg.id) return false;
     const entry = moduleState.messageCache.get(conversationId);
     if (!entry) return false;
-    const localIdx = entry.messages.findIndex((m) => m && m._localPending && m.turn_id === sentMsg.turn_id);
+    const localIdx = sentMsg.turn_id
+      ? entry.messages.findIndex((m) => m && m._localPending && m.turn_id === sentMsg.turn_id)
+      : _localPendingEchoIndexWithoutTurnId(entry, sentMsg);
     if (localIdx < 0) return false;
     entry.messages[localIdx] = sentMsg;
     entry.messages.sort((a, b) => a.seq - b.seq);
@@ -2566,6 +2608,7 @@
     deleteConversationMessage,
     describeMessageForMenu,
     getActiveConversationId,
+    activeConversationRun,
     getConversationById,
     fellowConversationForKey,
     setActiveConversationId,

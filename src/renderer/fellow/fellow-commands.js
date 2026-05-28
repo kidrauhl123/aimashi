@@ -100,8 +100,7 @@
 
   async function saveDesktopLocalFellow({
     api = global.mia,
-    fellow = {},
-    loadChatSessions = async () => {}
+    fellow = {}
   } = {}) {
     if (typeof api?.saveFellow !== "function") throw new Error("本机 Fellow 保存接口不可用。");
     const runtime = await api.saveFellow(fellow);
@@ -109,7 +108,6 @@
     const saved = fellow.key
       ? fellows.find((item) => item.key === fellow.key)
       : [...fellows].reverse().find((item) => item.name === String(fellow.name || "").trim()) || fellows[0];
-    await loadChatSessions();
     return { key: saved?.key || "", fellow: saved || null, conversation: null, runtime };
   }
 
@@ -141,14 +139,12 @@
   async function deleteDesktopLocalFellow({
     state = {},
     api = global.mia,
-    fellow = {},
-    loadChatSessions = async () => {}
+    fellow = {}
   } = {}) {
     const key = String(fellow.key || fellow.id || "").trim();
     if (!key) return { deleted: false, runtime: state.runtime };
     if (typeof api?.deleteFellow !== "function") throw new Error("本机 Fellow 删除接口不可用。");
     const runtime = await api.deleteFellow({ key });
-    await loadChatSessions();
     return { deleted: true, runtime };
   }
 

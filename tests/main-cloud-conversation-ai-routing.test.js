@@ -9,13 +9,13 @@ function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 
-test("main owns cloud conversation fellow invocation and group conductor execution", () => {
+test("main owns cloud conversation fellow invocation execution without group coordination", () => {
   const main = read("src/main.js");
   const cloudEventsClient = read("src/main/cloud/cloud-events-client.js");
 
   assert.match(main, /createLocalFellowResponder/, "main must instantiate the local fellow responder Module");
   assert.match(main, /createCloudEventsClient/, "main must instantiate the cloud events client Module");
-  assert.match(main, /createMainGroupConductor/, "main must instantiate the main-process group conductor Module");
+  assert.doesNotMatch(main, /createMainGroupConductor/, "main must not instantiate a desktop group conductor");
   assert.match(main, /createMainFellowConversationResponder/, "main must instantiate the main-process fellow conversation responder Module");
   assert.match(main, /createMainFellowRuntimeDispatcher/, "main must instantiate the unified fellow runtime dispatcher Module");
   assert.match(main, /shouldHandleLocalCloudConversationAi/, "main must gate AI execution so foreground and daemon do not both answer");
@@ -31,7 +31,7 @@ test("main owns cloud conversation fellow invocation and group conductor executi
   );
   const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
   assert.match(dispatcher, /localFellowResponder\.respond/, "dispatcher must own explicit desktop-local invocation execution");
-  assert.match(dispatcher, /mainGroupConductor\.handleConversationMessageAppended/, "dispatcher must own group conductor fan-out");
+  assert.doesNotMatch(dispatcher, /mainGroupConductor/, "dispatcher must not run group conductor fan-out from message events");
   assert.match(
     dispatcher,
     /mainFellowConversationResponder\.handleConversationMessageAppended/,

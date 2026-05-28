@@ -18,6 +18,7 @@ const SHARED_MODULES = [
   { file: "conversation-kinds.js", global: "miaConversationKinds" },
   { file: "send-pipeline.js", global: "miaSendPipeline" },
   { file: "avatar-media.js", global: "miaAvatarMedia" },
+  { file: "avatar-resolve.js", global: "miaAvatarResolve" },
   { file: "fellow-runtime-control.js", global: "miaFellowRuntimeControl" }
 ];
 

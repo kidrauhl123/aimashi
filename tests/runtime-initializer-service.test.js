@@ -29,7 +29,6 @@ function runtimeFor(dir) {
     relaySettings: path.join(home, "mia-relay.json"),
     userProfile: path.join(home, "mia-user.json"),
     appearanceSettings: path.join(home, "mia-appearance.json"),
-    chatSessions: path.join(home, "mia-sessions.json"),
     soul: path.join(home, "SOUL.md"),
     petDir: path.join(home, "pets"),
     petJobsDir: path.join(home, "pet-jobs")
@@ -64,7 +63,6 @@ function setup(t, overrides = {}) {
     defaultRelaySettings: () => ({ enabled: false }),
     defaultUserProfile: () => ({ displayName: "Boss" }),
     defaultAppearanceSettings: () => ({ theme: "system" }),
-    defaultChatStore: () => ({ sessions: [] }),
     loadFellowManifest: () => manifest,
     saveFellowManifest: (next) => {
       calls.push(["save-fellows", next.fellows.length]);
@@ -107,7 +105,7 @@ test("initializeRuntimeCore creates runtime directories, default files, fellows,
   assert.deepEqual(readJson(runtime.relaySettings), { enabled: false });
   assert.deepEqual(readJson(runtime.userProfile), { displayName: "Boss" });
   assert.deepEqual(readJson(runtime.appearanceSettings), { theme: "system" });
-  assert.deepEqual(readJson(runtime.chatSessions), { sessions: [] });
+  assert.equal(fs.existsSync(path.join(runtime.home, "mia-sessions.json")), false);
   assert.match(fs.readFileSync(runtime.soul, "utf8"), /Mia Shared Soul/);
   assert.equal(fs.readFileSync(path.join(runtime.fellowDir, "mei.md"), "utf8"), "legacy persona body");
   assert.deepEqual(readJson(path.join(runtime.fellowDir, "mei.fellow.json")), { key: "mei", name: "Mei" });
