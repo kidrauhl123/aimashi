@@ -506,7 +506,7 @@ function modelIconSrc(model = {}) {
 
 function setModelAvatar(engine, entry = {}, config = {}) {
   if (!els.quickModelAvatar) return;
-  const icon = engine === "claude-code"
+  const rawIcon = engine === "claude-code"
     ? modelIconSrc({ provider: "anthropic", model: entry.model || config.model || "claude" })
     : engine === "codex"
       ? modelIconSrc({ provider: "openai-codex", model: entry.model || config.model || "codex" })
@@ -514,6 +514,11 @@ function setModelAvatar(engine, entry = {}, config = {}) {
         provider: entry.provider || config.provider || (engine === "hermes" ? "nous" : engine),
         model: entry.model || config.model || entry.value || ""
       });
+  // modelIconSrc / providerIconSrc still return desktop-bundle-relative
+  // "./assets/..." paths so the lookup table can be shared verbatim with
+  // the renderer. Web loads from "/app/", so we normalize at the render
+  // boundary the same way avatar paths do (see normalizeAvatarUrl).
+  const icon = normalizeAvatarUrl(rawIcon);
   els.quickModelAvatar.textContent = icon ? "" : "◇";
   els.quickModelAvatar.style.backgroundImage = icon ? `url("${icon}")` : "";
 }

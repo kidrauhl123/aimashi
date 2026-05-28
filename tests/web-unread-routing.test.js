@@ -200,6 +200,26 @@ test("src/web/app.js stopped maintaining its own copy of the avatar preset table
   );
 });
 
+test("src/web/app.js normalizes model + provider icon URLs through the same boundary as avatars", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  // setModelAvatar must hand the looked-up icon path through
+  // normalizeAvatarUrl before assigning background-image — otherwise the
+  // "./assets/model-icons/..." form 404s under the /app/ SPA fallback the
+  // same way the fellow avatars used to.
+  const setterMatch = source.match(/function setModelAvatar\([\s\S]*?\n\}/);
+  assert.ok(setterMatch, "setModelAvatar must exist");
+  assert.match(
+    setterMatch[0],
+    /normalizeAvatarUrl\(/,
+    "setModelAvatar must route the icon path through normalizeAvatarUrl so /app/ resolves /assets/... correctly"
+  );
+  assert.match(
+    setterMatch[0],
+    /style\.backgroundImage\s*=\s*icon\s*\?/,
+    "setModelAvatar still assigns the normalized URL to backgroundImage"
+  );
+});
+
 test("src/renderer/index.html loads shared/avatar-resolve.js before helpers/avatar-helpers.js", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/renderer/index.html"), "utf8");
   const resolveIdx = html.indexOf("shared/avatar-resolve.js");
