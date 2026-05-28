@@ -74,6 +74,8 @@ const { createLaunchdService } = require("./main/launchd-service.js");
 const { createEnginePluginsService } = require("./main/engine-plugins-service.js");
 const { createLocalAgentEngineService } = require("./main/local-agent-engine-service.js");
 const { createAgentSessionStore } = require("./main/agent-session-store.js");
+const { createAgentPermissionCoordinator } = require("./main/agent-permission-coordinator.js");
+const { runCodexAppServerTurn } = require("./main/codex-app-server-runner.js");
 const { createSchedulerMcpBridge } = require("./main/scheduler-mcp-bridge.js");
 const { createSystemHermesService } = require("./main/system-hermes-service.js");
 const { createEngineRuntimeConfigService } = require("./main/engine-runtime-config-service.js");
@@ -276,6 +278,10 @@ const agentSessionStore = createAgentSessionStore({
   runtimePaths,
   readJson,
   normalizeFellowAgentEngine
+});
+const agentPermissionCoordinator = createAgentPermissionCoordinator({
+  runtimePaths,
+  readJson
 });
 
 const chatAttachments = createChatAttachments({
@@ -1384,6 +1390,7 @@ function createActiveClaudeCodeChatAdapter() {
     injectGroupContextForSdk: _passthroughGroupContext,
     lastUserPrompt: hermesRunService.lastUserPrompt,
     normalizeEffortLevel: settingsStore.normalizeEffortLevel,
+    permissionCoordinator: agentPermissionCoordinator,
     processEnvStrings,
     readFellowPersona,
     setAgentSessionEntry: agentSessionStore.setEntry,
@@ -1397,14 +1404,17 @@ function createActiveCodexChatAdapter() {
     buildEnabledSkillsContext: skillsLoader.buildEnabledSkillsContext,
     chatCompletionResponse,
     codexSdk,
+    appendEngineLog,
     ensureCodexHome: schedulerMcpBridge.ensureCodexHome,
     expandLeadingSkillCommand: skillsLoader.expandLeadingSkillCommand,
     getAgentSessionId: agentSessionStore.getId,
     injectGroupContextForSdk: _passthroughGroupContext,
     lastUserPrompt: hermesRunService.lastUserPrompt,
     normalizeEffortLevel: settingsStore.normalizeEffortLevel,
+    permissionCoordinator: agentPermissionCoordinator,
     processEnvStrings,
     readFellowPersona,
+    runCodexAppServerTurn,
     setAgentSessionId: agentSessionStore.setId,
     shellCommandPath: localAgentEngineService.shellCommandPath,
     writeSchedulerMcpContext: schedulerMcpBridge.writeContext
@@ -1450,8 +1460,11 @@ function fellowWithRuntimeConfig(fellow, runtimeConfig = {}) {
   };
 }
 
-async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, emit: externalEmit = null, utility = false, background = false, allowSlashCommands = true, runtimeConfig = null, activeSkillIds = [] }) {
+async function sendChat({ fellowKey, personaKey, sessionId, messages, group, webContents, emit: externalEmit = null, utility = false, persistAgentSession = undefined, background = false, allowSlashCommands = true, runtimeConfig = null, activeSkillIds = [] }) {
   utility = Boolean(utility);
+  const shouldPersistAgentSession = persistAgentSession == null
+    ? !utility
+    : Boolean(persistAgentSession);
   let abortController;
   if (group || utility || background) {
     // Group dispatches run in parallel; each gets its own controller.
@@ -1525,6 +1538,7 @@ async function sendChat({ fellowKey, personaKey, sessionId, messages, group, web
       abortController,
       emit,
       utility,
+      persistAgentSession: shouldPersistAgentSession,
       slashText,
       runtimeConfig: turnRuntimeConfig
     });
@@ -1560,6 +1574,7 @@ function createWindow() {
     minHeight: 560,
     title: "Mia",
     titleBarStyle: "hidden",
+    acceptFirstMouse: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -1914,18 +1929,6 @@ const mainFellowRuntimeDispatcher = createMainFellowRuntimeDispatcher({
   mainFellowConversationResponder,
   log: (line) => appendCloudLog(line)
 });
-cloudEventSocketRuntime = createCloudEventsClient({
-  WebSocketImpl: WebSocket,
-  getSettings: () => settingsStore.cloudSettings(),
-  writeCloudSettings: (patch) => settingsStore.writeCloudSettings(patch),
-  cloudStatus: () => cloudStatus(false),
-  cloudEventsUrl,
-  cloudWebSocketProtocols,
-  broadcastRendererEvent,
-  cloudEventChannel: IpcChannel.CloudEvent,
-  appendCloudLog,
-  fellowRuntimeDispatcher: mainFellowRuntimeDispatcher
-});
 // Desktop-local message cache (TG-style local-first render + delta sync). If
 // node:sqlite is unavailable for any reason, degrade to no cache — the IPC layer
 // treats a null cache as "always fetch from cloud" (previous behavior).
@@ -1937,11 +1940,25 @@ const conversationMessageCache = (() => {
     return null;
   }
 })();
+cloudEventSocketRuntime = createCloudEventsClient({
+  WebSocketImpl: WebSocket,
+  getSettings: () => settingsStore.cloudSettings(),
+  writeCloudSettings: (patch) => settingsStore.writeCloudSettings(patch),
+  cloudStatus: () => cloudStatus(false),
+  cloudEventsUrl,
+  cloudWebSocketProtocols,
+  broadcastRendererEvent,
+  cloudEventChannel: IpcChannel.CloudEvent,
+  appendCloudLog,
+  fellowRuntimeDispatcher: mainFellowRuntimeDispatcher,
+  messageCache: conversationMessageCache
+});
 registerSocialIpc({
   ipcMain,
   socialApi,
   fellowRuntimeDispatcher: mainFellowRuntimeDispatcher,
   messageCache: conversationMessageCache,
+  getCloudUserId: () => settingsStore.cloudSettings().user?.id || "",
   log: (line) => appendCloudLog(line)
 });
 ipcMain.handle(IpcChannel.SocialMyUsername, () => {
@@ -1970,6 +1987,8 @@ ipcMain.handle(IpcChannel.AuthProviderCancel, () => authService.cancelProviderOA
 ipcMain.handle(IpcChannel.ChatSend, (event, payload) => sendChat({ ...payload, webContents: event.sender }));
 ipcMain.handle(IpcChannel.ChatSendStateless, (_event, payload) => sendChatStateless(payload));
 ipcMain.handle(IpcChannel.ChatStop, () => stopChat());
+ipcMain.handle(IpcChannel.ChatPermissionRespond, (_event, payload) => agentPermissionCoordinator.resolvePermission(payload || {}));
+ipcMain.handle(IpcChannel.ChatPermissionList, (_event, payload) => agentPermissionCoordinator.listPending(payload || {}));
 ipcMain.handle(IpcChannel.ChatAttachmentSave, (_event, payload) => saveChatAttachment(payload));
 ipcMain.handle(IpcChannel.ChatFileFetch, (_event, payload) => safeFetchFileAttachment(payload));
 ipcMain.handle(IpcChannel.CommandsSlash, () => engineCatalogService.loadHermesSlashCommands());

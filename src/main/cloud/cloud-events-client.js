@@ -15,6 +15,7 @@ function createCloudEventsClient({
   cloudEventChannel,
   appendCloudLog,
   fellowRuntimeDispatcher,
+  messageCache = null,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
@@ -52,6 +53,15 @@ function createCloudEventsClient({
 
   function emitToRenderer(envelope) {
     broadcastRendererEvent(cloudEventChannel, envelope);
+  }
+
+  function writeMessageToCache(conversationId, message) {
+    if (!messageCache || !conversationId || !message?.id) return;
+    try {
+      messageCache.upsertMessages(conversationId, [message]);
+    } catch (error) {
+      log(`[cloud-events] message cache upsert failed: ${error?.message || error}`);
+    }
   }
 
   function settings() {
@@ -125,6 +135,7 @@ function createCloudEventsClient({
       return;
     }
     if (message.type === CloudEvent.ConversationMessageAppended) {
+      writeMessageToCache(message.conversationId, message.message);
       fellowRuntimeDispatcher?.handleCloudEvent?.(message)
         ?.catch((error) => log(`Cloud conversation AI dispatch failed: ${error?.message || error}`));
       emitToRenderer({ type: message.type, payload: message });

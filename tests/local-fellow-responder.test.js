@@ -51,6 +51,7 @@ test("respond runs the local engine and posts the reply as the fellow", async ()
     ],
     group: true,
     utility: true,
+    persistAgentSession: true,
     allowSlashCommands: false
   });
   assert.deepEqual(calls.post, [{

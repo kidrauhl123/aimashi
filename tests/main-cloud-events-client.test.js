@@ -203,6 +203,43 @@ test("conversation AI events are handled in main and still forwarded to renderer
   assert.equal(calls.broadcasts.map((item) => item.envelope.type).join(","), "conversation.fellow_invocation_requested,conversation.message_appended");
 });
 
+test("conversation.message_appended events are written through to the local message cache", async () => {
+  const cached = [];
+  const { client, calls } = setup({
+    messageCache: {
+      upsertMessages: (conversationId, messages) => cached.push({ conversationId, messages })
+    }
+  });
+
+  client.handleMessage(JSON.stringify({
+    type: "conversation.message_appended",
+    seq: 5,
+    conversationId: "fellow:u_1:mia",
+    message: {
+      id: "m_2",
+      seq: 2,
+      sender_kind: "fellow",
+      sender_ref: "mia",
+      body_md: "done",
+      trace_json: JSON.stringify({ reasoning: "检查文件" })
+    }
+  }));
+  await Promise.resolve();
+
+  assert.deepEqual(cached, [{
+    conversationId: "fellow:u_1:mia",
+    messages: [{
+      id: "m_2",
+      seq: 2,
+      sender_kind: "fellow",
+      sender_ref: "mia",
+      body_md: "done",
+      trace_json: JSON.stringify({ reasoning: "检查文件" })
+    }]
+  }]);
+  assert.equal(calls.broadcasts[0].envelope.type, "conversation.message_appended");
+});
+
 test("fellow runtime updates are forwarded to the renderer", () => {
   const { client, calls } = setup();
 

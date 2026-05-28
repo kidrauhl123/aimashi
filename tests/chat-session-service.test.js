@@ -111,7 +111,13 @@ test("generateSessionTitle delegates title chat and falls back safely", async (t
 
   assert.equal(calls.titleChats.length, 1);
   assert.equal(calls.titleChats[0].sessionId, "title:title_uuid");
-  assert.match(calls.titleChats[0].messages[1].content, /user: 请帮我设计一个同步方案/);
+  assert.equal(calls.titleChats[0].utility, true);
+  assert.equal(calls.titleChats[0].persistAgentSession, false);
+  assert.equal(calls.titleChats[0].allowSlashCommands, false);
+  assert.equal(calls.titleChats[0].messages.length, 1);
+  assert.equal(calls.titleChats[0].messages[0].role, "user");
+  assert.match(calls.titleChats[0].messages[0].content, /只输出标题/);
+  assert.match(calls.titleChats[0].messages[0].content, /user: 请帮我设计一个同步方案/);
 
   const failing = setup(t, { sendChat: async () => { throw new Error("down"); } }).service;
   assert.deepEqual(await failing.generateSessionTitle({

@@ -14,11 +14,12 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
   async function fire(task) {
     const runId = "r-" + crypto.randomBytes(6).toString("hex");
     const firedAt = Date.now();
-    emit("started", { taskId: task.id, runId, sessionId: task.sessionId });
+    const conversationId = task.conversationId || task.sessionId;
+    emit("started", { taskId: task.id, runId, conversationId });
     try {
       const result = await runRemoteChatRequest({
         fellowKey: task.fellowId,
-        sessionId: task.sessionId,
+        conversationId,
         text: task.prompt,
         displayText: task.prompt,
         // Run independently of the interactive single-flight abort controller so
@@ -47,7 +48,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       emit("finished", {
         taskId: task.id,
         runId: run?.id || runId,
-        sessionId: task.sessionId,
+        conversationId,
         fellowId: task.fellowId,
         messageId: outputMessageId,
         outputText,
@@ -67,7 +68,7 @@ function createFireRunner({ store, runRemoteChatRequest, emit, logger = console 
       emit("failed", {
         taskId: task.id,
         runId: run?.id || runId,
-        sessionId: task.sessionId,
+        conversationId,
         error: run?.error || String(e?.message || e)
       });
       return run;

@@ -32,7 +32,7 @@ function createDeps(messages, overrides = {}) {
     getAgentSessionEntry: () => overrides.savedEntry || {},
     getSchedulerMcpSpec: () => overrides.schedulerMcpSpec ?? null,
     injectGroupContextForSdk: (prompt, contextBlock) => `GROUP:${contextBlock}\n${prompt}`,
-    lastUserPrompt: () => "hello",
+    lastUserPrompt: overrides.lastUserPrompt || (() => "hello"),
     normalizeEffortLevel: (level, engine) => `${engine}:${level}`,
     processEnvStrings: () => ({ PATH: "/bin" }),
     readFellowPersona: () => "persona",
@@ -112,6 +112,104 @@ test("sendChat resumes only when bridge fingerprint matches", async () => {
   });
   const queryCall = deps.calls.find((call) => call[0] === "query")[1];
   assert.equal(queryCall.options.resume, "old_session");
+});
+
+test("sendChat can persist native sessions for utility turns", async () => {
+  const deps = createDeps([
+    { session_id: "sess_native" },
+    { type: "assistant", message: { content: [{ text: "ok" }] } }
+  ], { lastUserPrompt: () => "再看看" });
+  const adapter = createClaudeCodeChatAdapter(deps);
+
+  await adapter.sendChat({
+    fellow: { key: "kongling", name: "空铃", bio: "" },
+    sessionId: "conversation:fellow:u_1:kongling",
+    messages: [
+      { role: "system", content: "最近消息上下文：\n[user:u_1] 看看我电脑现在的内存占用" },
+      { role: "user", content: "再看看" }
+    ],
+    signal: null,
+    abortController: {},
+    emit: null,
+    utility: true,
+    persistAgentSession: true
+  });
+
+  assert.deepEqual(deps.calls.find((call) => call[0] === "set-session"), [
+    "set-session", "claude-code", "kongling", "conversation:fellow:u_1:kongling", "sess_native", "fp1"
+  ]);
+  const queryCall = deps.calls.find((call) => call[0] === "query")[1];
+  assert.equal(queryCall.options.systemPrompt.append, "persona");
+});
+
+test("sendChat resumes utility turns when native persistence is enabled", async () => {
+  const deps = createDeps([
+    { type: "assistant", message: { content: [{ text: "resumed utility" }] } }
+  ], { savedEntry: { id: "old_session", fingerprint: "fp1" }, lastUserPrompt: () => "再看看" });
+  const adapter = createClaudeCodeChatAdapter(deps);
+
+  await adapter.sendChat({
+    fellow: { key: "kongling", name: "空铃", bio: "" },
+    sessionId: "conversation:fellow:u_1:kongling",
+    messages: [
+      { role: "system", content: "最近消息上下文：\n[user:u_1] 看看我电脑现在的内存占用" },
+      { role: "user", content: "再看看" }
+    ],
+    signal: null,
+    abortController: {},
+    emit: null,
+    utility: true,
+    persistAgentSession: true
+  });
+
+  const queryCall = deps.calls.find((call) => call[0] === "query")[1];
+  assert.match(queryCall.prompt, /再看看/);
+  assert.equal(queryCall.options.resume, "old_session");
+  assert.equal(deps.calls.some((call) => call[0] === "set-session"), false);
+});
+
+test("sendChat wires Claude tool permission requests through coordinator", async () => {
+  const permissionCalls = [];
+  const deps = createDeps([
+    { type: "assistant", message: { content: [{ text: "ok" }] } }
+  ]);
+  deps.permissionCoordinator = {
+    requestPermission: async (payload) => {
+      permissionCalls.push(payload);
+      return { decision: "allow", scope: "always" };
+    }
+  };
+  const emitted = [];
+  const adapter = createClaudeCodeChatAdapter(deps);
+
+  await adapter.sendChat({
+    fellow: { key: "alice", name: "Alice", bio: "", engineConfig: { permissionMode: "default" } },
+    sessionId: "s1",
+    messages: [{ role: "user", content: "hello" }],
+    signal: null,
+    abortController: {},
+    emit: (kind, data) => emitted.push({ kind, data }),
+    utility: false
+  });
+
+  const queryCall = deps.calls.find((call) => call[0] === "query")[1];
+  assert.equal(typeof queryCall.options.canUseTool, "function");
+  const result = await queryCall.options.canUseTool("Bash", { command: "npm test" }, {
+    toolUseID: "toolu_1",
+    title: "Run tests",
+    signal: null
+  });
+  assert.deepEqual(result, {
+    behavior: "allow",
+    updatedInput: { command: "npm test" },
+    toolUseID: "toolu_1",
+    decisionClassification: "user_permanent"
+  });
+  assert.equal(permissionCalls[0].engine, "claude-code");
+  assert.equal(permissionCalls[0].fellowKey, "alice");
+  assert.equal(permissionCalls[0].sessionId, "s1");
+  assert.equal(permissionCalls[0].toolName, "Bash");
+  assert.equal(typeof permissionCalls[0].emit, "function");
 });
 
 test("sendStateless uses prompt without persona append or resume", async () => {

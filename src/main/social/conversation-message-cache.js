@@ -9,6 +9,10 @@
 // along without a schema migration; the extracted columns exist only for
 // querying/ordering. Client-only transient fields (e.g. in-place `translation`)
 // are intentionally NOT persisted.
+//
+// The same SQLite file also stores a small social bootstrap cache keyed by cloud
+// user id. It replaces the old renderer localStorage snapshot so cold starts can
+// render a conversation list from disk without making localStorage a data source.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,6 +20,19 @@ const { DatabaseSync } = require("node:sqlite");
 
 const DEFAULT_RECENT_LIMIT = 50;
 const DEFAULT_PRUNE_KEEP = 300;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function fellowConversationRef(conversationId) {
+  const parts = String(conversationId || "").split(":");
+  if (parts.length < 3 || parts[0] !== "fellow") return "";
+  return parts.slice(2).join(":");
+}
+
+function isLegacyFellowSessionConversation(conversation = {}) {
+  if (!conversation || conversation.type !== "fellow") return false;
+  const ref = fellowConversationRef(conversation.id);
+  return UUID_RE.test(ref);
+}
 
 function migrate(db) {
   db.exec(`
@@ -32,6 +49,15 @@ function migrate(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conversation_seq
       ON messages (conversation_id, seq);
+
+    CREATE TABLE IF NOT EXISTS social_bootstrap (
+      user_id            TEXT PRIMARY KEY,
+      conversations_json TEXT NOT NULL,
+      friends_json       TEXT NOT NULL,
+      fellows_json       TEXT NOT NULL,
+      members_json       TEXT NOT NULL,
+      updated_at         TEXT NOT NULL
+    );
   `);
 }
 
@@ -66,6 +92,29 @@ function openConversationMessageCache(dbPath) {
     SELECT MAX(seq) AS maxSeq FROM messages WHERE conversation_id = ?
   `);
   const deleteConvStmt = db.prepare("DELETE FROM messages WHERE conversation_id = ?");
+  const socialBootstrapStmt = db.prepare(`
+    SELECT conversations_json, friends_json, fellows_json, members_json, updated_at
+    FROM social_bootstrap
+    WHERE user_id = ?
+  `);
+  const socialBootstrapUpsertStmt = db.prepare(`
+    INSERT INTO social_bootstrap (user_id, conversations_json, friends_json, fellows_json, members_json, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (user_id) DO UPDATE SET
+      conversations_json = excluded.conversations_json,
+      friends_json = excluded.friends_json,
+      fellows_json = excluded.fellows_json,
+      members_json = excluded.members_json,
+      updated_at = excluded.updated_at
+  `);
+  const socialBootstrapAllStmt = db.prepare("SELECT user_id, conversations_json, friends_json, fellows_json, members_json FROM social_bootstrap");
+  const cachedConversationIdsStmt = db.prepare(`
+    SELECT conversation_id, MAX(seq) AS max_seq
+    FROM messages
+    GROUP BY conversation_id
+    ORDER BY max_seq DESC
+    LIMIT ?
+  `);
   const pruneStmt = db.prepare(`
     DELETE FROM messages
     WHERE conversation_id = ?
@@ -137,6 +186,14 @@ function openConversationMessageCache(dbPath) {
     const convId = String(conversationId || "");
     if (!convId) return;
     deleteConvStmt.run(convId);
+    for (const row of socialBootstrapAllStmt.all()) {
+      const snapshot = parseSocialBootstrapRow(row.user_id, row);
+      if (!snapshot) continue;
+      const conversations = snapshot.conversations.filter((item) => item?.id !== convId);
+      const members = { ...(snapshot.members || {}) };
+      delete members[convId];
+      updateSocialBootstrap(row.user_id, { conversations, members });
+    }
   }
 
   // Keep only the newest `keep` messages for a conversation, dropping older rows.
@@ -151,12 +208,109 @@ function openConversationMessageCache(dbPath) {
     db.close();
   }
 
+  function parseJson(value, fallback) {
+    try {
+      const parsed = JSON.parse(value || "");
+      return parsed == null ? fallback : parsed;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function parseSocialBootstrapRow(userId, row) {
+    if (!row) return null;
+    const conversations = parseJson(row.conversations_json, []);
+    const friends = parseJson(row.friends_json, []);
+    const fellows = parseJson(row.fellows_json, []);
+    const members = parseJson(row.members_json, {});
+    return {
+      userId,
+      conversations: Array.isArray(conversations) ? conversations : [],
+      friends: Array.isArray(friends) ? friends : [],
+      fellows: Array.isArray(fellows) ? fellows : [],
+      members: members && typeof members === "object" && !Array.isArray(members) ? members : {},
+      updatedAt: row.updated_at || ""
+    };
+  }
+
+  function getSocialBootstrap(userId) {
+    const uid = String(userId || "").trim();
+    if (!uid) return null;
+    const stored = parseSocialBootstrapRow(uid, socialBootstrapStmt.get(uid));
+    if (stored) return stored;
+    const conversations = inferredConversationsForUser(uid);
+    if (!conversations.length) return null;
+    return {
+      userId: uid,
+      conversations,
+      friends: [],
+      fellows: [],
+      members: {},
+      updatedAt: ""
+    };
+  }
+
+  function inferredConversationForUser(conversationId, userId) {
+    const id = String(conversationId || "");
+    if (id.startsWith(`fellow:${userId}:`)) {
+      const conversation = { id, type: "fellow" };
+      return isLegacyFellowSessionConversation(conversation) ? null : conversation;
+    }
+    if (id.startsWith("dm:")) {
+      const parts = id.split(":").slice(1);
+      if (parts.includes(userId)) return { id, type: "dm" };
+    }
+    return null;
+  }
+
+  function inferredConversationsForUser(userId) {
+    const uid = String(userId || "").trim();
+    if (!uid) return [];
+    const rows = cachedConversationIdsStmt.all(100);
+    return rows
+      .map((row) => inferredConversationForUser(row.conversation_id, uid))
+      .filter(Boolean);
+  }
+
+  function updateSocialBootstrap(userId, patch = {}) {
+    const uid = String(userId || "").trim();
+    if (!uid || !patch || typeof patch !== "object") return null;
+    const current = getSocialBootstrap(uid) || {
+      userId: uid,
+      conversations: [],
+      friends: [],
+      fellows: [],
+      members: {}
+    };
+    const next = {
+      userId: uid,
+      conversations: Array.isArray(patch.conversations) ? patch.conversations : current.conversations,
+      friends: Array.isArray(patch.friends) ? patch.friends : current.friends,
+      fellows: Array.isArray(patch.fellows) ? patch.fellows : current.fellows,
+      members: patch.members && typeof patch.members === "object" && !Array.isArray(patch.members)
+        ? { ...(current.members || {}), ...patch.members }
+        : (current.members || {}),
+      updatedAt: new Date().toISOString()
+    };
+    socialBootstrapUpsertStmt.run(
+      uid,
+      JSON.stringify(next.conversations),
+      JSON.stringify(next.friends),
+      JSON.stringify(next.fellows),
+      JSON.stringify(next.members),
+      next.updatedAt
+    );
+    return next;
+  }
+
   return {
     upsertMessages,
     getRecentMessages,
     getMaxSeq,
     deleteConversation,
     pruneConversation,
+    getSocialBootstrap,
+    updateSocialBootstrap,
     close
   };
 }

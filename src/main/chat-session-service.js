@@ -150,20 +150,24 @@ function createChatSessionService({
       .filter((message) => ["user", "assistant"].includes(message.role) && String(message.content || "").trim())
       .slice(0, 4);
     if (!clipped.length) return { title: "新对话" };
+    const transcript = clipped.map((message) => `${message.role}: ${message.content}`).join("\n").slice(0, 1600);
     try {
       const response = await sendChat({
         personaKey,
         sessionId: sessionId || `title:${randomUUID()}`,
-        messages: [
-          {
-            role: "system",
-            content: "请给下面这段对话生成一个简短标题。要求：不超过12个中文字；只输出标题；不要解释；不要引号；不要句号。"
-          },
-          {
-            role: "user",
-            content: clipped.map((message) => `${message.role}: ${message.content}`).join("\n").slice(0, 1600)
-          }
-        ]
+        messages: [{
+          role: "user",
+          content: [
+            "请给下面这段对话生成一个简短标题。",
+            "要求：不超过12个中文字；只输出标题；不要解释；不要引号；不要句号。",
+            "",
+            "对话：",
+            transcript
+          ].join("\n")
+        }],
+        utility: true,
+        persistAgentSession: false,
+        allowSlashCommands: false
       });
       const content = response.choices?.[0]?.message?.content || "";
       return { title: chatStore.cleanSessionTitle(content) || chatStore.fallbackSessionTitle(clipped) };

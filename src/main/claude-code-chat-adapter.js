@@ -1,6 +1,4 @@
 const crypto = require("node:crypto");
-const fs = require("node:fs");
-const path = require("node:path");
 
 function firstTextValue(value) {
   if (typeof value === "string") return value;
@@ -60,11 +58,13 @@ function createClaudeCodeChatAdapter(deps = {}) {
   const chatCompletionResponse = requireDependency(deps, "chatCompletionResponse");
   const getSchedulerMcpSpec = requireDependency(deps, "getSchedulerMcpSpec");
   const writeSchedulerMcpContext = requireDependency(deps, "writeSchedulerMcpContext");
+  const permissionCoordinator = deps.permissionCoordinator || null;
   const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
   const cwd = deps.cwd || (() => process.cwd());
 
-  async function sendChat({ fellow, sessionId, messages, group, signal, abortController, emit, utility = false }) {
+  async function sendChat({ fellow, sessionId, messages, group, signal, abortController, emit, utility = false, persistAgentSession = !utility }) {
     const engine = "claude-code";
+    const shouldPersistAgentSession = Boolean(persistAgentSession);
     const commandPath = shellCommandPath("claude");
     if (!commandPath) throw new Error("本机没有检测到 Claude Code CLI。请先安装并确认 `claude --version` 可用。");
     const lastUser = lastUserPrompt(messages);
@@ -93,7 +93,7 @@ function createClaudeCodeChatAdapter(deps = {}) {
     } catch (error) {
       appendEngineLog(`Claude bridge plugin refresh failed: ${error?.message || error}`);
     }
-    const savedEntry = utility ? {} : getAgentSessionEntry(engine, fellow.key, sessionId);
+    const savedEntry = shouldPersistAgentSession ? getAgentSessionEntry(engine, fellow.key, sessionId) : {};
     const externalSessionId = savedEntry.id && savedEntry.fingerprint === bridgeFingerprint
       ? savedEntry.id
       : "";
@@ -121,6 +121,38 @@ function createClaudeCodeChatAdapter(deps = {}) {
     if (fellow.engineConfig?.model) options.model = String(fellow.engineConfig.model);
     options.effort = normalizeEffortLevel(fellow.engineConfig?.effortLevel || "medium", "claude-code");
     if (options.permissionMode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
+    if (permissionCoordinator && options.permissionMode !== "bypassPermissions") {
+      options.canUseTool = async (toolName, input = {}, context = {}) => {
+        let preview = "";
+        try { preview = input ? JSON.stringify(input, null, 2).slice(0, 4000) : ""; } catch { preview = ""; }
+        const decision = await permissionCoordinator.requestPermission({
+          engine,
+          fellowKey: fellow.key,
+          sessionId,
+          signal: context.signal || signal,
+          emit,
+          toolName,
+          title: context.title || `${fellow.name || "Claude Code"} 想使用 ${context.displayName || toolName}`,
+          description: context.description || context.decisionReason || "",
+          preview,
+          input
+        });
+        if (decision.decision === "allow") {
+          return {
+            behavior: "allow",
+            updatedInput: input,
+            toolUseID: context.toolUseID,
+            decisionClassification: decision.scope === "always" ? "user_permanent" : "user_temporary"
+          };
+        }
+        return {
+          behavior: "deny",
+          message: decision.message || "用户拒绝了工具权限。",
+          toolUseID: context.toolUseID,
+          decisionClassification: "user_reject"
+        };
+      };
+    }
 
     const stream = query({ prompt: promptWithGroup, options });
     let capturedSessionId = externalSessionId;
@@ -132,7 +164,7 @@ function createClaudeCodeChatAdapter(deps = {}) {
       if (signal?.aborted) break;
       if (message?.session_id && !capturedSessionId) {
         capturedSessionId = message.session_id;
-        if (!utility) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
+        if (shouldPersistAgentSession) setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
       }
 
       if (emit && message?.type === "stream_event") {
@@ -211,7 +243,7 @@ function createClaudeCodeChatAdapter(deps = {}) {
         }
       }
     }
-    if (capturedSessionId && !externalSessionId && !utility) {
+    if (capturedSessionId && !externalSessionId && shouldPersistAgentSession) {
       setAgentSessionEntry(engine, fellow.key, sessionId, capturedSessionId, bridgeFingerprint);
     }
     if (signal?.aborted) {

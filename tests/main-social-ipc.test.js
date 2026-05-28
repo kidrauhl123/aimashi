@@ -72,9 +72,84 @@ test("listing conversation messages writes through to the local cache; cached re
   assert.deepEqual(cached, { ok: true, data: { messages: [{ id: "m1", seq: 1 }] } });
 });
 
+test("social list IPC writes bootstrap data through to the local cache", async () => {
+  const ipcMain = fakeIpcMain();
+  const patches = [];
+  const fakeCache = {
+    updateSocialBootstrap: (userId, patch) => patches.push({ userId, patch }),
+    getSocialBootstrap: (userId) => userId === "u_me" ? { userId, conversations: [{ id: "c_cached" }] } : null
+  };
+  registerSocialIpc({
+    ipcMain,
+    socialApi: {
+      listFriends: async () => ({ friends: [{ id: "u_friend" }] }),
+      listFellows: async () => ({ fellows: [{ id: "mia" }] }),
+      listConversations: async () => ({ conversations: [{ id: "c_live" }] })
+    },
+    messageCache: fakeCache,
+    getCloudUserId: () => "u_me"
+  });
+
+  await ipcMain.handlers.get(IpcChannel.SocialListFriends)(null);
+  await ipcMain.handlers.get(IpcChannel.SocialListFellows)(null);
+  await ipcMain.handlers.get(IpcChannel.SocialListConversations)(null);
+  const cached = await ipcMain.handlers.get(IpcChannel.SocialGetCachedBootstrap)(null, "u_me");
+
+  assert.deepEqual(patches, [
+    { userId: "u_me", patch: { friends: [{ id: "u_friend" }] } },
+    { userId: "u_me", patch: { fellows: [{ id: "mia" }] } },
+    { userId: "u_me", patch: { conversations: [{ id: "c_live" }] } }
+  ]);
+  assert.deepEqual(cached, { ok: true, data: { userId: "u_me", conversations: [{ id: "c_cached" }] } });
+});
+
+test("updating a conversation writes the returned title through to the social bootstrap cache", async () => {
+  const ipcMain = fakeIpcMain();
+  const patches = [];
+  const fakeCache = {
+    getSocialBootstrap: (userId) => userId === "u_me" ? {
+      userId,
+      conversations: [
+        { id: "fellow:u_me:kongling", type: "fellow", name: "空铃" },
+        { id: "g_1", type: "group", name: "Group" }
+      ]
+    } : null,
+    updateSocialBootstrap: (userId, patch) => patches.push({ userId, patch })
+  };
+  registerSocialIpc({
+    ipcMain,
+    socialApi: {
+      updateConversation: async () => ({
+        conversation: { id: "fellow:u_me:kongling", type: "fellow", name: "查看package.json行数" }
+      })
+    },
+    messageCache: fakeCache,
+    getCloudUserId: () => "u_me"
+  });
+
+  const result = await ipcMain.handlers.get(IpcChannel.SocialUpdateConversation)(
+    null,
+    "fellow:u_me:kongling",
+    { name: "查看package.json行数" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(patches, [{
+    userId: "u_me",
+    patch: {
+      conversations: [
+        { id: "fellow:u_me:kongling", type: "fellow", name: "查看package.json行数" },
+        { id: "g_1", type: "group", name: "Group" }
+      ]
+    }
+  }]);
+});
+
 test("cached read returns empty envelope when no cache is wired", async () => {
   const ipcMain = fakeIpcMain();
   registerSocialIpc({ ipcMain, socialApi: {} });
   const cached = await ipcMain.handlers.get(IpcChannel.SocialGetCachedMessages)(null, "dm:a:b", 50);
   assert.deepEqual(cached, { ok: true, data: { messages: [] } });
+  const cachedBootstrap = await ipcMain.handlers.get(IpcChannel.SocialGetCachedBootstrap)(null, "u_me");
+  assert.deepEqual(cachedBootstrap, { ok: true, data: null });
 });

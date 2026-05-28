@@ -5,14 +5,10 @@ const path = require("node:path");
 
 function mapCodexPermissionMode(value) {
   const id = String(value || "default").trim();
-  // approvalPolicy is forced to "never" across the board: mia has no
-  // approval UI surfaced inside chat, so any non-"never" policy makes Codex
-  // self-cancel tool calls (it interprets "no human reachable" as a denial).
-  // Sandbox mode is still honored from the user's dropdown.
-  if (id === "acceptEdits") return { sandboxMode: "workspace-write", approvalPolicy: "never" };
+  if (id === "acceptEdits") return { sandboxMode: "workspace-write", approvalPolicy: "on-request" };
   if (id === "bypassPermissions") return { sandboxMode: "danger-full-access", approvalPolicy: "never" };
   if (id === "readOnly") return { sandboxMode: "read-only", approvalPolicy: "never" };
-  return { sandboxMode: "workspace-write", approvalPolicy: "never" };
+  return { sandboxMode: "workspace-write", approvalPolicy: "untrusted" };
 }
 
 function statelessPrompt(systemPrompt, userPrompt) {
@@ -182,14 +178,18 @@ function createCodexChatAdapter(deps = {}) {
   const chatCompletionResponse = requireDependency(deps, "chatCompletionResponse");
   const ensureCodexHome = requireDependency(deps, "ensureCodexHome");
   const writeSchedulerMcpContext = requireDependency(deps, "writeSchedulerMcpContext");
+  const runCodexAppServerTurn = deps.runCodexAppServerTurn || null;
+  const permissionCoordinator = deps.permissionCoordinator || null;
+  const appendEngineLog = deps.appendEngineLog || (() => {});
   const randomUUID = deps.randomUUID || (() => crypto.randomUUID());
   const cwd = deps.cwd || (() => process.cwd());
 
-  async function sendChat({ fellow, sessionId, messages, group, signal, emit = null, utility = false }) {
+  async function sendChat({ fellow, sessionId, messages, group, signal, emit = null, utility = false, persistAgentSession = !utility }) {
     const engine = "codex";
+    const shouldPersistAgentSession = Boolean(persistAgentSession);
     const commandPath = shellCommandPath("codex");
     if (!commandPath) throw new Error("本机没有检测到 Codex CLI。请先安装并确认 `codex --version` 可用。");
-    const externalSessionId = utility ? "" : getAgentSessionId(engine, fellow.key, sessionId);
+    const externalSessionId = shouldPersistAgentSession ? getAgentSessionId(engine, fellow.key, sessionId) : "";
     const lastUser = lastUserPrompt(messages);
     // Best-effort: grab id from last user message for scheduler context
     const lastUserMessage = Array.isArray(messages) ? [...messages].reverse().find((m) => m?.role === "user") : null;
@@ -205,20 +205,20 @@ function createCodexChatAdapter(deps = {}) {
     const persona = !externalSessionId
       ? readFellowPersona(fellow.key, fellow.name, fellow.bio).trim()
       : "";
-    const prompt = persona
-      ? [
-          "以下是 Mia 给当前 Fellow 的人设，请在本次对话中遵守：",
-          "",
-          persona,
-          "",
-          "用户消息：",
-          userText
-        ].join("\n")
-      : userText;
+    const prompt = (() => {
+      if (!persona) return userText;
+      const sections = [];
+      sections.push([
+        "以下是 Mia 给当前 Fellow 的人设，请在本次对话中遵守：",
+        "",
+        persona
+      ].join("\n"));
+      sections.push(["用户消息：", userText].join("\n"));
+      return sections.join("\n\n");
+    })();
     const promptWithGroup = group && group.contextBlock
       ? injectGroupContextForSdk(prompt, group.contextBlock)
       : prompt;
-    const { Codex } = await codexSdk();
     const baseEnv = processEnvStrings();
     let codexHomePath = "";
     try {
@@ -229,26 +229,51 @@ function createCodexChatAdapter(deps = {}) {
     const env = codexHomePath
       ? { ...baseEnv, CODEX_HOME: codexHomePath }
       : baseEnv;
-    const codex = new Codex({
-      codexPathOverride: commandPath,
-      env
-    });
     const permission = mapCodexPermissionMode(fellow.engineConfig?.permissionMode || fellow.agentPermissionMode || "default");
+    const effectivePermission = typeof emit === "function"
+      ? permission
+      : { ...permission, approvalPolicy: "never" };
     const threadOptions = {
       workingDirectory: cwd(),
       skipGitRepoCheck: true,
       modelReasoningEffort: normalizeEffortLevel(fellow.engineConfig?.effortLevel || "medium", "codex"),
-      ...permission
+      ...effectivePermission
     };
     if (fellow.engineConfig?.model) threadOptions.model = String(fellow.engineConfig.model);
-    const thread = externalSessionId
-      ? codex.resumeThread(externalSessionId, threadOptions)
-      : codex.startThread(threadOptions);
     const startedAtMs = Date.now();
-    const turn = await runCodexTurn(thread, promptWithGroup, { signal, emit });
-    const capturedSessionId = externalSessionId || thread.id || "";
+    let turn;
+    let capturedSessionId = externalSessionId;
+    let transport = "codex-sdk";
+    if (typeof emit === "function" && typeof runCodexAppServerTurn === "function") {
+      transport = "codex-app-server";
+      turn = await runCodexAppServerTurn({
+        codexPath: commandPath,
+        env,
+        threadId: externalSessionId,
+        prompt: promptWithGroup,
+        options: threadOptions,
+        signal,
+        emit,
+        permissionCoordinator,
+        fellowKey: fellow.key,
+        sessionId,
+        appendLog: appendEngineLog
+      });
+      capturedSessionId = externalSessionId || turn?.threadId || "";
+    } else {
+      const { Codex } = await codexSdk();
+      const codex = new Codex({
+        codexPathOverride: commandPath,
+        env
+      });
+      const thread = externalSessionId
+        ? codex.resumeThread(externalSessionId, threadOptions)
+        : codex.startThread(threadOptions);
+      turn = await runCodexTurn(thread, promptWithGroup, { signal, emit });
+      capturedSessionId = externalSessionId || thread.id || "";
+    }
     const imagePaths = recentGeneratedImagePaths(capturedSessionId, { env, startedAtMs });
-    if (capturedSessionId && !externalSessionId && !utility) {
+    if (capturedSessionId && !externalSessionId && shouldPersistAgentSession) {
       setAgentSessionId(engine, fellow.key, sessionId, capturedSessionId);
     }
     if (signal?.aborted) throw stoppedError();
@@ -258,7 +283,7 @@ function createCodexChatAdapter(deps = {}) {
       content: contentWithGeneratedImages(turn?.finalResponse, imagePaths),
       attachments: generatedImageAttachments(imagePaths),
       mia: {
-        transport: "codex-sdk",
+        transport,
         engine,
         session_id: capturedSessionId || "",
         fellow_key: fellow.key
@@ -278,7 +303,8 @@ function createCodexChatAdapter(deps = {}) {
       workingDirectory: cwd(),
       skipGitRepoCheck: true,
       modelReasoningEffort: normalizeEffortLevel("medium", "codex"),
-      ...mapCodexPermissionMode("default")
+      ...mapCodexPermissionMode("default"),
+      approvalPolicy: "never"
     });
     const turn = await thread.run(statelessPrompt(systemPrompt, userPrompt), runOptions(signal));
     if (signal?.aborted) throw stoppedError();

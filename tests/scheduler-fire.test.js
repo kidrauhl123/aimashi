@@ -15,7 +15,7 @@ function tmpStore() {
 test("createFireRunner.fire: ok path records run with outputMessageId", async () => {
   const store = tmpStore();
   const t = store.create({
-    title: "x", fellowId: "f", sessionId: "s", originMessageId: "m",
+    title: "x", fellowId: "f", conversationId: "fellow:u1:f", originMessageId: "m",
     trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
   });
   const calls = [];
@@ -42,7 +42,8 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
   await runner.fire(store.get(t.id));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].fellowKey, "f");
-  assert.equal(calls[0].sessionId, "s");
+  assert.equal(calls[0].conversationId, "fellow:u1:f");
+  assert.equal(calls[0].sessionId, undefined);
   assert.equal(calls[0].text, "do");
   // Task runs go through the independent (background) abort path.
   assert.equal(calls[0].background, true);
@@ -63,7 +64,7 @@ test("createFireRunner.fire: ok path records run with outputMessageId", async ()
 test("createFireRunner.fire: error path records run with status=failed", async () => {
   const store = tmpStore();
   const t = store.create({
-    title: "x", fellowId: "f", sessionId: "s", originMessageId: "m",
+    title: "x", fellowId: "f", conversationId: "fellow:u1:f", originMessageId: "m",
     trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
   });
   const runner = createFireRunner({
@@ -80,7 +81,7 @@ test("createFireRunner.fire: error path records run with status=failed", async (
 test("createFireRunner.fire: emits lifecycle events", async () => {
   const store = tmpStore();
   const t = store.create({
-    title: "x", fellowId: "f", sessionId: "s", originMessageId: "m",
+    title: "x", fellowId: "f", conversationId: "fellow:u1:f", originMessageId: "m",
     trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
   });
   const events = [];
@@ -102,7 +103,7 @@ test("createFireRunner.fire: emits lifecycle events", async () => {
 test("createFireRunner.fire: tolerates task deletion during run", async () => {
   const store = tmpStore();
   const t = store.create({
-    title: "x", fellowId: "f", sessionId: "s", originMessageId: "m",
+    title: "x", fellowId: "f", conversationId: "fellow:u1:f", originMessageId: "m",
     trigger: { type: "cron", cron: "0 9 * * *" }, timezone: "UTC", prompt: "do"
   });
   const events = [];

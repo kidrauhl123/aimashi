@@ -64,7 +64,7 @@ function createDeps(overrides = {}) {
     ensureCodexHome: () => overrides.codexHomePath ?? "",
     getAgentSessionId: () => overrides.externalSessionId || "",
     injectGroupContextForSdk: (prompt, contextBlock) => `GROUP:${contextBlock}\n${prompt}`,
-    lastUserPrompt: () => "hello",
+    lastUserPrompt: overrides.lastUserPrompt || (() => "hello"),
     normalizeEffortLevel: (level, engine) => `${engine}:${level}`,
     processEnvStrings: () => overrides.env || { PATH: "/bin" },
     readFellowPersona: () => "persona",
@@ -75,11 +75,9 @@ function createDeps(overrides = {}) {
 }
 
 test("mapCodexPermissionMode maps known permission modes", () => {
-  // approvalPolicy is forced to "never" everywhere because mia has no
-  // approval UI inside chat; sandbox mode still varies per user preference.
   assert.deepEqual(mapCodexPermissionMode("acceptEdits"), {
     sandboxMode: "workspace-write",
-    approvalPolicy: "never"
+    approvalPolicy: "on-request"
   });
   assert.deepEqual(mapCodexPermissionMode("bypassPermissions"), {
     sandboxMode: "danger-full-access",
@@ -91,7 +89,7 @@ test("mapCodexPermissionMode maps known permission modes", () => {
   });
   assert.deepEqual(mapCodexPermissionMode("other"), {
     sandboxMode: "workspace-write",
-    approvalPolicy: "never"
+    approvalPolicy: "untrusted"
   });
 });
 
@@ -141,6 +139,50 @@ test("sendChat resumes existing thread without persona injection", async () => {
   assert.equal(deps.calls[3][1], "expanded");
   assert.equal(deps.calls.some((call) => call[0] === "set-session"), false);
   assert.equal(response.id, "thread_old");
+});
+
+test("sendChat resumes utility conversations when native persistence is enabled", async () => {
+  const deps = createDeps({ externalSessionId: "thread_old", expandedPrompt: "再看看", lastUserPrompt: () => "再看看" });
+  const adapter = createCodexChatAdapter(deps);
+
+  const response = await adapter.sendChat({
+    fellow: { key: "kongling", name: "空铃", bio: "" },
+    sessionId: "conversation:fellow:u_1:kongling",
+    messages: [
+      { role: "system", content: "最近消息上下文：\n[user:u_1] 看看我电脑现在的内存占用" },
+      { role: "user", content: "再看看" }
+    ],
+    signal: null,
+    utility: true,
+    persistAgentSession: true
+  });
+
+  assert.equal(deps.calls[2][0], "resumeThread");
+  assert.equal(deps.calls[2][1], "thread_old");
+  assert.equal(deps.calls[3][1], "再看看");
+  assert.equal(deps.calls.some((call) => call[0] === "set-session"), false);
+  assert.equal(response.id, "thread_old");
+});
+
+test("sendChat can persist native sessions for utility conversations", async () => {
+  const deps = createDeps({ startedThreadId: "thread_native", lastUserPrompt: () => "再看看" });
+  const adapter = createCodexChatAdapter(deps);
+
+  await adapter.sendChat({
+    fellow: { key: "kongling", name: "空铃", bio: "" },
+    sessionId: "conversation:fellow:u_1:kongling",
+    messages: [
+      { role: "system", content: "最近消息上下文：\n[user:u_1] 看看我电脑现在的内存占用" },
+      { role: "user", content: "再看看" }
+    ],
+    signal: null,
+    utility: true,
+    persistAgentSession: true
+  });
+
+  assert.deepEqual(deps.calls.find((call) => call[0] === "set-session"), [
+    "set-session", "codex", "kongling", "conversation:fellow:u_1:kongling", "thread_native"
+  ]);
 });
 
 test("sendChat surfaces generated image paths when Codex returns empty text", async () => {
@@ -227,4 +269,39 @@ test("sendChat streams Codex agent message deltas when emit is provided", async 
   assert.equal(deps.calls[3][0], "runStreamed");
   assert.deepEqual(emitted.filter((event) => event.kind === "text_delta").map((event) => event.payload.text), ["你", "好", "。"]);
   assert.equal(response.choices[0].message.content, "你好。");
+});
+
+test("sendChat uses Codex app-server runner for interactive approval-capable turns", async () => {
+  const deps = createDeps({ expandedPrompt: "expanded" });
+  const permissionCoordinator = { requestPermission: async () => ({ decision: "allow", scope: "once" }) };
+  deps.permissionCoordinator = permissionCoordinator;
+  deps.runCodexAppServerTurn = async (args) => {
+    deps.calls.push(["app-server", args]);
+    args.emit("text_delta", { id: "msg_1", text: "app out" });
+    return { threadId: "app_thread_1", finalResponse: "app out", items: [] };
+  };
+  const emitted = [];
+  const adapter = createCodexChatAdapter(deps);
+
+  const response = await adapter.sendChat({
+    fellow: { key: "alice", name: "Alice", bio: "", engineConfig: { permissionMode: "default", effortLevel: "high" } },
+    sessionId: "s1",
+    messages: [{ role: "user", content: "hello" }],
+    signal: null,
+    emit: (kind, payload) => emitted.push({ kind, payload }),
+    utility: false
+  });
+
+  const call = deps.calls.find((entry) => entry[0] === "app-server")[1];
+  assert.equal(call.codexPath, "/bin/codex");
+  assert.equal(call.prompt.includes("expanded"), true);
+  assert.equal(call.options.approvalPolicy, "untrusted");
+  assert.equal(call.options.sandboxMode, "workspace-write");
+  assert.equal(call.permissionCoordinator, permissionCoordinator);
+  assert.equal(call.fellowKey, "alice");
+  assert.equal(call.sessionId, "s1");
+  assert.equal(response.id, "app_thread_1");
+  assert.equal(response.mia.transport, "codex-app-server");
+  assert.equal(response.choices[0].message.content, "app out");
+  assert.deepEqual(emitted.map((event) => event.kind), ["text_delta"]);
 });

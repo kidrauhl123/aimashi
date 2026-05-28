@@ -19,24 +19,26 @@ test("createTasksStore: create succeeds without originMessageId (optional metada
   const store = createTasksStore(tmpFile());
   // Engines pass "" when the originating message has no id — must not block.
   const task = store.create({
-    title: "remind", fellowId: "f1", sessionId: "s1",
+    title: "remind", fellowId: "f1", conversationId: "fellow:u1:f1",
     trigger: { type: "oneshot", at: "2026-05-25T21:04:45+08:00" },
     timezone: "Asia/Shanghai", prompt: "吃饭"
   });
   assert.ok(task.id.startsWith("t-"));
   assert.equal(task.originMessageId, "");
+  assert.equal(task.conversationId, "fellow:u1:f1");
+  assert.equal(task.sessionId, "fellow:u1:f1");
 });
 
-test("createTasksStore: fellowId and sessionId remain required", () => {
+test("createTasksStore: fellowId and conversationId remain required", () => {
   const store = createTasksStore(tmpFile());
   assert.throws(() => store.create({
-    title: "t", sessionId: "s", trigger: { type: "oneshot", at: "2026-05-25T21:04:45+08:00" },
+    title: "t", conversationId: "fellow:u1:f", trigger: { type: "oneshot", at: "2026-05-25T21:04:45+08:00" },
     timezone: "UTC", prompt: "p"
   }), /fellowId is required/);
   assert.throws(() => store.create({
     title: "t", fellowId: "f", trigger: { type: "oneshot", at: "2026-05-25T21:04:45+08:00" },
     timezone: "UTC", prompt: "p"
-  }), /sessionId is required/);
+  }), /conversationId is required/);
 });
 
 test("createTasksStore: create assigns id and persists", () => {

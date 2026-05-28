@@ -207,6 +207,7 @@ function createLocalFellowResponder({ sendChat, postConversationMessageAsFellow,
         ],
         group: true,
         utility: true,
+        persistAgentSession: true,
         allowSlashCommands: false
       };
       if (runtimeConfig && typeof runtimeConfig === "object") chatArgs.runtimeConfig = runtimeConfig;

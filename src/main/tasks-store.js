@@ -26,7 +26,7 @@ function readJSON(filePath, fallback) {
 function validateInput(input) {
   if (!input || typeof input !== "object") throw new Error("task input must be an object");
   if (!input.fellowId) throw new Error("fellowId is required");
-  if (!input.sessionId) throw new Error("sessionId is required");
+  if (!input.conversationId && !input.sessionId) throw new Error("conversationId is required");
   // originMessageId is optional provenance metadata (which user message
   // prompted the task). It is stored but never consumed for delivery or
   // orphaning, so a missing message id must not block task creation — engines
@@ -83,11 +83,13 @@ function createTasksStore(filePath) {
   function create(input) {
     validateInput(input);
     const now = Date.now();
+    const conversationId = String(input.conversationId || input.sessionId);
     const task = {
       id: "t-" + crypto.randomBytes(8).toString("hex"),
       title: String(input.title || "未命名任务"),
       fellowId: String(input.fellowId),
-      sessionId: String(input.sessionId),
+      conversationId,
+      sessionId: conversationId,
       originMessageId: String(input.originMessageId || ""),
       trigger: { ...input.trigger },
       timezone: String(input.timezone || "UTC"),
