@@ -1,6 +1,36 @@
 const { parseAttachmentsFromMessage } = require("./attachment-materializer.js");
-const { fellowForMember } = require("../shared/group-fellow-routing.js");
 const { createGroupOrchestrator } = require("./group-orchestrator.js");
+const { fellowForMember } = require("../shared/group-fellow-routing.js");
+const { MemberKind } = require("../shared/conversation-kinds.js");
+
+function memberDisplayName(member, fellows) {
+  if (member?.member_kind === MemberKind.Fellow) {
+    const fellow = fellowForMember(member, fellows);
+    return fellow?.name || member.fellow_name || member.member_ref || "Fellow";
+  }
+  const user = member?.user && typeof member.user === "object" ? member.user : null;
+  return member?.username || member?.displayName || member?.display_name || user?.username || user?.displayName || member?.member_ref || "用户";
+}
+
+function groupRoster(members, fellows) {
+  return (Array.isArray(members) ? members : [])
+    .map((member) => {
+      const kind = member?.member_kind === MemberKind.Fellow ? "fellow" : "user";
+      return `- ${memberDisplayName(member, fellows)} (${kind}:${member?.member_ref || ""})`;
+    })
+    .join("\n");
+}
+
+function inputWithGroupContext(input, members, fellows, fellow) {
+  const roster = groupRoster(members, fellows);
+  if (!roster) return input;
+  const name = String(fellow?.name || fellow?.id || fellow?.key || "Fellow").trim();
+  return [
+    `你是 ${name}，正在一个群聊里发言。`,
+    `群成员：\n${roster}`,
+    `用户消息：\n${input || ""}`
+  ].join("\n\n");
+}
 
 function requireDep(deps, key) {
   if (!deps || !deps[key]) throw new Error(`${key} dependency is required`);
@@ -28,9 +58,7 @@ function createCloudAgentDispatcher(deps = {}) {
   const broadcastTransientEvent = typeof deps.broadcastTransientEvent === "function"
     ? deps.broadcastTransientEvent
     : () => {};
-  const loadPrompts = typeof deps.loadPrompts === "function"
-    ? deps.loadPrompts
-    : undefined;
+  const loadPrompts = typeof deps.loadPrompts === "function" ? deps.loadPrompts : undefined;
   const getUserPublic = typeof deps.getUserPublic === "function" ? deps.getUserPublic : () => null;
   const log = typeof deps.log === "function" ? deps.log : () => {};
   const pending = new Set();
@@ -38,7 +66,6 @@ function createCloudAgentDispatcher(deps = {}) {
     socialStore,
     messagesStore,
     fellowsStore,
-    runtimeBindingsStore,
     workerManager,
     hermesRunsClient,
     ...(loadPrompts ? { loadPrompts } : {}),
@@ -51,43 +78,6 @@ function createCloudAgentDispatcher(deps = {}) {
       role: messageRole(row),
       content: row.body_md || ""
     }));
-  }
-
-  function memberDisplayName(member, fellows) {
-    if (member?.member_kind === "fellow") {
-      const fellow = fellowForMember(member, fellows);
-      return fellow?.name || member.fellow_name || member.member_ref || "Fellow";
-    }
-    const user = member?.user && typeof member.user === "object" ? member.user : null;
-    return member?.username || member?.displayName || member?.display_name || user?.username || user?.displayName || member?.member_ref || "用户";
-  }
-
-  function groupRoster(members, fellows) {
-    return (Array.isArray(members) ? members : [])
-      .map((member) => {
-        const kind = member?.member_kind === "fellow" ? "fellow" : "user";
-        return `- ${memberDisplayName(member, fellows)} (${kind}:${member?.member_ref || ""})`;
-      })
-      .join("\n");
-  }
-
-  function inputWithGroupRoster(input, members, fellows, fellow) {
-    const roster = groupRoster(members, fellows);
-    if (!roster) return input;
-    const displayName = String(fellow?.name || fellow?.displayName || fellow?.display_name || fellow?.id || fellow?.key || "Fellow").trim();
-    return [
-      `你是 ${displayName}，正在一个多 Fellow 群聊中发言。`,
-      "群里的其他 Fellow 和你是同类成员，只是名字、人设、能力不同；不要说这里只有你，也不要否认群成员名单里的人。",
-      `群成员：\n${roster}`,
-      `用户消息：\n${input || ""}`
-    ].join("\n\n");
-  }
-
-  function canHandleFellow(args = {}) {
-    const userId = String(args.userId || "").trim();
-    const fellowId = String(args.fellowId || "").trim();
-    if (!userId || !fellowId) return false;
-    return Boolean(runtimeBindingsStore.getEnabledBinding(userId, fellowId, "cloud-hermes"));
   }
 
   function eventType(event = {}) {
@@ -103,10 +93,7 @@ function createCloudAgentDispatcher(deps = {}) {
   }
 
   function createTraceCollector() {
-    const trace = {
-      reasoning: "",
-      tools: []
-    };
+    const trace = { reasoning: "", tools: [] };
 
     function collect(event = {}) {
       const name = eventType(event);
@@ -159,54 +146,36 @@ function createCloudAgentDispatcher(deps = {}) {
     return { collect, payload };
   }
 
-  function enrichUserMembers(members) {
-    return (Array.isArray(members) ? members : []).map((member) => {
-      if (member?.member_kind !== "user" || member.user) return member;
-      const user = getUserPublic(member.member_ref);
-      return user ? { ...member, user } : member;
-    });
-  }
-
   function invocationSender(message, fallbackUserId) {
     const senderRef = String(message?.sender_ref || fallbackUserId || "").trim();
     return getUserPublic(senderRef) || (senderRef ? { id: senderRef } : null);
   }
 
-  function broadcastDesktopInvocation({ target, conversationId, message, members, recentMessages }) {
-    if (!target || target.runtimeKind !== "desktop-local") return false;
-    broadcastPersistedEvent(target.ownerId, {
+  function broadcastDesktopInvocation({ ownerId, fellowId, runtimeConfig, conversationId, message, members, recentMessages }) {
+    broadcastPersistedEvent(ownerId, {
       type: "conversation.fellow_invocation_requested",
       conversationId,
-      fellowId: target.fellowId,
+      fellowId,
       runtimeKind: "desktop-local",
-      runtimeConfig: target.runtimeConfig || {},
-      invokedBy: invocationSender(message, target.ownerId),
+      runtimeConfig: runtimeConfig || {},
+      invokedBy: invocationSender(message, ownerId),
       triggeringMessage: message,
       recentMessages,
       members
     });
-    return true;
   }
 
-  async function runSingleInvocation({ userId, conversationId, message, fellowMember, target, members = null, fellows = null }) {
-    const fellowId = target?.fellowId || fellowMember?.member_ref;
-    const ownerId = target?.ownerId || userId;
-    if (!fellowId || !ownerId) return null;
-    const binding = target?.binding || runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "cloud-hermes");
-    if (!binding) return null;
-    const runtimeConfig = target?.runtimeConfig || binding.config || {};
+  async function runHermesInline({ ownerId, fellowId, runtimeConfig, conversationId, message, members, fellows }) {
     const fellow = fellowsStore.getFellow(ownerId, fellowId) || { id: fellowId, name: fellowId };
-    const rosterMembers = Array.isArray(members) ? members : enrichUserMembers(socialStore.listConversationMembers(conversationId));
+    const rosterMembers = Array.isArray(members) ? members : socialStore.listConversationMembers(conversationId);
     const rosterFellows = Array.isArray(fellows) ? fellows : fellowsStore.listFellows(ownerId);
     const trace = createTraceCollector();
-
     const run = cloudAgentRunsStore.createRun({
       userId: ownerId,
       fellowId,
       conversationId,
       triggerMessageId: message.id
     });
-
     try {
       const worker = await workerManager.ensureWorker(ownerId);
       const materialized = attachmentMaterializer
@@ -227,7 +196,7 @@ function createCloudAgentDispatcher(deps = {}) {
         model: runtimeConfig.model || "mia-default",
         effortLevel: runtimeConfig.effortLevel || "medium",
         permissionMode: runtimeConfig.permissionMode || "ask",
-        input: inputWithGroupRoster(materialized.input || message.body_md || "", rosterMembers, rosterFellows, fellow),
+        input: inputWithGroupContext(materialized.input || message.body_md || "", rosterMembers, rosterFellows, fellow),
         attachments: materialized.attachments || [],
         conversationHistory: conversationHistory(conversationId),
         onRunCreated(hermesRunId) {
@@ -272,7 +241,7 @@ function createCloudAgentDispatcher(deps = {}) {
       });
       cloudAgentRunsStore.markComplete(run.id);
       for (const member of socialStore.listConversationMembers(conversationId)) {
-        if (member.member_kind === "user") {
+        if (member.member_kind === MemberKind.User) {
           broadcastPersistedEvent(member.member_ref, { type: "conversation.message_appended", conversationId, message: reply });
         }
       }
@@ -281,6 +250,32 @@ function createCloudAgentDispatcher(deps = {}) {
       cloudAgentRunsStore.markError(run.id, error);
       return null;
     }
+  }
+
+  async function dispatchFellow({ ownerId, fellowId, conversationId, message, members, fellows, recentMessages }) {
+    const cloudBinding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "cloud-hermes");
+    if (cloudBinding) {
+      return runHermesInline({
+        ownerId,
+        fellowId,
+        runtimeConfig: cloudBinding.config || {},
+        conversationId,
+        message,
+        members,
+        fellows
+      });
+    }
+    const desktopBinding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "desktop-local");
+    broadcastDesktopInvocation({
+      ownerId,
+      fellowId,
+      runtimeConfig: desktopBinding?.config || {},
+      conversationId,
+      message,
+      members,
+      recentMessages
+    });
+    return null;
   }
 
   async function runInvocation(args = {}) {
@@ -293,50 +288,52 @@ function createCloudAgentDispatcher(deps = {}) {
 
     const conversation = socialStore.getConversation(conversationId);
     if (!conversation) return null;
-    if (conversation.type === "fellow" && conversation.decorations?.runtimeKind !== "cloud-hermes") return null;
+
     if (conversation.type === "group") {
-      const decision = await groupOrchestrator.chooseTargets({ userId, conversationId, conversation, message, requestedFellowId });
-      const targets = decision?.targets || [];
-      if (!targets.length) return null;
+      const decision = await groupOrchestrator.chooseTargets({
+        userId,
+        conversationId,
+        conversation,
+        message,
+        requestedFellowId
+      });
+      const chosen = decision?.chosen || [];
+      if (!chosen.length) return null;
       const replies = [];
-      for (const target of targets.slice(0, 3)) {
-        if (target.runtimeKind === "desktop-local") {
-          broadcastDesktopInvocation({
-            target,
-            conversationId,
-            message,
-            members: decision.members || [],
-            recentMessages: decision.recentMessages || []
-          });
-          continue;
-        }
-        const reply = await runSingleInvocation({
-          userId: target.ownerId,
+      for (const member of chosen) {
+        const reply = await dispatchFellow({
+          ownerId: member.owner_id,
+          fellowId: member.member_ref,
           conversationId,
           message,
-          target,
           members: decision.members || [],
-          fellows: decision.fellows || []
+          fellows: decision.fellows || [],
+          recentMessages: decision.recentMessages || []
         });
         if (reply) replies.push(reply);
       }
       return replies[0] || null;
     }
-    const fellowMembers = enrichUserMembers(socialStore.listConversationMembers(conversationId))
-      .filter((member) => member.member_kind === "fellow" && member.owner_id === userId);
+
+    // DM (fellow:* conversation): one fellow, owned by the sender.
+    const fellowMembers = socialStore.listConversationMembers(conversationId)
+      .filter((member) => member.member_kind === MemberKind.Fellow && member.owner_id === userId);
     const fellowMember = requestedFellowId
       ? fellowMembers.find((member) => member.member_ref === requestedFellowId)
       : fellowMembers[0];
     if (!fellowMember) return null;
-    return runSingleInvocation({ userId, conversationId, message, fellowMember });
-  }
-
-  async function runUserMessage(args = {}) {
-    return runInvocation(args);
+    return dispatchFellow({
+      ownerId: fellowMember.owner_id,
+      fellowId: fellowMember.member_ref,
+      conversationId,
+      message,
+      members: socialStore.listConversationMembers(conversationId),
+      recentMessages: []
+    });
   }
 
   function handleUserMessage(args = {}) {
-    const promise = runUserMessage(args);
+    const promise = runInvocation(args);
     pending.add(promise);
     promise.finally(() => pending.delete(promise));
     return promise;
@@ -355,7 +352,7 @@ function createCloudAgentDispatcher(deps = {}) {
     }
   }
 
-  return { canHandleFellow, handleUserMessage, invokeFellow, idle };
+  return { handleUserMessage, invokeFellow, idle };
 }
 
 module.exports = { createCloudAgentDispatcher };

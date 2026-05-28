@@ -9,29 +9,22 @@ function read(rel) {
   return fs.readFileSync(path.join(root, rel), "utf8");
 }
 
-test("main routes cloud conversation AI events to main-process responders", () => {
+test("main wires the desktop fellow runtime dispatcher and listens for invocation requests", () => {
   const main = read("src/main.js");
-  const routedSource = fs.existsSync(path.join(root, "src/main/cloud/cloud-events-client.js"))
-    ? `${main}\n${read("src/main/cloud/cloud-events-client.js")}`
-    : main;
+  const routedSource = `${main}\n${read("src/main/cloud/cloud-events-client.js")}`;
 
   assert.match(main, /createLocalFellowResponder/);
-  assert.doesNotMatch(main, /createMainGroupConductor/);
-  assert.match(main, /createMainFellowConversationResponder/);
   assert.match(main, /createMainFellowRuntimeDispatcher/);
-  assert.match(main, /sendChat,\s*\n\s*postConversationMessageAsFellow/s);
+  assert.doesNotMatch(main, /createMainGroupConductor/);
+  assert.doesNotMatch(main, /createMainFellowConversationResponder/);
   assert.match(
     routedSource,
     /message\.type === CloudEvent\.ConversationFellowInvocationRequested[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/
   );
-  assert.match(
-    routedSource,
-    /message\.type === CloudEvent\.ConversationMessageAppended[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/
-  );
   const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
   assert.match(dispatcher, /localFellowResponder\.respond/);
   assert.doesNotMatch(dispatcher, /mainGroupConductor/);
-  assert.match(dispatcher, /mainFellowConversationResponder\.handleConversationMessageAppended/);
+  assert.doesNotMatch(dispatcher, /mainFellowConversationResponder/);
 });
 
 test("renderer no longer executes local fellow replies for cloud conversation events", () => {

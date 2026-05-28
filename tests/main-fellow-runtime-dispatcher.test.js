@@ -4,11 +4,7 @@ const assert = require("node:assert/strict");
 const { createMainFellowRuntimeDispatcher } = require("../src/main/social/fellow-runtime-dispatcher.js");
 
 function setup(overrides = {}) {
-  const calls = {
-    responder: [],
-    fellowConversation: [],
-    logs: []
-  };
+  const calls = { responder: [], logs: [] };
   const dispatcher = createMainFellowRuntimeDispatcher({
     shouldHandle: () => true,
     listFellows: () => [{ key: "codex", name: "Codex" }],
@@ -18,16 +14,13 @@ function setup(overrides = {}) {
         return true;
       }
     },
-    mainFellowConversationResponder: {
-      handleConversationMessageAppended: async (args) => calls.fellowConversation.push(args)
-    },
     log: (line) => calls.logs.push(line),
     ...overrides
   });
   return { dispatcher, calls };
 }
 
-test("explicit fellow invocation goes through the unified runtime dispatcher", async () => {
+test("desktop responds when the cloud requests a fellow invocation", async () => {
   const { dispatcher, calls } = setup();
 
   await dispatcher.handleCloudEvent({
@@ -46,51 +39,29 @@ test("explicit fellow invocation goes through the unified runtime dispatcher", a
   assert.match(calls.responder[0].systemPrompt, /背景/);
 });
 
-test("conversation message events only wake explicit local responders, not group coordination", async () => {
+test("conversation.message_appended events do not wake the desktop dispatcher", async () => {
   const { dispatcher, calls } = setup();
-  const message = { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" };
 
-  await dispatcher.handleCloudEvent({
+  const handled = await dispatcher.handleCloudEvent({
     type: "conversation.message_appended",
     conversationId: "g_1",
-    message
+    message: { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" }
   });
 
-  assert.deepEqual(calls.fellowConversation, [{ conversationId: "g_1", message }]);
+  assert.equal(handled, false);
   assert.equal(calls.responder.length, 0);
 });
 
-test("dispatcher gate prevents duplicate foreground and daemon replies", async () => {
+test("shouldHandle gate suppresses invocation events", async () => {
   const { dispatcher, calls } = setup({ shouldHandle: () => false });
 
-  await dispatcher.handleCloudEvent({
+  const handled = await dispatcher.handleCloudEvent({
     type: "conversation.fellow_invocation_requested",
     conversationId: "g_1",
     fellowId: "codex",
     triggeringMessage: { id: "m_1", body_md: "@codex 看看" }
   });
-  await dispatcher.handleCloudEvent({
-    type: "conversation.message_appended",
-    conversationId: "g_1",
-    message: { id: "m_2", sender_kind: "user", body_md: "hi" }
-  });
 
+  assert.equal(handled, false);
   assert.deepEqual(calls.responder, []);
-  assert.deepEqual(calls.fellowConversation, []);
-});
-
-test("invokeFellow is limited to desktop-local adapters in the main process", async () => {
-  const { dispatcher, calls } = setup();
-
-  const skipped = await dispatcher.invokeFellow({
-    conversationId: "g_1",
-    fellowId: "codex",
-    dedupKey: "m_1:codex",
-    runtimeKind: "cloud-hermes",
-    systemPrompt: "system",
-    userPrompt: "hi"
-  });
-
-  assert.equal(skipped, false);
-  assert.equal(calls.responder.length, 0);
 });

@@ -16,27 +16,18 @@ test("main owns cloud conversation fellow invocation execution without group coo
   assert.match(main, /createLocalFellowResponder/, "main must instantiate the local fellow responder Module");
   assert.match(main, /createCloudEventsClient/, "main must instantiate the cloud events client Module");
   assert.doesNotMatch(main, /createMainGroupConductor/, "main must not instantiate a desktop group conductor");
-  assert.match(main, /createMainFellowConversationResponder/, "main must instantiate the main-process fellow conversation responder Module");
+  assert.doesNotMatch(main, /createMainFellowConversationResponder/, "main must not instantiate a desktop DM auto-responder");
   assert.match(main, /createMainFellowRuntimeDispatcher/, "main must instantiate the unified fellow runtime dispatcher Module");
   assert.match(main, /shouldHandleLocalCloudConversationAi/, "main must gate AI execution so foreground and daemon do not both answer");
   assert.match(
     cloudEventsClient,
     /message\.type === CloudEvent\.ConversationFellowInvocationRequested[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/,
-    "explicit @ cloud events must enter the unified fellow runtime dispatcher"
-  );
-  assert.match(
-    cloudEventsClient,
-    /message\.type === CloudEvent\.ConversationMessageAppended[\s\S]*fellowRuntimeDispatcher\?\.handleCloudEvent\?\.\(message\)/,
-    "conversation message events must enter the unified fellow runtime dispatcher"
+    "explicit fellow invocation events must enter the unified fellow runtime dispatcher"
   );
   const dispatcher = read("src/main/social/fellow-runtime-dispatcher.js");
   assert.match(dispatcher, /localFellowResponder\.respond/, "dispatcher must own explicit desktop-local invocation execution");
   assert.doesNotMatch(dispatcher, /mainGroupConductor/, "dispatcher must not run group conductor fan-out from message events");
-  assert.match(
-    dispatcher,
-    /mainFellowConversationResponder\.handleConversationMessageAppended/,
-    "dispatcher must own fellow private conversation fan-out"
-  );
+  assert.doesNotMatch(dispatcher, /mainFellowConversationResponder/, "dispatcher must not re-derive invocation from raw message events");
   assert.doesNotMatch(
     cloudEventsClient,
     /"conversation\.(fellow_invocation_requested|message_appended)"/,

@@ -14,7 +14,7 @@ function fakeIpcMain() {
   };
 }
 
-test("posting a conversation message dispatches the returned user message to main conversation AI", async () => {
+test("posting a conversation message returns the cloud envelope and runs no desktop dispatch", async () => {
   const ipcMain = fakeIpcMain();
   const message = {
     id: "m_1",
@@ -23,15 +23,11 @@ test("posting a conversation message dispatches the returned user message to mai
     sender_ref: "u_1",
     body_md: "你好"
   };
-  const calls = { dispatched: [] };
 
   registerSocialIpc({
     ipcMain,
     socialApi: {
       postConversationMessage: async () => ({ message })
-    },
-    fellowRuntimeDispatcher: {
-      handleCloudEvent: async (event) => calls.dispatched.push(event)
     }
   });
 
@@ -42,11 +38,6 @@ test("posting a conversation message dispatches the returned user message to mai
   );
 
   assert.deepEqual(result, { ok: true, data: { message } });
-  assert.deepEqual(calls.dispatched, [{
-    type: "conversation.message_appended",
-    conversationId: "fellow:u_1:session_1",
-    message
-  }]);
 });
 
 test("listing conversation messages writes through to the local cache; cached read returns them", async () => {

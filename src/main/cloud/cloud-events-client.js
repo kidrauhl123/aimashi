@@ -136,8 +136,6 @@ function createCloudEventsClient({
     }
     if (message.type === CloudEvent.ConversationMessageAppended) {
       writeMessageToCache(message.conversationId, message.message);
-      fellowRuntimeDispatcher?.handleCloudEvent?.(message)
-        ?.catch((error) => log(`Cloud conversation AI dispatch failed: ${error?.message || error}`));
       emitToRenderer({ type: message.type, payload: message });
       return;
     }

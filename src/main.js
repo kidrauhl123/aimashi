@@ -50,7 +50,6 @@ const {
   createLocalFellowResponder,
   shouldHandleLocalCloudConversationAi
 } = require("./main/social/local-fellow-responder.js");
-const { createMainFellowConversationResponder } = require("./main/social/fellow-conversation-responder.js");
 const { createMainFellowRuntimeDispatcher } = require("./main/social/fellow-runtime-dispatcher.js");
 const { createCloudEventsClient } = require("./main/cloud/cloud-events-client.js");
 const { createCloudBridgeClient } = require("./main/cloud/cloud-bridge-client.js");
@@ -1821,29 +1820,10 @@ function shouldHandleCloudConversationAi() {
     daemonEnabled: settingsStore.daemonSettings().enabled
   });
 }
-const mainFellowConversationResponder = createMainFellowConversationResponder({
-  getCurrentUserId: () => settingsStore.cloudSettings().user?.id || "",
-  getConversationDetails: (conversationId) => socialApi.getConversation(conversationId),
-  listConversations: async () => {
-    const data = await socialApi.listConversations();
-    return data?.conversations || [];
-  },
-  listRecentMessages: async (conversationId, sinceSeq, limit) => {
-    const data = await socialApi.listConversationMessages(conversationId, sinceSeq, limit);
-    return data?.messages || [];
-  },
-  getFellowRuntime: async (fellowId, runtimeKind) => {
-    const data = await socialApi.getFellowRuntime(fellowId, runtimeKind);
-    return data?.binding || null;
-  },
-  responder: localFellowResponder,
-  log: (line) => appendCloudLog(line)
-});
 const mainFellowRuntimeDispatcher = createMainFellowRuntimeDispatcher({
   shouldHandle: shouldHandleCloudConversationAi,
   listFellows: () => loadFellowManifest().fellows || [],
   localFellowResponder,
-  mainFellowConversationResponder,
   log: (line) => appendCloudLog(line)
 });
 // Desktop-local message cache (TG-style local-first render + delta sync). If
@@ -1873,7 +1853,6 @@ cloudEventSocketRuntime = createCloudEventsClient({
 registerSocialIpc({
   ipcMain,
   socialApi,
-  fellowRuntimeDispatcher: mainFellowRuntimeDispatcher,
   messageCache: conversationMessageCache,
   getCloudUserId: () => settingsStore.cloudSettings().user?.id || "",
   log: (line) => appendCloudLog(line)

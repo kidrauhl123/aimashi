@@ -5,12 +5,7 @@ const {
   buildDispatchPrompt,
   directFellowIdsForMessage,
   fellowForMember,
-  memberRuntimeKind,
-  messageIsAvailabilityPing,
-  messageIsShortAcknowledgement,
-  messageNamesHumanMember,
-  messageNamesUnavailableFellow,
-  parseDispatchDecision
+  parseDispatchSpeak
 } = require("../shared/group-fellow-routing.js");
 const { MemberKind } = require("../shared/conversation-kinds.js");
 
@@ -25,49 +20,6 @@ function normalizeMessages(result) {
   if (Array.isArray(result)) return result;
   if (Array.isArray(result?.messages)) return result.messages;
   return [];
-}
-
-function bindingConfig(binding) {
-  return binding?.config && typeof binding.config === "object" ? binding.config : {};
-}
-
-function runtimeTargetForMember(runtimeBindingsStore, member) {
-  if (!member?.member_ref || !member?.owner_id) return null;
-  const fellowId = member.member_ref;
-  const ownerId = member.owner_id;
-  const explicitRuntimeKind = memberRuntimeKind(member);
-  if (explicitRuntimeKind === "desktop-local") {
-    const binding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "desktop-local");
-    return { member, fellowId, ownerId, runtimeKind: "desktop-local", binding, runtimeConfig: bindingConfig(binding) };
-  }
-  if (explicitRuntimeKind === "cloud-hermes") {
-    const binding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "cloud-hermes");
-    return binding ? { member, fellowId, ownerId, runtimeKind: "cloud-hermes", binding, runtimeConfig: bindingConfig(binding) } : null;
-  }
-  const cloudBinding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "cloud-hermes");
-  if (cloudBinding) {
-    return { member, fellowId, ownerId, runtimeKind: "cloud-hermes", binding: cloudBinding, runtimeConfig: bindingConfig(cloudBinding) };
-  }
-  const desktopBinding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "desktop-local");
-  if (desktopBinding) {
-    return { member, fellowId, ownerId, runtimeKind: "desktop-local", binding: desktopBinding, runtimeConfig: bindingConfig(desktopBinding) };
-  }
-  return { member, fellowId, ownerId, runtimeKind: "desktop-local", binding: null, runtimeConfig: {} };
-}
-
-function uniqueFellowsForMembers(fellowsStore, fellowMembers) {
-  const fellows = [];
-  const seen = new Set();
-  for (const member of Array.isArray(fellowMembers) ? fellowMembers : []) {
-    const ownerId = String(member?.owner_id || "");
-    const fellowId = String(member?.member_ref || "");
-    const key = `${ownerId}:${fellowId}`;
-    if (!ownerId || !fellowId || seen.has(key)) continue;
-    seen.add(key);
-    const fellow = fellowsStore.getFellow(ownerId, fellowId);
-    if (fellow) fellows.push({ ...fellow, key: fellow.id });
-  }
-  return fellows;
 }
 
 function enrichUserMembers(members, getUserPublic) {
@@ -102,15 +54,39 @@ function fellowNamesById(fellowMembers, fellows) {
   return names;
 }
 
-function targetsForIds(targets, fellowIds) {
-  const byId = new Map(targets.map((target) => [target.fellowId, target]));
+function uniqueFellowsForMembers(fellowsStore, fellowMembers) {
+  const fellows = [];
+  const seen = new Set();
+  for (const member of fellowMembers) {
+    const ownerId = String(member?.owner_id || "");
+    const fellowId = String(member?.member_ref || "");
+    const key = `${ownerId}:${fellowId}`;
+    if (!ownerId || !fellowId || seen.has(key)) continue;
+    seen.add(key);
+    const fellow = fellowsStore.getFellow(ownerId, fellowId);
+    if (fellow) fellows.push({ ...fellow, key: fellow.id });
+  }
+  return fellows;
+}
+
+function membersByFellowId(fellowMembers) {
+  const map = new Map();
+  for (const member of fellowMembers) {
+    if (member?.member_ref) map.set(member.member_ref, member);
+  }
+  return map;
+}
+
+function pickMembers(fellowMembers, fellowIds) {
+  const map = membersByFellowId(fellowMembers);
   const chosen = [];
   const seen = new Set();
   for (const fellowId of fellowIds) {
-    const target = byId.get(fellowId);
-    if (!target || seen.has(fellowId)) continue;
+    if (!fellowId || seen.has(fellowId)) continue;
+    const member = map.get(fellowId);
+    if (!member) continue;
     seen.add(fellowId);
-    chosen.push(target);
+    chosen.push(member);
     if (chosen.length >= 3) break;
   }
   return chosen;
@@ -124,15 +100,13 @@ function createGroupOrchestrator({
   socialStore,
   messagesStore,
   fellowsStore,
-  runtimeBindingsStore,
   workerManager,
   hermesRunsClient,
   loadPrompts = async () => ({ dispatch: DEFAULT_DISPATCH_PROMPT }),
   getUserPublic = () => null,
   log = () => {}
 }) {
-  async function runConductor({ userId, conversationId, conversation, message, fellowMembers, targets, fellows, recentMessages }) {
-    if (!targets.length) return [];
+  async function runConductor({ userId, conversationId, conversation, message, fellowMembers, fellows, recentMessages }) {
     const prompts = await loadPrompts().catch((error) => {
       log(`[group-orchestrator] load conductor prompts failed: ${error?.message || error}`);
       return null;
@@ -162,8 +136,7 @@ function createGroupOrchestrator({
         attachments: [],
         conversationHistory: []
       });
-      const decision = parseDispatchDecision(result.content || "");
-      return decision ? targetsForIds(targets, decision.speak) : [];
+      return parseDispatchSpeak(result.content || "");
     } catch (error) {
       log(`[group-orchestrator] conductor dispatch failed: ${error?.message || error}`);
       return [];
@@ -175,51 +148,38 @@ function createGroupOrchestrator({
     const members = enrichUserMembers(socialStore.listConversationMembers(conversationId), getUserPublic);
     const fellowMembers = members.filter((member) => member.member_kind === MemberKind.Fellow);
     const fellows = uniqueFellowsForMembers(fellowsStore, fellowMembers);
-    const targets = fellowMembers
-      .map((member) => runtimeTargetForMember(runtimeBindingsStore, member))
-      .filter(Boolean);
     const recentMessages = recentMessagesForDispatch(messagesStore, conversationId, message);
-    if (!targets.length) return { targets: [], members, fellows, recentMessages };
+    const context = { members, fellows, recentMessages };
+
+    if (!fellowMembers.length) return { chosen: [], ...context };
 
     if (requestedFellowId) {
-      return {
-        targets: targetsForIds(targets, [requestedFellowId]),
-        members,
-        fellows,
-        recentMessages
-      };
+      return { chosen: pickMembers(fellowMembers, [requestedFellowId]), ...context };
     }
 
-    const runnableMembers = targets.map((target) => target.member);
-    if (messageNamesUnavailableFellow(message, fellowMembers, runnableMembers, fellows)) {
-      return { targets: [], members, fellows, recentMessages };
-    }
-    if (messageNamesHumanMember(message, members, runnableMembers, fellows)) {
-      return { targets: [], members, fellows, recentMessages };
-    }
-    if (messageIsAvailabilityPing(message.body_md || "")) {
-      return { targets: [], members, fellows, recentMessages };
-    }
-    if (messageIsShortAcknowledgement(message.body_md || "")) {
-      return { targets: [], members, fellows, recentMessages };
+    if (fellowMembers.length === 1) {
+      return { chosen: [fellowMembers[0]], ...context };
     }
 
-    const directIds = directFellowIdsForMessage(message, fellowMembers, runnableMembers, fellows);
+    const directIds = directFellowIdsForMessage(message, fellowMembers, fellows);
     if (directIds.length) {
-      return { targets: targetsForIds(targets, directIds), members, fellows, recentMessages };
+      return { chosen: pickMembers(fellowMembers, directIds), ...context };
     }
 
-    const conductedTargets = await runConductor({
+    const spoken = await runConductor({
       userId,
       conversationId,
       conversation,
       message,
       fellowMembers,
-      targets,
       fellows,
       recentMessages
     });
-    return { targets: conductedTargets, members, fellows, recentMessages };
+    const chosenByLlm = pickMembers(fellowMembers, spoken);
+    if (chosenByLlm.length) return { chosen: chosenByLlm, ...context };
+
+    // Conductor returned nothing usable — let the first fellow keep the conversation alive.
+    return { chosen: [fellowMembers[0]], ...context };
   }
 
   return { chooseTargets };
@@ -227,6 +187,5 @@ function createGroupOrchestrator({
 
 module.exports = {
   ORCHESTRATOR_FELLOW,
-  createGroupOrchestrator,
-  runtimeTargetForMember
+  createGroupOrchestrator
 };

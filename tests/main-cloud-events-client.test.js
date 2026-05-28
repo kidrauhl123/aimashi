@@ -172,7 +172,7 @@ test("start replaces a stale cloud events socket that never became ready", () =>
   assert.equal(client.status().connecting, true);
 });
 
-test("conversation AI events are handled in main and still forwarded to renderer", async () => {
+test("fellow invocation events are dispatched to main; raw message events are not", async () => {
   const { client, calls } = setup();
 
   client.handleMessage(JSON.stringify({
@@ -192,14 +192,10 @@ test("conversation AI events are handled in main and still forwarded to renderer
 
   assert.deepEqual(calls.settingsWrites, [{ lastEventSeq: 4 }, { lastEventSeq: 5 }]);
   assert.deepEqual(calls.runtimeDispatcher.map((message) => message.type), [
-    "conversation.fellow_invocation_requested",
-    "conversation.message_appended"
+    "conversation.fellow_invocation_requested"
   ]);
   assert.equal(calls.runtimeDispatcher[0].fellowId, "codex");
-  assert.deepEqual(calls.runtimeDispatcher[1].message, { id: "m_2", seq: 2, sender_kind: "user", body_md: "大家看看" });
   assert.deepEqual(calls.responder, []);
-  assert.deepEqual(calls.conductor, []);
-  assert.deepEqual(calls.fellowConversation, []);
   assert.equal(calls.broadcasts.map((item) => item.envelope.type).join(","), "conversation.fellow_invocation_requested,conversation.message_appended");
 });
 

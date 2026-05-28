@@ -43,134 +43,47 @@ function setup() {
   };
 }
 
-test("dispatcher only runs enabled cloud-hermes fellow conversations and appends fellow reply", async () => {
+function makeDispatcher(ctx, overrides = {}) {
+  return createCloudAgentDispatcher({
+    socialStore: ctx.socialStore,
+    messagesStore: ctx.messagesStore,
+    fellowsStore: ctx.fellowsStore,
+    runtimeBindingsStore: ctx.runtimeBindingsStore,
+    cloudAgentRunsStore: ctx.cloudAgentRunsStore,
+    workerManager: {
+      async ensureWorker(userId) {
+        return { userId, baseUrl: "http://worker", apiKey: "k" };
+      }
+    },
+    hermesRunsClient: {
+      async runChat() {
+        return { runId: "hr_test", content: "reply", events: [] };
+      }
+    },
+    broadcastPersistedEvent() {},
+    broadcastTransientEvent() {},
+    ...overrides
+  });
+}
+
+test("cloud-hermes DM runs the fellow and appends a reply", async () => {
   const ctx = setup();
   const hermesCalls = [];
-  const broadcasts = [];
-  const transientEvents = [];
-  const materializeCalls = [];
   try {
     ctx.runtimeBindingsStore.upsertBinding({
       userId: ctx.user.id,
       fellowId: "mia",
       runtimeKind: "cloud-hermes",
       enabled: true,
-      config: {
-        model: "hermes-agent",
-        effortLevel: "high",
-        permissionMode: "auto"
-      }
+      config: { model: "hermes-agent" }
     });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
+    const dispatcher = makeDispatcher(ctx, {
       hermesRunsClient: {
         async runChat(args) {
           hermesCalls.push(args);
-          args.onRunCreated?.("hr_1");
-          args.onEvent?.({ type: "message.delta", delta: "cloud " });
-          args.onEvent?.({ type: "tool.started", tool: "shell" });
-          return { runId: "hr_1", content: "cloud reply", events: [{ artifacts: [{ path: "/data/workspace/out.txt" }] }] };
+          return { runId: "hr_dm", content: "hi", events: [] };
         }
-      },
-      attachmentMaterializer: {
-        materialize(args) {
-          materializeCalls.push(args);
-          return {
-            input: `${args.text}\n\n附件上下文：/data/attachments/run/a.txt`,
-            attachments: [{ id: "file_1", name: "a.txt", path: "/data/attachments/run/a.txt" }]
-          };
-        },
-        archiveGeneratedAttachments(args) {
-          assert.deepEqual(args.result.events, [{ artifacts: [{ path: "/data/workspace/out.txt" }] }]);
-          return [{ id: "file_generated", type: "text", name: "out.txt", mimeType: "text/plain", size: 3, url: "/api/files/file_generated" }];
-        }
-      },
-      broadcastPersistedEvent(userId, payload) {
-        broadcasts.push({ userId, payload });
-      },
-      broadcastTransientEvent(userId, payload) {
-        transientEvents.push({ userId, payload });
       }
-    });
-
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: ctx.conversation.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "hello",
-      attachments: [{ id: "file_1", url: "/api/files/file_1" }]
-    });
-
-    await dispatcher.handleUserMessage({ userId: ctx.user.id, conversationId: ctx.conversation.id, message });
-
-    assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].userId, ctx.user.id);
-    assert.equal(hermesCalls[0].fellow.id, "mia");
-    assert.equal(hermesCalls[0].model, "hermes-agent");
-    assert.equal(hermesCalls[0].effortLevel, "high");
-    assert.equal(hermesCalls[0].permissionMode, "auto");
-    assert.equal(materializeCalls.length, 1);
-    assert.deepEqual(materializeCalls[0].attachments, [{ id: "file_1", url: "/api/files/file_1" }]);
-    assert.match(hermesCalls[0].input, /附件上下文/);
-    assert.deepEqual(hermesCalls[0].attachments, [{ id: "file_1", name: "a.txt", path: "/data/attachments/run/a.txt" }]);
-    assert.deepEqual(hermesCalls[0].conversationHistory.map((m) => m.role), ["user"]);
-
-    const messages = ctx.messagesStore.listMessagesSince(ctx.conversation.id, 0);
-    assert.deepEqual(messages.map((m) => m.sender_kind), ["user", "fellow"]);
-    assert.equal(messages[1].sender_ref, "mia");
-    assert.equal(messages[1].sender_owner_id, ctx.user.id);
-    assert.equal(messages[1].body_md, "cloud reply");
-    assert.deepEqual(JSON.parse(messages[1].attachments_json), [{ id: "file_generated", type: "text", name: "out.txt", mimeType: "text/plain", size: 3, url: "/api/files/file_generated" }]);
-
-    const runRows = ctx.cloudStore.getDb().prepare("SELECT status, hermes_run_id FROM cloud_agent_runs").all()
-      .map((row) => ({ status: row.status, hermes_run_id: row.hermes_run_id }));
-    assert.deepEqual(runRows, [{ status: "complete", hermes_run_id: "hr_1" }]);
-    assert.equal(broadcasts.length, 1);
-    assert.equal(broadcasts[0].payload.type, "conversation.message_appended");
-    assert.deepEqual(transientEvents.map((item) => item.payload.type), [
-      "cloud_agent_run_started",
-      "cloud_agent_run_event",
-      "cloud_agent_run_event"
-    ]);
-    assert.equal(transientEvents[0].payload.hermesRunId, "hr_1");
-    assert.deepEqual(transientEvents.slice(1).map((item) => item.payload.event.type), ["message.delta", "tool.started"]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("dispatcher defaults cloud-hermes runs to the platform model alias", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_default", content: "ok", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
     });
     const message = ctx.messagesStore.appendMessage({
       conversationId: ctx.conversation.id,
@@ -178,23 +91,27 @@ test("dispatcher defaults cloud-hermes runs to the platform model alias", async 
       senderRef: ctx.user.id,
       bodyMd: "hello"
     });
-    await dispatcher.handleUserMessage({ userId: ctx.user.id, conversationId: ctx.conversation.id, message });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: ctx.conversation.id,
+      message
+    });
+    assert.equal(reply.sender_ref, "mia");
+    assert.equal(reply.body_md, "hi");
     assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].model, "mia-default");
   } finally {
     ctx.cleanup();
   }
 });
 
-test("invokeFellow runs enabled cloud-hermes fellows in group conversations", async () => {
+test("single-fellow group skips the conductor and replies directly", async () => {
   const ctx = setup();
   const hermesCalls = [];
-  const broadcasts = [];
   try {
     const group = ctx.socialStore.createConversation({
-      id: "g_cloud",
+      id: "g_single",
       type: "group",
-      name: "Cloud Group"
+      name: "Single fellow group"
     });
     ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
     ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
@@ -205,1309 +122,307 @@ test("invokeFellow runs enabled cloud-hermes fellows in group conversations", as
       enabled: true,
       config: { model: "hermes-agent" }
     });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
+    const dispatcher = makeDispatcher(ctx, {
       hermesRunsClient: {
         async runChat(args) {
           hermesCalls.push(args);
-          return { runId: "hr_group", content: "group cloud reply", events: [] };
+          return { runId: "hr_single", content: "got it", events: [] };
         }
-      },
-      broadcastPersistedEvent(userId, payload) {
-        broadcasts.push({ userId, payload });
-      },
-      broadcastTransientEvent() {}
+      }
     });
     const message = ctx.messagesStore.appendMessage({
       conversationId: group.id,
       senderKind: "user",
       senderRef: ctx.user.id,
-      bodyMd: "@mia hello"
+      bodyMd: "有人吗"
     });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.equal(reply.sender_ref, "mia");
+    assert.equal(hermesCalls.length, 1, "no conductor turn for a one-fellow group");
+    assert.match(hermesCalls[0].input, /群成员/);
+  } finally {
+    ctx.cleanup();
+  }
+});
 
+test("multi-fellow group routes by name in the body", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_named", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
+    for (const fellowId of ["mia", "kongling"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_named", content: "yes", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "空铃在吗"
+    });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.equal(reply.sender_ref, "kongling");
+    assert.equal(hermesCalls.length, 1, "no conductor turn when the message names a fellow");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("multi-fellow group falls back to the conductor when no name matches", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_conductor", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
+    for (const fellowId of ["mia", "kongling"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          if (args.metadataRole === "group-conductor") {
+            return { runId: "hr_c", content: '{"speak":["kongling"]}', events: [] };
+          }
+          return { runId: "hr_r", content: "ok", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "随便聊聊"
+    });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.equal(reply.sender_ref, "kongling");
+    assert.deepEqual(hermesCalls.map((call) => call.metadataRole || "reply"), ["group-conductor", "reply"]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("conductor garbage falls back to the first fellow member", async () => {
+  const ctx = setup();
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_garbage", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
+    for (const fellowId of ["mia", "kongling"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat(args) {
+          if (args.metadataRole === "group-conductor") return { runId: "hr_c", content: "not json", events: [] };
+          return { runId: "hr_r", content: "fallback reply", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "随便聊聊"
+    });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.ok(reply, "expected a fellow to fall back into replying");
+    assert.match(reply.sender_ref, /mia|kongling/);
+    assert.equal(reply.body_md, "fallback reply");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("desktop-only fellow gets a fellow_invocation_requested broadcast and no inline run", async () => {
+  const ctx = setup();
+  const broadcasts = [];
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "spec-master", name: "Spec Master", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_local", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "spec-master", ownerId: ctx.user.id });
+    ctx.runtimeBindingsStore.upsertBinding({
+      userId: ctx.user.id,
+      fellowId: "spec-master",
+      runtimeKind: "desktop-local",
+      enabled: true,
+      config: { model: "claude" }
+    });
+    const dispatcher = makeDispatcher(ctx, {
+      broadcastPersistedEvent(userId, event) {
+        broadcasts.push({ userId, event });
+      },
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_x", content: "nope", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "看下昨天的报告"
+    });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.equal(reply, null);
+    assert.equal(hermesCalls.length, 0);
+    const invocation = broadcasts.find((entry) => entry.event.type === "conversation.fellow_invocation_requested");
+    assert.ok(invocation, "expected a desktop invocation broadcast");
+    assert.equal(invocation.event.fellowId, "spec-master");
+    assert.equal(invocation.userId, ctx.user.id);
+    assert.equal(invocation.event.runtimeConfig?.model, "claude");
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("@mention bypasses the conductor and picks only the mentioned fellow", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_mention", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
+    for (const fellowId of ["mia", "kongling"]) {
+      ctx.runtimeBindingsStore.upsertBinding({
+        userId: ctx.user.id,
+        fellowId,
+        runtimeKind: "cloud-hermes",
+        enabled: true,
+        config: { model: "hermes-agent" }
+      });
+    }
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_mention", content: "reply", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "hey",
+      mentions: [{ kind: "fellow", fellowId: "kongling" }]
+    });
+    const reply = await dispatcher.handleUserMessage({
+      userId: ctx.user.id,
+      conversationId: group.id,
+      message
+    });
+    assert.equal(reply.sender_ref, "kongling");
+    assert.deepEqual(hermesCalls.map((call) => call.metadataRole || "reply"), ["reply"]);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test("explicit fellowId on invokeFellow runs that fellow regardless of routing", async () => {
+  const ctx = setup();
+  const hermesCalls = [];
+  try {
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
+    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
+    const group = ctx.socialStore.createConversation({ id: "g_explicit", type: "group", name: "Group" });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
+    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
+    ctx.runtimeBindingsStore.upsertBinding({
+      userId: ctx.user.id,
+      fellowId: "kongling",
+      runtimeKind: "cloud-hermes",
+      enabled: true,
+      config: { model: "hermes-agent" }
+    });
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat(args) {
+          hermesCalls.push(args);
+          return { runId: "hr_explicit", content: "explicit reply", events: [] };
+        }
+      }
+    });
+    const message = ctx.messagesStore.appendMessage({
+      conversationId: group.id,
+      senderKind: "user",
+      senderRef: ctx.user.id,
+      bodyMd: "anything"
+    });
     const reply = await dispatcher.invokeFellow({
       userId: ctx.user.id,
       conversationId: group.id,
-      fellowId: "mia",
+      fellowId: "kongling",
       message
     });
-
-    assert.equal(reply.sender_kind, "fellow");
-    assert.equal(reply.sender_ref, "mia");
-    assert.equal(reply.body_md, "group cloud reply");
-    assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].conversationId, group.id);
-    assert.equal(hermesCalls[0].fellow.id, "mia");
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((m) => m.sender_kind), ["user", "fellow"]);
-    assert.equal(broadcasts.length, 1);
-    assert.equal(broadcasts[0].payload.type, "conversation.message_appended");
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage runs the single owned cloud-hermes fellow in a group conversation", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_auto",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_group_auto", content: "single fellow reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "谁能总结一下"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply.sender_ref, "mia");
-    assert.equal(reply.body_md, "single fellow reply");
-    assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].conversationId, group.id);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage keeps single-fellow cloud groups silent for availability-only pings", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_single_ping",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "有人吗"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage keeps single-fellow cloud groups silent for named availability pings", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_single_named_ping",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "空灵你在吗"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage keeps single-fellow cloud groups silent for human-directed tasks", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const remote = ctx.cloudStore.registerUser({ username: "空灵", password: "123456" }).user;
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_human_task",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: remote.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      getUserPublic: (userId) => ctx.cloudStore.getUserPublic(userId),
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "空灵帮我看下报错"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage routes multi-fellow cloud groups by the named fellow", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "xiaoli", name: "小栗", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_named",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "xiaoli", ownerId: ctx.user.id });
-    for (const fellowId of ["alice", "xiaoli"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_group_named", content: "alice cloud reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "爱丽丝你说一下"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply.sender_ref, "alice");
-    assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].fellow.id, "alice");
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage routes named probe wording to the named cloud fellow only", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_named_probe",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
-    for (const fellowId of ["mia", "kongling"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_named_probe", content: "空铃 reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "空铃呢"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
     assert.equal(reply.sender_ref, "kongling");
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["reply", "kongling"]
-    ]);
-    assert.match(hermesCalls[0].input, /群成员/);
-    assert.match(hermesCalls[0].input, /Mia/);
-    assert.match(hermesCalls[0].input, /空铃/);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage emits desktop invocation for named local fellows in mixed-runtime groups", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  const broadcasts = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_mixed_named_desktop",
-      type: "group",
-      name: "Mixed Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "kongling",
-      runtimeKind: "desktop-local",
-      enabled: true,
-      config: { agentEngine: "hermes", model: "local-model" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent(userId, payload) {
-        broadcasts.push({ userId, payload });
-      },
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "空铃？"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-    assert.equal(broadcasts.length, 1);
-    assert.equal(broadcasts[0].userId, ctx.user.id);
-    assert.equal(broadcasts[0].payload.type, "conversation.fellow_invocation_requested");
-    assert.equal(broadcasts[0].payload.fellowId, "kongling");
-    assert.equal(broadcasts[0].payload.runtimeKind, "desktop-local");
-    assert.deepEqual(broadcasts[0].payload.runtimeConfig, { agentEngine: "hermes", model: "local-model" });
-    assert.ok(Array.isArray(broadcasts[0].payload.recentMessages));
-    assert.ok(Array.isArray(broadcasts[0].payload.members));
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage uses one synthetic orchestrator before desktop invocation in mixed-runtime groups", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  const broadcasts = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_mixed_orchestrated_desktop",
-      type: "group",
-      name: "Mixed Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "kongling",
-      runtimeKind: "desktop-local",
-      enabled: true,
-      config: { agentEngine: "hermes", model: "local-model" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          if (args.metadataRole === "group-conductor") {
-            assert.equal(args.fellow.id, "group-orchestrator");
-            assert.match(args.input, /Mia/);
-            assert.match(args.input, /空铃/);
-            return { runId: "hr_dispatch_mixed", content: JSON.stringify({ speak: ["kongling"] }), events: [] };
-          }
-          return { runId: "hr_unexpected_reply", content: "unexpected reply", events: [] };
-        }
-      },
-      loadPrompts: async () => ({
-        dispatch: "members:\n{{members}}\nrecent:\n{{recent}}\nuser: {{userMessage}}\n输出 JSON：{\"speak\": []}"
-      }),
-      broadcastPersistedEvent(userId, payload) {
-        broadcasts.push({ userId, payload });
-      },
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "今天日报怎么写"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["group-conductor", "group-orchestrator"]
-    ]);
-    assert.equal(broadcasts.length, 1);
-    assert.equal(broadcasts[0].payload.type, "conversation.fellow_invocation_requested");
-    assert.equal(broadcasts[0].payload.fellowId, "kongling");
-    assert.equal(broadcasts[0].payload.runtimeKind, "desktop-local");
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage honors explicit desktop-local member runtime over cloud bindings", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  const broadcasts = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_explicit_desktop_member",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({
-      conversationId: group.id,
-      memberKind: "fellow",
-      memberRef: "mia",
-      ownerId: ctx.user.id,
-      aiPerms: { runtimeKind: "desktop-local" }
-    });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent(userId, payload) {
-        broadcasts.push({ userId, payload });
-      },
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "Mia 你说一下"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-    assert.equal(broadcasts.length, 1);
-    assert.equal(broadcasts[0].payload.type, "conversation.fellow_invocation_requested");
-    assert.equal(broadcasts[0].payload.fellowId, "mia");
-    assert.equal(broadcasts[0].payload.runtimeKind, "desktop-local");
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage routes cloud group search requests to a search-capable fellow", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, {
-      id: "blackcat",
-      name: "黑猫",
-      capabilities: { webSearch: true }
-    });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_search",
-      type: "group",
-      name: "Cloud Group"
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "blackcat", ownerId: ctx.user.id });
-    for (const fellowId of ["alice", "blackcat"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_group_search", content: "search cloud reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "爱丽丝你帮我找下AI领域最新新闻"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply.sender_ref, "blackcat");
     assert.equal(hermesCalls.length, 1);
-    assert.equal(hermesCalls[0].fellow.id, "blackcat");
   } finally {
     ctx.cleanup();
-  }
-});
-
-test("handleUserMessage uses a cloud conductor when a multi-fellow cloud group has no direct route", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "xiaoli", name: "小栗", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_conductor",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "alice" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "xiaoli", ownerId: ctx.user.id });
-    for (const fellowId of ["alice", "xiaoli"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          if (args.metadataRole === "group-conductor") {
-            assert.equal(args.fellow.id, "group-orchestrator");
-            assert.match(args.input, /爱丽丝/);
-            assert.match(args.input, /小栗/);
-            assert.match(args.sessionId, /^cloud:[^:]+:group-orchestrator:g_cloud_conductor:/);
-            return { runId: "hr_dispatch", content: JSON.stringify({ speak: ["xiaoli"] }), events: [] };
-          }
-          return { runId: "hr_reply", content: "xiaoli reply", events: [] };
-        }
-      },
-      loadPrompts: async () => ({
-        dispatch: "members:\n{{members}}\nrecent:\n{{recent}}\nuser: {{userMessage}}\n输出 JSON：{\"speak\": []}"
-      }),
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "大家怎么看"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply.sender_ref, "xiaoli");
-    assert.equal(reply.body_md, "xiaoli reply");
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["group-conductor", "group-orchestrator"],
-      ["reply", "xiaoli"]
-    ]);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "大家怎么看",
-      "xiaoli reply"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage stays silent when the cloud conductor chooses nobody", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "alice", name: "爱丽丝", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "xiaoli", name: "小栗", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_conductor_silent",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "alice" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "alice", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "xiaoli", ownerId: ctx.user.id });
-    for (const fellowId of ["alice", "xiaoli"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          if (args.metadataRole === "group-conductor") {
-            return { runId: "hr_dispatch_silent", content: JSON.stringify({ speak: [] }), events: [] };
-          }
-          return { runId: "hr_reply_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "大家先看看"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["group-conductor", "group-orchestrator"]
-    ]);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "大家先看看"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage stays silent when the cloud conductor returns invalid JSON", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "kongling", name: "空铃", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_conductor_invalid_json",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: ctx.user.id });
-    for (const fellowId of ["mia", "kongling"]) {
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId,
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-    }
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          if (args.metadataRole === "group-conductor") {
-            return { runId: "hr_dispatch_invalid", content: "我觉得 Mia 应该说话", events: [] };
-          }
-          return { runId: "hr_reply_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "大家怎么看"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["group-conductor", "group-orchestrator"]
-    ]);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "大家怎么看"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage stays silent when the user text names a remote-owned fellow", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const remote = ctx.cloudStore.registerUser({ username: "remote_named", password: "123456" }).user;
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(remote.id, { id: "kongling", name: "空灵", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_remote_named",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: remote.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "空灵你在吗"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "空灵你在吗"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage stays silent for availability-only pings in mixed-owner cloud groups", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const remote = ctx.cloudStore.registerUser({ username: "remote_ping", password: "123456" }).user;
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(remote.id, { id: "kongling", name: "空灵", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_ping_silent",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: remote.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "有人吗"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "有人吗"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage stays silent for short acknowledgements in cloud groups", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_ack_silent",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          return { runId: "hr_ack_unexpected", content: "unexpected reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "好吧"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply, null);
-    assert.equal(hermesCalls.length, 0);
-    assert.deepEqual(ctx.messagesStore.listMessagesSince(group.id, 0).map((row) => row.body_md), [
-      "好吧"
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("handleUserMessage uses the conductor for availability wording with a concrete task", async () => {
-  const ctx = setup();
-  const hermesCalls = [];
-  try {
-    const remote = ctx.cloudStore.registerUser({ username: "remote_ping_task", password: "123456" }).user;
-    ctx.fellowsStore.upsertFellow(ctx.user.id, { id: "mia", name: "Mia", capabilities: ["chat"] });
-    ctx.fellowsStore.upsertFellow(remote.id, { id: "kongling", name: "空灵", capabilities: ["chat"] });
-    const group = ctx.socialStore.createConversation({
-      id: "g_cloud_ping_task",
-      type: "group",
-      name: "Cloud Group",
-      decorations: {
-        hostMember: { kind: "fellow", fellowId: "mia" }
-      }
-    });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "user", memberRef: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "mia", ownerId: ctx.user.id });
-    ctx.socialStore.addConversationMember({ conversationId: group.id, memberKind: "fellow", memberRef: "kongling", ownerId: remote.id });
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: true,
-      config: { model: "hermes-agent" }
-    });
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: {
-        async ensureWorker(userId) {
-          return { userId, baseUrl: "http://worker", apiKey: "k" };
-        }
-      },
-      hermesRunsClient: {
-        async runChat(args) {
-          hermesCalls.push(args);
-          if (args.metadataRole === "group-conductor") {
-            return { runId: "hr_dispatch_ping_task", content: JSON.stringify({ speak: ["mia"] }), events: [] };
-          }
-          return { runId: "hr_reply_ping_task", content: "mia reply", events: [] };
-        }
-      },
-      broadcastPersistedEvent() {},
-      broadcastTransientEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: group.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "有人吗，帮我看下报错"
-    });
-
-    const reply = await dispatcher.handleUserMessage({
-      userId: ctx.user.id,
-      conversationId: group.id,
-      message
-    });
-
-    assert.equal(reply.sender_ref, "mia");
-    assert.equal(reply.body_md, "mia reply");
-    assert.deepEqual(hermesCalls.map((call) => [call.metadataRole || "reply", call.fellow.id]), [
-      ["group-conductor", "group-orchestrator"],
-      ["reply", "mia"]
-    ]);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("dispatcher skips fellow conversations without enabled cloud-hermes binding", async () => {
-  const ctx = setup();
-  try {
-    ctx.runtimeBindingsStore.upsertBinding({
-      userId: ctx.user.id,
-      fellowId: "mia",
-      runtimeKind: "cloud-hermes",
-      enabled: false
-    });
-    let called = false;
-    const dispatcher = createCloudAgentDispatcher({
-      socialStore: ctx.socialStore,
-      messagesStore: ctx.messagesStore,
-      fellowsStore: ctx.fellowsStore,
-      runtimeBindingsStore: ctx.runtimeBindingsStore,
-      cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-      workerManager: { async ensureWorker() { called = true; } },
-      hermesRunsClient: { async runChat() { called = true; return { content: "" }; } },
-      broadcastPersistedEvent() {}
-    });
-    const message = ctx.messagesStore.appendMessage({
-      conversationId: ctx.conversation.id,
-      senderKind: "user",
-      senderRef: ctx.user.id,
-      bodyMd: "hello"
-    });
-    await dispatcher.handleUserMessage({ userId: ctx.user.id, conversationId: ctx.conversation.id, message });
-    assert.equal(called, false);
-    assert.equal(ctx.messagesStore.listMessagesSince(ctx.conversation.id, 0).length, 1);
-  } finally {
-    ctx.cleanup();
-  }
-});
-
-test("dispatcher skips desktop-local and legacy fellow conversations even when a cloud binding exists", async () => {
-  for (const decorations of [
-    { fellowKey: "mia", sessionId: "mia", runtimeKind: "desktop-local" },
-    { fellowKey: "mia", sessionId: "mia" }
-  ]) {
-    const ctx = setup();
-    try {
-      ctx.socialStore.updateConversation(ctx.conversation.id, { decorations });
-      ctx.runtimeBindingsStore.upsertBinding({
-        userId: ctx.user.id,
-        fellowId: "mia",
-        runtimeKind: "cloud-hermes",
-        enabled: true,
-        config: { model: "hermes-agent" }
-      });
-      let called = false;
-      const dispatcher = createCloudAgentDispatcher({
-        socialStore: ctx.socialStore,
-        messagesStore: ctx.messagesStore,
-        fellowsStore: ctx.fellowsStore,
-        runtimeBindingsStore: ctx.runtimeBindingsStore,
-        cloudAgentRunsStore: ctx.cloudAgentRunsStore,
-        workerManager: { async ensureWorker() { called = true; } },
-        hermesRunsClient: { async runChat() { called = true; return { content: "" }; } },
-        broadcastPersistedEvent() {}
-      });
-      const message = ctx.messagesStore.appendMessage({
-        conversationId: ctx.conversation.id,
-        senderKind: "user",
-        senderRef: ctx.user.id,
-        bodyMd: "hello"
-      });
-      await dispatcher.handleUserMessage({ userId: ctx.user.id, conversationId: ctx.conversation.id, message });
-      assert.equal(called, false);
-      assert.equal(ctx.messagesStore.listMessagesSince(ctx.conversation.id, 0).length, 1);
-    } finally {
-      ctx.cleanup();
-    }
   }
 });

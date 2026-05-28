@@ -1,6 +1,4 @@
 const { IpcChannel } = require("../../shared/ipc-channels");
-const { CloudEvent } = require("../../shared/cloud-events.js");
-const { SenderKind } = require("../../shared/conversation-kinds.js");
 
 function safeCall(fn) {
   return async (_event, ...args) => {
@@ -11,17 +9,6 @@ function safeCall(fn) {
       return { ok: false, error: String(error?.message || error), status: error?.status || 500 };
     }
   };
-}
-
-function dispatchPostedConversationMessage({ conversationId, result, fellowRuntimeDispatcher, log = () => {} }) {
-  const message = result?.message || result?.data?.message || null;
-  if (!conversationId || !message?.id || message.sender_kind !== SenderKind.User) return;
-  const promise = fellowRuntimeDispatcher?.handleCloudEvent?.({
-    type: CloudEvent.ConversationMessageAppended,
-    conversationId,
-    message
-  });
-  promise?.catch?.((error) => log(`Cloud conversation AI dispatch after post failed: ${error?.message || error}`));
 }
 
 function resultArray(result, key) {
@@ -82,7 +69,7 @@ function cachedSocialBootstrap({ messageCache, getCloudUserId, requestedUserId }
   return messageCache.getSocialBootstrap(userId);
 }
 
-function registerSocialIpc({ ipcMain, socialApi, fellowRuntimeDispatcher = null, messageCache = null, getCloudUserId = null, log = () => {} }) {
+function registerSocialIpc({ ipcMain, socialApi, messageCache = null, getCloudUserId = null, log = () => {} }) {
   ipcMain.handle(IpcChannel.SocialSendFriendRequest, safeCall((toUsername) => socialApi.sendFriendRequest(toUsername)));
   ipcMain.handle(IpcChannel.SocialRespondFriendRequest, safeCall((requestId, action) => socialApi.respondFriendRequest(requestId, action)));
   ipcMain.handle(IpcChannel.SocialCancelFriendRequest, safeCall((requestId) => socialApi.cancelFriendRequest(requestId)));
@@ -131,11 +118,7 @@ function registerSocialIpc({ ipcMain, socialApi, fellowRuntimeDispatcher = null,
   ipcMain.handle(IpcChannel.SocialGetCachedBootstrap, safeCall((userId) => (
     cachedSocialBootstrap({ messageCache, getCloudUserId, requestedUserId: userId })
   )));
-  ipcMain.handle(IpcChannel.SocialPostConversationMessage, safeCall(async (conversationId, body) => {
-    const result = await socialApi.postConversationMessage(conversationId, body);
-    dispatchPostedConversationMessage({ conversationId, result, fellowRuntimeDispatcher, log });
-    return result;
-  }));
+  ipcMain.handle(IpcChannel.SocialPostConversationMessage, safeCall((conversationId, body) => socialApi.postConversationMessage(conversationId, body)));
   ipcMain.handle(IpcChannel.SocialDeleteConversationMessage, safeCall((conversationId, messageId) => socialApi.deleteConversationMessage(conversationId, messageId)));
   ipcMain.handle(IpcChannel.SocialCreateConversation, safeCall((payload) => socialApi.createConversation(payload)));
   ipcMain.handle(IpcChannel.SocialEnsureFellowConversation, safeCall((fellowId, body) => socialApi.ensureFellowConversation(fellowId, body)));

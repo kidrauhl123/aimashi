@@ -291,7 +291,7 @@ test("POST group message routes named fellow only and gives the agent group iden
   }
 });
 
-test("POST group short acknowledgement stays silent through the HTTP entrypoint", async () => {
+test("POST group short message reaches the single-fellow handler through the HTTP entrypoint", async () => {
   const dataDir = tempDir("mia-cloud-agent-ack-group-");
   const hermesCalls = [];
   const server = createMiaCloudServer({
@@ -309,7 +309,7 @@ test("POST group short acknowledgement stays silent through the HTTP entrypoint"
     cloudAgentHermesClient: {
       async runChat(args) {
         hermesCalls.push(args);
-        return { runId: "hr_unexpected", content: "unexpected", events: [] };
+        return { runId: "hr_ok", content: "good", events: [] };
       }
     }
   });
@@ -336,7 +336,8 @@ test("POST group short acknowledgement stays silent through the HTTP entrypoint"
     });
     await server.mia.cloudAgentDispatcher.idle();
 
-    assert.equal(hermesCalls.length, 0);
+    assert.equal(hermesCalls.length, 1);
+    assert.equal(hermesCalls[0].fellow.id, "mia");
   } finally {
     await close(server);
     fs.rmSync(dataDir, { recursive: true, force: true });
