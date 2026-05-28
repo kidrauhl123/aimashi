@@ -38,29 +38,46 @@ async function startServer(extraEnv = {}) {
   });
 }
 
-async function startHermesFixtureServer() {
+async function startHermesFixtureServer({ skillCount = 1 } = {}) {
   const port = await freePort();
   const archive = new AdmZip();
   archive.addFile("repo-main/skills/demo-remote/SKILL.md", Buffer.from("---\nname: demo-remote\n---\n# Demo Remote\n"));
   archive.addFile("repo-main/skills/demo-remote/references/notes.md", Buffer.from("# Notes\n"));
+  const skills = Array.from({ length: skillCount }, (_item, index) => {
+    if (index === 0) {
+      return {
+        name: "demo-remote",
+        description: "Remote GitHub skill",
+        source: "github",
+        identifier: "owner/repo/skills/demo-remote",
+        trust_level: "community",
+        repo: "owner/repo",
+        path: "skills/demo-remote",
+        tags: ["software"],
+        extra: {}
+      };
+    }
+    const n = String(index).padStart(3, "0");
+    return {
+      name: `remote-skill-${n}`,
+      description: `Remote test skill ${n}`,
+      source: "github",
+      identifier: `owner/repo/skills/remote-skill-${n}`,
+      trust_level: "community",
+      repo: "owner/repo",
+      path: `skills/remote-skill-${n}`,
+      tags: ["software"],
+      extra: {}
+    };
+  });
   const server = http.createServer((req, res) => {
     if (req.url === "/index.json") {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         version: 1,
         generated_at: "2026-05-28T03:27:06.731039+00:00",
-        skill_count: 1,
-        skills: [{
-          name: "demo-remote",
-          description: "Remote GitHub skill",
-          source: "github",
-          identifier: "owner/repo/skills/demo-remote",
-          trust_level: "community",
-          repo: "owner/repo",
-          path: "skills/demo-remote",
-          tags: ["software"],
-          extra: {}
-        }]
+        skill_count: skills.length,
+        skills
       }));
     }
     if (req.url === "/github-archive/owner/repo/zip/HEAD") {
@@ -213,6 +230,28 @@ test("Hermes remote skills appear in market and install as real packages", async
 
     const pkg = await api(ctx.port, "GET", inst.body.download.url, { token: alice.token });
     assert.equal(pkg.status, 200);
+  } finally {
+    await stopServer(ctx);
+    await fixture.close();
+  }
+});
+
+test("GET /api/skills defaults to a bounded page but honors explicit limits", async () => {
+  const fixture = await startHermesFixtureServer({ skillCount: 240 });
+  const ctx = await startServer({
+    MIA_HERMES_SKILLS_MARKET: "1",
+    MIA_HERMES_SKILLS_INDEX_URL: `${fixture.url}/index.json`,
+    MIA_HERMES_GITHUB_ARCHIVE_BASE_URL: `${fixture.url}/github-archive`
+  });
+  try {
+    const alice = await register(ctx.port, "alice");
+    const defaultPage = await api(ctx.port, "GET", "/api/skills", { token: alice.token });
+    assert.equal(defaultPage.status, 200);
+    assert.equal(defaultPage.body.skills.length, 120);
+
+    const largerPage = await api(ctx.port, "GET", "/api/skills?limit=200", { token: alice.token });
+    assert.equal(largerPage.status, 200);
+    assert.equal(largerPage.body.skills.length, 200);
   } finally {
     await stopServer(ctx);
     await fixture.close();

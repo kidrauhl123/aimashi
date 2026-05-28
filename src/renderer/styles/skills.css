@@ -85,9 +85,8 @@
 /* 卡片 —— 无边框，白底 + 柔和阴影，悬停轻微浮起 */
 .skill-card {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 16px;
   row-gap: 14px;
   align-items: start;
   min-width: 0;
@@ -108,26 +107,8 @@
   box-shadow: 0 2px 6px rgba(17, 24, 39, 0.06), 0 12px 28px rgba(17, 24, 39, 0.09);
 }
 
-.skill-card-icon {
-  grid-column: 1;
-  grid-row: 1;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 15px;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.skill-card-icon.docs { background: linear-gradient(135deg, #4f8bff, #2563eb); }
-.skill-card-icon.creative { background: linear-gradient(135deg, #2bb6a3, #0f766e); }
-.skill-card-icon.build { background: linear-gradient(135deg, #9b6bff, #7c3aed); }
-.skill-card-icon.ops { background: linear-gradient(135deg, #64748b, #475569); }
-
 .skill-card-head {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
   display: grid;
   gap: 6px;
@@ -154,8 +135,12 @@
 }
 
 .skill-card-source {
-  grid-column: 1 / -1;
+  grid-column: 1;
   grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
   overflow: hidden;
   color: var(--faint);
   font-size: 12px;
@@ -207,20 +192,7 @@
 
 /* 市场卡片：标题行带「添加」按钮 */
 .market-card {
-  grid-template-columns: minmax(0, 1fr);
   cursor: default;
-}
-
-.market-card .skill-card-head,
-.market-card .skill-card-source {
-  grid-column: 1;
-}
-
-.market-card .skill-card-source {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
 }
 
 .skill-card-source-text {
@@ -291,29 +263,56 @@
 
 .skill-card-action {
   flex: 0 0 auto;
-  padding: 5px 14px;
+  min-width: 54px;
+  min-height: 32px;
+  padding: 0 15px;
   border: 0;
   border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--text);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
 .skill-card-action:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background: rgba(17, 24, 39, 0.1);
+}
+
+.skill-card-action-use {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.skill-card-action-install {
+  background: #111827;
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.skill-card:hover .skill-card-action-install,
+.skill-card:focus-within .skill-card-action-install {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.skill-card-action-install:hover:not(:disabled) {
+  background: #030712;
+  color: #fff;
+  transform: translateY(-1px);
 }
 
 .skill-card-action:disabled {
   opacity: 0.6;
-  cursor: default;
-}
-
-.skill-card-action.installed {
-  background: transparent;
-  color: var(--faint);
-  font-weight: 450;
   cursor: default;
 }
 

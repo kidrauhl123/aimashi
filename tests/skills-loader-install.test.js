@@ -28,6 +28,19 @@ function makeZip() {
   return zip.toBuffer();
 }
 
+function makeNestedZip() {
+  const zip = new AdmZip();
+  zip.addFile("nested-skill/SKILL.md", Buffer.from("---\nname: nested-skill\ndescription: A nested marketplace skill.\n---\n# Nested Skill\n"));
+  zip.addFile("nested-skill/scripts/run.py", Buffer.from("print('nested')\n"));
+  return zip.toBuffer();
+}
+
+function makeNamedZip(name) {
+  const zip = new AdmZip();
+  zip.addFile("SKILL.md", Buffer.from(`---\nname: ${name}\ndescription: A legacy marketplace skill.\n---\n# ${name}\n`));
+  return zip.toBuffer();
+}
+
 test("installMarketplaceSkill extracts a multi-file zip into <home>/skills and it scans as 'mia'", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
   try {
@@ -49,6 +62,46 @@ test("installMarketplaceSkill extracts a multi-file zip into <home>/skills and i
     assert.ok(found, "installed skill appears in local scan");
     assert.equal(found.source, "mia");
     assert.equal(found.marketSourceLabel, "GitHub");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("installMarketplaceSkill preserves market source when SKILL.md is nested inside the package", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
+  try {
+    const loader = makeLoader(home);
+    const library = await loader.installMarketplaceSkill({
+      id: "community-nested-skill",
+      zipBuffer: makeNestedZip(),
+      marketMeta: { sourceLabel: "Community Source", upstreamSource: "example/skills", trustLevel: "community" }
+    });
+
+    const found = library.skills.find((s) => s.name === "nested-skill");
+    assert.ok(found, "nested marketplace skill appears in local scan");
+    assert.equal(found.source, "mia");
+    assert.equal(found.pluginLabel, "我的技能");
+    assert.equal(found.marketSourceLabel, "Community Source");
+    assert.equal(found.marketUpstreamSource, "example/skills");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("legacy marketplace markers infer a known source label from the market id", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "mia-skills-loader-"));
+  try {
+    const loader = makeLoader(home);
+    const library = await loader.installMarketplaceSkill({
+      id: "hermes.claude-marketplace.example.abc123",
+      zipBuffer: makeNamedZip("legacy-source-skill")
+    });
+
+    const found = library.skills.find((s) => s.name === "legacy-source-skill");
+    assert.ok(found, "legacy marketplace skill appears in local scan");
+    assert.equal(found.pluginLabel, "我的技能");
+    assert.equal(found.marketSourceLabel, "Claude");
+    assert.equal(found.fromMarket, true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

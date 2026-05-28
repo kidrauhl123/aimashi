@@ -54,6 +54,7 @@ const { createMainFellowRuntimeDispatcher } = require("./main/social/fellow-runt
 const { createCloudEventsClient } = require("./main/cloud/cloud-events-client.js");
 const { createCloudBridgeClient } = require("./main/cloud/cloud-bridge-client.js");
 const { createCloudDesktopSyncClient } = require("./main/cloud/desktop-sync-client.js");
+const { openSkillMarketCache } = require("./main/skills/skill-market-cache.js");
 const { createRelayClient, relayPairingLink } = require("./main/relay/relay-client.js");
 const { createRemoteControlRouter } = require("./main/remote/remote-control-router.js");
 const { createModelSettingsService } = require("./main/model-settings-service.js");
@@ -1773,6 +1774,7 @@ const socialApi = createSocialApi({
   getSettings: () => settingsStore.cloudSettings(),
   normalizeUrl: settingsStore.normalizeCloudUrl
 });
+const skillMarketCache = openSkillMarketCache(path.join(runtimePaths().home, "skill-market-cache.db"));
 cloudDesktopSyncRuntime = createCloudDesktopSyncClient({
   getCloudSettings: () => settingsStore.cloudSettings(),
   writeCloudSettings: (patch) => settingsStore.writeCloudSettings(patch),
@@ -1790,7 +1792,8 @@ cloudDesktopSyncRuntime = createCloudDesktopSyncClient({
   startCloudEvents,
   startCloudBridge,
   stopCloudEvents,
-  stopCloudBridge
+  stopCloudBridge,
+  skillMarketCache
 });
 cloudBridgeRuntime = createCloudBridgeClient({
   WebSocketImpl: WebSocket,

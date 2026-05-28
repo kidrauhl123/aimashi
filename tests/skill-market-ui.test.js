@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
@@ -28,6 +29,17 @@ test("main orchestrates cloud install → local write", () => {
 
 test("skill-library renders a market mode with an install action", () => {
   const src = read("src/renderer/skills/skill-library.js");
+  assert.match(src, /MARKET_SKILL_PAGE_LIMIT/);
+  assert.match(src, /function marketRequestParams/);
+  assert.match(src, /limit:\s*MARKET_SKILL_PAGE_LIMIT/);
+  assert.match(src, /state\.skillMarket\.queryKey/);
+  assert.match(src, /window\.mia\.marketSkills\(params\)/);
+  assert.match(src, /forceRefresh:\s*true/);
+  assert.match(src, /background:\s*true/);
+  assert.match(src, /state\.skillMarket\.refreshing/);
+  assert.match(src, /data\?\.cached/);
+  assert.match(src, /data\?\.stale/);
+  assert.doesNotMatch(src, /window\.mia\.marketSkills\(\{\}\)/);
   assert.match(src, /state\.skillMarketMode/);
   assert.match(src, /function renderMarketView/);
   assert.match(src, /function installMarketSkill/);
@@ -39,6 +51,7 @@ test("skill-library renders a market mode with an install action", () => {
 test("market cards render compact source logos beside source labels", () => {
   const src = read("src/renderer/skills/skill-library.js");
   assert.match(src, /MARKET_SOURCE_LOGOS/);
+  assert.match(src, /function renderUnifiedSkillCard/);
   assert.match(src, /function marketSourceKey/);
   assert.match(src, /function marketSourceLogoHtml/);
   assert.match(src, /className = `skill-source-logo skill-source-logo-\$\{sourceKey\}`/);
@@ -52,16 +65,31 @@ test("market cards render compact source logos beside source labels", () => {
   assert.match(src, /assets\/provider-icons\/browse-sh\.svg/);
   assert.match(src, /assets\/provider-icons\/claude\.svg/);
   assert.match(src, /assets\/provider-icons\/lobehub\.svg/);
+  assert.doesNotMatch(src, /已添加/);
+  assert.match(src, /installedLocalSkillForMarket/);
+  assert.match(src, /data-skill-use=/);
+  assert.match(src, /skill-card-action-use/);
+  assert.match(src, /skill-card-action-install/);
 
   const css = read("src/renderer/styles/skills.css");
-  assert.match(css, /\.market-card\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
-  assert.match(css, /\.market-card \.skill-card-source\s*\{[\s\S]*display:\s*flex/);
+  assert.match(css, /\.skill-card\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(css, /\.skill-card-source\s*\{[\s\S]*display:\s*flex/);
   assert.match(css, /\.skill-source-logo\s*\{/);
   assert.match(css, /\.skill-source-logo-mask/);
   assert.match(css, /assets\/engine-icons\/hermesagent\.svg/);
   assert.match(css, /assets\/provider-icons\/github\.svg/);
   assert.match(css, /\.skill-source-logo-hermes\s*\{[\s\S]*color:\s*#0f172a/);
   assert.doesNotMatch(css, /\.skill-card-icon\.source-logo/);
+  assert.doesNotMatch(css, /background:\s*var\(--accent\)/);
+  assert.doesNotMatch(css, /\.skill-card-action\.installed/);
+  assert.match(css, /\.skill-card-action\s*\{[\s\S]*border:\s*0/);
+  assert.match(css, /\.skill-card-action\s*\{[\s\S]*opacity:\s*1/);
+  assert.match(css, /\.skill-card-action-use\s*\{[\s\S]*opacity:\s*1/);
+  assert.match(css, /\.skill-card-action-install\s*\{[\s\S]*opacity:\s*0/);
+  assert.match(css, /\.skill-card:hover \.skill-card-action-install/);
+  assert.match(css, /\.skill-card:focus-within \.skill-card-action-install/);
+  assert.match(css, /\.skill-card-action-install\s*\{[\s\S]*background:\s*#111827/);
+  assert.match(css, /\.skill-card-action-install\s*\{[\s\S]*color:\s*#fff/);
 
   [
     "src/renderer/assets/engine-icons/hermesagent.svg",
@@ -80,4 +108,62 @@ test("topbar has the mine/market toggle and market styles exist", () => {
   const css = read("src/renderer/styles/skills.css");
   assert.match(css, /\.skill-mode-toggle/);
   assert.match(css, /\.skill-card-action/);
+});
+
+test("market state tracks cached pages separately from foreground loading", () => {
+  const state = read("src/renderer/app-state.js");
+  assert.match(state, /refreshing:\s*false/);
+  assert.match(state, /cached:\s*false/);
+  assert.match(state, /stale:\s*false/);
+  assert.match(state, /updatedAt:\s*""/);
+});
+
+test("local market cards infer known source labels from legacy market ids", () => {
+  const src = read("src/renderer/skills/skill-library.js");
+  const context = {
+    console,
+    window: {
+      miaSkillHelpers: {
+        skillDisplayName: (skill) => skill.title || skill.name,
+        skillSummaryZh: (skill) => skill.description || "",
+        skillAuthorLabel: (skill) => skill.pluginLabel || skill.sourceLabel || "Local",
+        skillTone: () => "blue",
+        skillInitials: () => "SK",
+        renderSkillMarkdownSource: (body) => body
+      }
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(src, context, { filename: "skill-library.js" });
+
+  context.window.miaSkillLibrary.initSkillLibrary({
+    state: { selectedSkillId: "" },
+    els: {},
+    mia: null,
+    escapeHtml: (value) => String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;"),
+    setText: () => {},
+    menuItemHtml: () => "",
+    syncTopbarClickCapture: () => {},
+    closeGroupContextMenu: () => {},
+    showNarrowContent: () => {},
+    deleteSkill: () => {},
+    openSkillDirectory: () => {}
+  });
+
+  const html = context.window.miaSkillLibrary.renderSkillCard({
+    id: "mia:hermes.claude-marketplace.presentation-tools.abc123",
+    name: "presentation-tools",
+    title: "presentation-tools",
+    description: "Use this skill when working with presentation files.",
+    pluginLabel: "我的技能",
+    relPath: "hermes.claude-marketplace.presentation-tools.abc123/SKILL.md"
+  });
+
+  assert.match(html, /skill-source-logo-claude/);
+  assert.match(html, />Claude</);
+  assert.doesNotMatch(html, />我的技能</);
 });

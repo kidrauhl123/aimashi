@@ -138,6 +138,38 @@ function createSkillsLoader(deps = {}) {
     }
   }
 
+  function readMarketMarkerForSkill(filePath, sourceRoot) {
+    const root = path.resolve(sourceRoot);
+    let current = path.resolve(path.dirname(filePath));
+    while (current === root || current.startsWith(root + path.sep)) {
+      const marker = readMarketMarker(current);
+      if (marker) return marker;
+      if (current === root) break;
+      current = path.dirname(current);
+    }
+    return null;
+  }
+
+  function inferMarketSourceLabel(marker = {}) {
+    const values = [
+      marker.id,
+      marker.sourceLabel,
+      marker.upstreamSource,
+      marker.upstreamId,
+      marker.upstreamRepo,
+      marker.upstreamPath
+    ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+    if (!values.length) return "";
+    if (values.some((value) => value.includes("claude-marketplace") || value.includes("anthropic"))) return "Claude";
+    if (values.some((value) => value.includes("clawhub"))) return "ClawHub";
+    if (values.some((value) => value.includes("skills-sh") || value.includes("skills.sh"))) return "skills.sh";
+    if (values.some((value) => value.includes("browse-sh") || value.includes("browse.sh"))) return "browse.sh";
+    if (values.some((value) => value.includes("lobehub"))) return "LobeHub";
+    if (values.some((value) => value.includes("github"))) return "GitHub";
+    if (values.some((value) => value.includes("official") || value.includes("hermes"))) return "Hermes";
+    return "";
+  }
+
   function simpleYamlValue(text, key) {
     const match = String(text || "").match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
     return match ? cleanYamlScalar(match[1]) : "";
@@ -374,10 +406,10 @@ function createSkillsLoader(deps = {}) {
           skill.pluginSource = plugin.source;
           skill.extensionId = plugin.extensionId || "";
           skill.sourceKind = plugin.kind || "skill-source";
-          const marketMarker = readMarketMarker(path.dirname(filePath));
+          const marketMarker = readMarketMarkerForSkill(filePath, plugin.root);
           skill.fromMarket = Boolean(marketMarker);
           if (marketMarker) {
-            skill.marketSourceLabel = marketMarker.sourceLabel || "";
+            skill.marketSourceLabel = marketMarker.sourceLabel || inferMarketSourceLabel(marketMarker);
             skill.marketUpstreamSource = marketMarker.upstreamSource || "";
             skill.marketUpstreamId = marketMarker.upstreamId || "";
             skill.marketTrustLevel = marketMarker.trustLevel || "";

@@ -6,10 +6,11 @@ const test = require("node:test");
 const root = path.join(__dirname, "..");
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 
-test("skill-library renders a single skill grid with icon cards", () => {
+test("skill-library renders a single unified skill grid without icon cards", () => {
   const src = read("src/renderer/skills/skill-library.js");
-  // 卡片带图标 + 数据驱动分类，仍走 selectSkill 预览
-  assert.match(src, /skill-card-icon/);
+  // 卡片只保留标题、描述、来源和动作按钮；数据驱动分类，仍走 selectSkill 预览
+  assert.match(src, /renderUnifiedSkillCard/);
+  assert.doesNotMatch(src, /skill-card-icon/);
   assert.match(src, /data-skill-select=/);
   // 不再有 plugins/connectors/extensions 的渲染与目录导航
   assert.doesNotMatch(src, /renderPluginCard|renderConnectorCard|renderExtensionDetail|renderExtensionNavRow|renderDirectorySectionRow|directorySectionRows/);
@@ -43,7 +44,7 @@ test("skill styles moved to feature stylesheet and grid is full-width", () => {
   const baseCss = read("src/renderer/styles.css");
   // 新表存在且含全屏网格 + 折叠侧栏列规则
   assert.match(skillsCss, /\.skill-card-grid/);
-  assert.match(skillsCss, /\.skill-card-icon/);
+  assert.doesNotMatch(skillsCss, /\.skill-card-icon/);
   assert.match(skillsCss, /\.app-shell\[data-active-view="skills"\]/);
   // base 表不再含已删/已迁移的技能专属规则
   assert.doesNotMatch(baseCss, /\.skills-sidebar\b/);

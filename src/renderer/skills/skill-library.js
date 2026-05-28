@@ -21,6 +21,8 @@
     claude: { label: "Claude", src: "./assets/provider-icons/claude.svg" },
     lobehub: { label: "LobeHub", src: "./assets/provider-icons/lobehub.svg" }
   };
+  const MARKET_SKILL_PAGE_LIMIT = 120;
+  const marketRefreshKeys = new Set();
 
   function initSkillLibrary(deps) {
     state = deps.state;
@@ -90,25 +92,50 @@
     return "没有匹配的 Skill";
   }
 
-  function renderSkillCard(skill) {
-    const tone = window.miaSkillHelpers.skillTone(skill);
-    const initials = window.miaSkillHelpers.skillInitials(skill.name);
-    const sourceText = skill.marketSourceLabel
-      ? `本机安装 · ${skill.marketSourceLabel}`
-      : (skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill));
+  function renderUnifiedSkillCard({ title, description, sourceHtml, actionHtml, className = "", attrs = "" }) {
+    const cardClass = ["skill-card", className].filter(Boolean).join(" ");
     return `
-      <article class="skill-card${skill.id === state.selectedSkillId ? " featured" : ""}" data-skill-select="${escapeHtml(skill.id)}">
-        <span class="skill-card-icon ${escapeHtml(tone)}" aria-hidden="true">${escapeHtml(initials)}</span>
+      <article class="${escapeHtml(cardClass)}"${attrs ? ` ${attrs}` : ""}>
         <div class="skill-card-head">
           <div class="skill-card-titlerow">
-            <strong>${escapeHtml(window.miaSkillHelpers.skillDisplayName(skill))}</strong>
-            <button class="skill-card-action" type="button" data-skill-use="${escapeHtml(skill.id)}">使用</button>
+            <strong>${escapeHtml(title || "Skill")}</strong>
+            ${actionHtml || ""}
           </div>
-          <p>${escapeHtml(window.miaSkillHelpers.skillSummaryZh(skill))}</p>
+          <p>${escapeHtml(description || "")}</p>
         </div>
-        <span class="skill-card-source">${escapeHtml(sourceText)}</span>
+        <span class="skill-card-source">${sourceHtml || ""}</span>
       </article>
     `;
+  }
+
+  function localSkillMarketSourceLabel(skill) {
+    const explicit = String(skill?.marketSourceLabel || "").trim();
+    if (explicit) return explicit;
+    const sourceKey = marketSourceKey(skill);
+    return marketSourceLogo(skill, sourceKey)?.label || "";
+  }
+
+  function skillSourceLogoHtml(skill) {
+    const sourceLabel = localSkillMarketSourceLabel(skill);
+    if (!sourceLabel && !skill?.marketUpstreamSource) return "";
+    return marketSourceLogoHtml({
+      sourceLabel,
+      ownerLabel: sourceLabel,
+      upstreamSource: skill.marketUpstreamSource || skill.upstreamSource || "",
+      category: skill.category || ""
+    });
+  }
+
+  function renderSkillCard(skill) {
+    const sourceText = localSkillMarketSourceLabel(skill) || skill.pluginLabel || window.miaSkillHelpers.skillAuthorLabel(skill);
+    return renderUnifiedSkillCard({
+      title: window.miaSkillHelpers.skillDisplayName(skill),
+      description: window.miaSkillHelpers.skillSummaryZh(skill),
+      sourceHtml: `${skillSourceLogoHtml(skill)}<span class="skill-card-source-text">${escapeHtml(sourceText)}</span>`,
+      actionHtml: `<button class="skill-card-action skill-card-action-use" type="button" data-skill-use="${escapeHtml(skill.id)}">使用</button>`,
+      className: skill.id === state.selectedSkillId ? "featured" : "",
+      attrs: `data-skill-select="${escapeHtml(skill.id)}"`
+    });
   }
 
   function renderChips(entries) {
@@ -199,8 +226,9 @@
     els.skillPreviewMark.className = `skill-dot ${window.miaSkillHelpers.skillTone(skill)}`;
     els.skillPreviewMark.textContent = window.miaSkillHelpers.skillInitials(skill.name);
     setText(els.skillPreviewTitle, window.miaSkillHelpers.skillDisplayName(skill));
-    const previewSource = skill.marketSourceLabel
-      ? `${skill.sourceLabel || "Local"} · ${skill.marketSourceLabel}`
+    const previewMarketSource = localSkillMarketSourceLabel(skill);
+    const previewSource = previewMarketSource
+      ? `${skill.sourceLabel || "Local"} · ${previewMarketSource}`
       : (skill.sourceLabel || "Local");
     setText(els.skillPreviewMeta, `${skill.name || "Skill"} · ${previewSource} · ${skill.relPath || skill.category || ""}`);
     els.skillPreviewBody.innerHTML = skill.body
@@ -298,8 +326,8 @@
     return Boolean(state.runtime?.cloud?.enabled);
   }
 
-  function marketSkillInstalled(skill) {
-    return (state.skillLibrary.skills || []).some((local) => local.name === skill.name);
+  function installedLocalSkillForMarket(skill) {
+    return (state.skillLibrary.skills || []).find((local) => local.name === skill.name) || null;
   }
 
   function formatInstallCount(n) {
@@ -311,6 +339,22 @@
 
   function marketCategoryEntries() {
     return (state.skillMarket.categories || []).map((entry) => [entry.category, entry.count]);
+  }
+
+  function marketRequestParams() {
+    return {
+      category: state.skillCategoryFilter.trim(),
+      q: state.skillFilter.trim(),
+      limit: MARKET_SKILL_PAGE_LIMIT
+    };
+  }
+
+  function marketQueryKey(params) {
+    return JSON.stringify({
+      category: params.category || "",
+      q: params.q || "",
+      limit: params.limit || MARKET_SKILL_PAGE_LIMIT
+    });
   }
 
   function visibleMarketSkills() {
@@ -325,9 +369,25 @@
   }
 
   function normalizedMarketSourceValues(skill) {
-    return [skill?.upstreamSource, skill?.sourceLabel, skill?.ownerLabel, skill?.category]
+    return [
+      skill?.upstreamSource,
+      skill?.sourceLabel,
+      skill?.ownerLabel,
+      skill?.category,
+      skill?.id,
+      skill?.relPath,
+      skill?.marketSourceLabel,
+      skill?.marketUpstreamSource,
+      skill?.marketUpstreamId,
+      skill?.marketUpstreamRepo,
+      skill?.marketUpstreamPath
+    ]
       .map((value) => String(value || "").trim().toLowerCase())
       .filter(Boolean);
+  }
+
+  function marketSourceValuesInclude(values, ...needles) {
+    return [...values].some((value) => needles.some((needle) => value.includes(needle)));
   }
 
   function marketSourceKey(skill) {
@@ -344,6 +404,7 @@
       || values.has("claude-marketplace")
       || values.has("anthropics/skills")
       || values.has("anthropic/skills")
+      || marketSourceValuesInclude(values, "claude-marketplace", "anthropics/skills", "anthropic/skills")
     ) return "claude";
     if (values.has("lobehub")) return "lobehub";
     return "";
@@ -366,40 +427,46 @@
   }
 
   function renderMarketCard(skill) {
-    const installed = marketSkillInstalled(skill);
+    const installedSkill = installedLocalSkillForMarket(skill);
     const installing = state.installingSkillIds.has(skill.id);
-    const action = installed
-      ? `<span class="skill-card-action installed">已添加</span>`
-      : `<button class="skill-card-action" type="button" data-skill-install="${escapeHtml(skill.id)}"${installing ? " disabled" : ""}>${installing ? "…" : "添加"}</button>`;
+    const action = installedSkill
+      ? `<button class="skill-card-action skill-card-action-use" type="button" data-skill-use="${escapeHtml(installedSkill.id)}">使用</button>`
+      : `<button class="skill-card-action skill-card-action-install" type="button" data-skill-install="${escapeHtml(skill.id)}"${installing ? " disabled" : ""}>${installing ? "…" : "添加"}</button>`;
     const meta = [skill.sourceLabel, formatInstallCount(skill.installCount)].filter(Boolean).join(" · ");
-    return `
-      <article class="skill-card market-card" data-market-id="${escapeHtml(skill.id)}">
-        <div class="skill-card-head">
-          <div class="skill-card-titlerow">
-            <strong>${escapeHtml(skill.name)}</strong>
-            ${action}
-          </div>
-          <p>${escapeHtml(skill.description || "")}</p>
-        </div>
-        <span class="skill-card-source">${marketSourceLogoHtml(skill)}<span class="skill-card-source-text">${escapeHtml(meta)}</span></span>
-      </article>
-    `;
+    return renderUnifiedSkillCard({
+      title: skill.name,
+      description: skill.description || "",
+      sourceHtml: `${marketSourceLogoHtml(skill)}<span class="skill-card-source-text">${escapeHtml(meta)}</span>`,
+      actionHtml: action,
+      className: "market-card",
+      attrs: `data-market-id="${escapeHtml(skill.id)}"`
+    });
   }
 
   function renderMarketView() {
     setText(els.skillPageTitle, "技能市场");
+    const params = marketRequestParams();
+    const queryKey = marketQueryKey(params);
     renderChips(marketCategoryEntries());
     if (!cloudSignedIn()) {
       els.skillCardGrid.innerHTML = `<div class="skill-empty-state">登录 Mia Cloud 后即可浏览技能市场。</div>`;
       return;
     }
     // Lazy-load the catalog the first time the market is shown.
-    if (!state.skillMarket.loaded && !state.skillMarket.loading) {
-      loadMarketSkills();
+    if (state.skillMarket.queryKey !== queryKey && !state.skillMarket.loading) {
+      loadMarketSkills(params);
       return;
     }
-    if (state.skillMarket.loading) {
+    if (!state.skillMarket.loaded && !state.skillMarket.loading) {
+      loadMarketSkills(params);
+      return;
+    }
+    if ((state.skillMarket.loading && !state.skillMarket.loaded) || state.skillMarket.queryKey !== queryKey) {
       els.skillCardGrid.innerHTML = `<div class="skill-empty-state">正在加载技能市场...</div>`;
+      return;
+    }
+    if (state.skillMarket.error && !(state.skillMarket.skills || []).length) {
+      els.skillCardGrid.innerHTML = `<div class="skill-empty-state">技能市场加载失败，请稍后重试。</div>`;
       return;
     }
     const shown = visibleMarketSkills();
@@ -413,6 +480,13 @@
         installMarketSkill(button.dataset.skillInstall);
       });
     });
+    els.skillCardGrid.querySelectorAll("[data-skill-use]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        useSkillInComposer(button.dataset.skillUse);
+      });
+    });
     els.skillCardGrid.querySelectorAll("[data-market-id]").forEach((card) => {
       card.addEventListener("contextmenu", (event) => {
         event.preventDefault();
@@ -421,21 +495,50 @@
     });
   }
 
-  async function loadMarketSkills() {
+  async function loadMarketSkills(params = marketRequestParams(), options = {}) {
     if (!state || !window.mia?.marketSkills) return;
-    state.skillMarket.loading = true;
+    const queryKey = marketQueryKey(params);
+    const forceRefresh = !!options.forceRefresh;
+    const background = !!options.background;
+    const hasCurrentPage = state.skillMarket.loaded && state.skillMarket.queryKey === queryKey;
+    if (forceRefresh && marketRefreshKeys.has(queryKey)) return;
+    if (forceRefresh) marketRefreshKeys.add(queryKey);
+    if (background || hasCurrentPage) {
+      state.skillMarket.refreshing = true;
+    } else {
+      state.skillMarket.loading = true;
+      state.skillMarket.loaded = false;
+    }
+    state.skillMarket.error = "";
+    state.skillMarket.queryKey = queryKey;
     renderSkillLibrary();
+    let shouldRefresh = false;
     try {
-      const data = await window.mia.marketSkills({});
+      const data = forceRefresh
+        ? await window.mia.marketSkills({ ...params, forceRefresh: true })
+        : await window.mia.marketSkills(params);
+      if (state.skillMarket.queryKey !== queryKey) return;
       state.skillMarket.skills = Array.isArray(data?.skills) ? data.skills : [];
       state.skillMarket.categories = Array.isArray(data?.categories) ? data.categories : [];
+      state.skillMarket.cached = Boolean(data?.cached);
+      state.skillMarket.stale = Boolean(data?.stale);
+      state.skillMarket.updatedAt = data?.updatedAt || "";
       state.skillMarket.loaded = true;
+      shouldRefresh = Boolean(data?.cached && data?.stale && !forceRefresh);
     } catch (error) {
       console.error("Failed to load skill market", error);
-      state.skillMarket.skills = [];
+      if (state.skillMarket.queryKey !== queryKey) return;
+      if (!background && !hasCurrentPage) state.skillMarket.skills = [];
+      state.skillMarket.error = error?.message || "load failed";
+      state.skillMarket.loaded = true;
     } finally {
-      state.skillMarket.loading = false;
-      renderSkillLibrary();
+      if (forceRefresh) marketRefreshKeys.delete(queryKey);
+      if (state.skillMarket.queryKey === queryKey) {
+        state.skillMarket.loading = false;
+        state.skillMarket.refreshing = false;
+        renderSkillLibrary();
+      }
+      if (shouldRefresh) loadMarketSkills(params, { forceRefresh: true, background: true });
     }
   }
 
