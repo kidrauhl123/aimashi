@@ -522,7 +522,12 @@
     // "@" must be at start of text or directly after whitespace so that
     // tokens like "foo@bar" never open the picker.
     if (i > 0 && !/\s/.test(value[i - 1])) return null;
-    return { start: i, filter: value.slice(i + 1, cursor) };
+    // Walk forward past any remaining token chars so a caret parked in the
+    // middle of an existing "@token" replaces the WHOLE token, not just the
+    // prefix to the left of the caret.
+    let end = cursor;
+    while (end < value.length && MENTION_TOKEN_CHAR.test(value[end])) end += 1;
+    return { start: i, end, filter: value.slice(i + 1, end) };
   }
 
   function filteredMentionMembers() {
@@ -546,11 +551,13 @@
         renderMentionMenu();
       }
       state.mentionStart = -1;
+      state.mentionEnd = -1;
       state.mentionFilter = "";
       return;
     }
     state.mentionMenuOpen = true;
     state.mentionStart = token.start;
+    state.mentionEnd = token.end;
     state.mentionFilter = token.filter;
     const items = filteredMentionMembers();
     if (state.mentionSelectedIndex >= items.length) {
@@ -603,14 +610,20 @@
     if (!state || !els || !els.chatInput) return;
     if (state.mentionStart < 0) return;
     const value = els.chatInput.value;
-    const cursor = els.chatInput.selectionStart || 0;
+    // Replace the WHOLE @token, not just the prefix up to the caret —
+    // otherwise a caret parked in the middle of an existing @kongling and
+    // a pick of "kongling" yields "@kongling ling".
+    const end = typeof state.mentionEnd === "number" && state.mentionEnd >= state.mentionStart
+      ? state.mentionEnd
+      : (els.chatInput.selectionStart || 0);
     const insert = `@${mentionInsertText(member)} `;
-    const next = value.slice(0, state.mentionStart) + insert + value.slice(cursor);
+    const next = value.slice(0, state.mentionStart) + insert + value.slice(end);
     els.chatInput.value = next;
     const caret = state.mentionStart + insert.length;
     els.chatInput.setSelectionRange(caret, caret);
     state.mentionMenuOpen = false;
     state.mentionStart = -1;
+    state.mentionEnd = -1;
     state.mentionFilter = "";
     state.mentionSelectedIndex = 0;
     renderMentionMenu();
@@ -623,6 +636,7 @@
     if (!state) return;
     state.mentionMenuOpen = false;
     state.mentionStart = -1;
+    state.mentionEnd = -1;
     state.mentionFilter = "";
     state.mentionSelectedIndex = 0;
     renderMentionMenu();

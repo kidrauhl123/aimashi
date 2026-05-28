@@ -128,6 +128,7 @@
       mentionFilter: "",
       mentionSelectedIndex: 0,
       mentionStart: -1,
+      mentionEnd: -1,
       openTraceKeys: new Set(),
       animatedTraceKeys: new Set(),
       codexModels: [],
