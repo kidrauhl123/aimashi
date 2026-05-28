@@ -1915,31 +1915,62 @@ function renderActiveChat() {
     const conversationType = conversationTypeForControls(conversation);
     const isDM = conversationType === "dm";
     const isFellow = conversationType === "fellow";
-    let peerAvatar = "";
-    let peerCrop = null;
-    let peerColor = "";
-    if (isDM) {
-      const parts = conversation.id.split(":");
-      const otherId = parts[1] === state.user?.id ? parts[2] : parts[1];
-      const friend = friendById(otherId);
-      peerAvatar = friend?.avatarImage || "";
-      peerCrop = friend?.avatarCrop || null;
-      peerColor = friend?.avatarColor || "";
-    } else if (isFellow) {
-      const fa = fellowAvatarFor(conversation, fellowKeyForConversation(conversation));
-      peerAvatar = fa?.image || "";
-      peerCrop = fa?.crop || null;
-      peerColor = fa?.color || "";
+    const isGroup = !isDM && !isFellow;
+    if (isGroup) {
+      // Group conversations need the same stacked-tile mosaic the sidebar
+      // paints (combinedConversationItems uses miaGroupTiles for this), so
+      // the chat-header avatar matches the row the user just clicked.
+      // applyAvatarMedia only knows the single-image case; we paint tiles
+      // directly into els.activeAvatar instead.
+      const records = state.conversationMembersCache.get(conversation.id) || [];
+      const tiles = window.miaGroupTiles.resolveGroupMemberTiles(records, groupTilesCtx());
+      const tileSpans = tiles.map((tile) => avatarHtml({
+        className: "group-avatar-tile",
+        image: tile.image,
+        crop: tile.crop,
+        color: tile.color || "#5e5ce6"
+      })).join("");
+      els.activeAvatar.className = "avatar group-avatar";
+      els.activeAvatar.setAttribute("data-count", String(tiles.length));
+      els.activeAvatar.removeAttribute("style");
+      els.activeAvatar.textContent = "";
+      els.activeAvatar.innerHTML = tileSpans;
+    } else {
+      let peerAvatar = "";
+      let peerCrop = null;
+      let peerColor = "";
+      if (isDM) {
+        const parts = conversation.id.split(":");
+        const otherId = parts[1] === state.user?.id ? parts[2] : parts[1];
+        const friend = friendById(otherId);
+        peerAvatar = friend?.avatarImage || "";
+        peerCrop = friend?.avatarCrop || null;
+        peerColor = friend?.avatarColor || "";
+      } else {
+        const fa = fellowAvatarFor(conversation, fellowKeyForConversation(conversation));
+        peerAvatar = fa?.image || "";
+        peerCrop = fa?.crop || null;
+        peerColor = fa?.color || "";
+      }
+      // Reset any leftover group state from a previous render.
+      els.activeAvatar.className = "avatar";
+      els.activeAvatar.removeAttribute("data-count");
+      els.activeAvatar.innerHTML = "";
+      applyAvatarMedia(
+        els.activeAvatar,
+        peerAvatar,
+        peerCrop,
+        peerColor || (isDM ? "#5e5ce6" : "#ff9f0a"),
+        (title[0] || "?").toUpperCase()
+      );
     }
-    applyAvatarMedia(
-      els.activeAvatar,
-      peerAvatar,
-      peerCrop,
-      peerColor || (isDM ? "#5e5ce6" : isFellow ? "#ff9f0a" : "#34c759"),
-      (title[0] || "?").toUpperCase()
-    );
     els.activeTitle.textContent = title;
-    els.activeMeta.textContent = isDM ? "私聊" : isFellow ? "AI 私聊" : "群聊";
+    const activeRun = state.cloudAgentRunsByConversation.get(conversation.id);
+    if (activeRun?.status === "running") {
+      els.activeMeta.innerHTML = `<span class="typing-status">正在输入<span class="typing-dots"><i></i><i></i><i></i></span></span>`;
+    } else {
+      els.activeMeta.textContent = isDM ? "私聊" : isFellow ? "AI 私聊" : "群聊";
+    }
     renderSessionMenu();
     renderComposerControls(conversation);
     const cached = state.messageCache.get(conversation.id);

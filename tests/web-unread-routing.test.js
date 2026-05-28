@@ -200,6 +200,30 @@ test("src/web/app.js stopped maintaining its own copy of the avatar preset table
   );
 });
 
+test("src/web/app.js paints group chat headers as a mosaic, not a single-letter circle", () => {
+  const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
+  // renderActiveChat must build the same stacked tiles for groups that the
+  // sidebar paints via miaGroupTiles. Without this the chat header for a
+  // group conversation falls through to a single-letter bubble.
+  const fn = source.match(/function renderActiveChat\([\s\S]*?\n\}/);
+  assert.ok(fn, "renderActiveChat must exist");
+  assert.match(
+    fn[0],
+    /miaGroupTiles\.resolveGroupMemberTiles/,
+    "renderActiveChat must resolve group member tiles for group conversations"
+  );
+  assert.match(
+    fn[0],
+    /els\.activeAvatar\.className\s*=\s*["']avatar group-avatar["']/,
+    "renderActiveChat must promote els.activeAvatar to a group-avatar mosaic when the active conversation is a group"
+  );
+  assert.match(
+    fn[0],
+    /els\.activeAvatar\.setAttribute\(["']data-count["']/,
+    "renderActiveChat must stamp data-count on the group avatar element (CSS layout reads it)"
+  );
+});
+
 test("src/web/app.js normalizes model + provider icon URLs through the same boundary as avatars", () => {
   const source = fs.readFileSync(path.join(ROOT, "src/web/app.js"), "utf8");
   // setModelAvatar must hand the looked-up icon path through
