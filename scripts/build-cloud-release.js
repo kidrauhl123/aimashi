@@ -343,6 +343,7 @@ function verifyRelease() {
     "api/src/shared/engine-contracts.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
+    "api/src/shared/agent-permissions.js",
     "api/src/permission-modes.js",
     "api/skills/commit-craft/SKILL.md",
     "web/index.html",
@@ -360,6 +361,7 @@ function verifyRelease() {
     "web/icon-512.png",
     "web/manifest.webmanifest",
     "web/shared/fellow-runtime-control.js",
+    "web/shared/agent-permissions.js",
     "smoke-cloud.js",
     "prepare-cloud-smoke-account.js",
     "doctor-cloud.js",
@@ -397,6 +399,7 @@ function verifyRelease() {
     "api/src/shared/engine-contracts.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
+    "api/src/shared/agent-permissions.js",
     "api/src/permission-modes.js",
     "web/app.js",
     "web/admin-model.js",
@@ -555,6 +558,7 @@ function main() {
   copyFile("src/shared/engine-contracts.js", path.join(apiDir, "src", "shared", "engine-contracts.js"));
   copyFile("src/shared/group-fellow-routing.js", path.join(apiDir, "src", "shared", "group-fellow-routing.js"));
   copyFile("src/shared/skill-safety.js", path.join(apiDir, "src", "shared", "skill-safety.js"));
+  copyFile("src/shared/agent-permissions.js", path.join(apiDir, "src", "shared", "agent-permissions.js"));
   copyFile("src/permission-modes.js", path.join(apiDir, "src", "permission-modes.js"));
   copyDir("skills", path.join(apiDir, "skills"));
   copyDir("src/web", webDir);
@@ -574,6 +578,7 @@ function main() {
   copyFile("src/shared/group-tiles.js", path.join(webDir, "shared", "group-tiles.js"));
   copyFile("src/shared/send-pipeline.js", path.join(webDir, "shared", "send-pipeline.js"));
   copyFile("src/shared/fellow-runtime-control.js", path.join(webDir, "shared", "fellow-runtime-control.js"));
+  copyFile("src/shared/agent-permissions.js", path.join(webDir, "shared", "agent-permissions.js"));
   copyFile("src/shared/trace-blocks.js", path.join(webDir, "shared", "trace-blocks.js"));
   copyFile("src/shared/mention-render.js", path.join(webDir, "shared", "mention-render.js"));
   copyFile("src/renderer/helpers/markdown-helpers.js", path.join(webDir, "helpers", "markdown-helpers.js"));
