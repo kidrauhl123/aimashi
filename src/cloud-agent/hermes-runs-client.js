@@ -26,32 +26,19 @@ function parseErrorMessage(text) {
   }
 }
 
-function parseSseEvents(text, onEvent = null) {
-  const events = [];
-  let content = "";
-  for (const block of String(text || "").split(/\n\n+/)) {
-    const dataLines = block
-      .split(/\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim());
-    if (!dataLines.length) continue;
-    const data = dataLines.join("\n");
-    if (data === "[DONE]") continue;
-    let event = null;
-    try {
-      event = JSON.parse(data);
-    } catch {
-      event = { type: "raw", data };
-    }
-    events.push(event);
-    if (typeof onEvent === "function") onEvent(event);
-    const delta = event.delta || event.content_delta || event.text_delta || "";
-    if (typeof delta === "string") content += delta;
-    if (typeof event.content === "string" && (event.type === "message.completed" || event.type === "run.completed")) {
-      content = event.content;
-    }
+function parseSseBlock(block) {
+  const dataLines = block
+    .split(/\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  if (!dataLines.length) return null;
+  const data = dataLines.join("\n");
+  if (data === "[DONE]") return null;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return { type: "raw", data };
   }
-  return { events, content };
 }
 
 function createHermesRunsClient(deps = {}) {
@@ -76,6 +63,12 @@ function createHermesRunsClient(deps = {}) {
     return runId;
   }
 
+  // Consume the run's SSE stream INCREMENTALLY so events surface as they arrive.
+  // This matters for the approval handshake: when a tool needs approval the run
+  // pauses at "waiting_for_approval" and the stream stays open, so reading the
+  // body to completion first (the old behavior) would hang and never deliver the
+  // approval.request event. onEvent fires live; the caller POSTs the approval on
+  // a separate path, which unblocks the server and resumes the stream.
   async function readEvents({ baseUrl, apiKey, runId, signal, onEvent }) {
     const response = await fetchImpl(`${cleanBaseUrl(baseUrl)}/v1/runs/${encodeURIComponent(runId)}/events`, {
       method: "GET",
@@ -84,9 +77,66 @@ function createHermesRunsClient(deps = {}) {
       },
       signal
     });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(parseErrorMessage(text) || `Hermes events failed: ${response.status}`);
+    }
+
+    const events = [];
+    let content = "";
+    const handleEvent = (event) => {
+      if (!event) return;
+      events.push(event);
+      if (typeof onEvent === "function") onEvent(event);
+      const delta = event.delta || event.content_delta || event.text_delta || "";
+      if (typeof delta === "string") content += delta;
+      if (typeof event.content === "string" && (event.type === "message.completed" || event.type === "run.completed")) {
+        content = event.content;
+      }
+    };
+
+    const body = response.body;
+    if (body && typeof body.getReader === "function") {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\n\n+/);
+        buffer = parts.pop() ?? "";
+        for (const block of parts) handleEvent(parseSseBlock(block));
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) handleEvent(parseSseBlock(buffer));
+    } else {
+      // Fallback for fetch mocks / responses without a streamable body.
+      const text = await response.text();
+      for (const block of String(text || "").split(/\n\n+/)) handleEvent(parseSseBlock(block));
+    }
+    return { events, content };
+  }
+
+  // Resolve a pending run approval. choice ∈ once | session | always | deny;
+  // pass all:true to clear every pending approval on the run at once.
+  async function submitApproval({ baseUrl, apiKey, runId, choice, all = false, signal }) {
+    const response = await fetchImpl(`${cleanBaseUrl(baseUrl)}/v1/runs/${encodeURIComponent(runId)}/approval`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      body: JSON.stringify({ choice, ...(all ? { all: true } : {}) }),
+      signal
+    });
     const text = await response.text();
-    if (!response.ok) throw new Error(parseErrorMessage(text) || `Hermes events failed: ${response.status}`);
-    return parseSseEvents(text, onEvent);
+    if (!response.ok) throw new Error(parseErrorMessage(text) || `Hermes approval failed: ${response.status}`);
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: true };
+    }
   }
 
   async function runChat(args = {}) {
@@ -158,7 +208,7 @@ function createHermesRunsClient(deps = {}) {
     return { runId, content: stream.content || "", events: stream.events };
   }
 
-  return { runChat };
+  return { runChat, submitApproval };
 }
 
 module.exports = { createHermesRunsClient };

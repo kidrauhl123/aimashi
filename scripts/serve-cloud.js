@@ -1691,6 +1691,39 @@ async function handleRequest(req, res, context) {
       return writeJson(res, 201, payload);
     }
 
+    // POST /api/conversations/:id/runs/:runId/approval — resolve an interactive
+    // tool-permission request raised by an in-flight cloud Hermes run. The
+    // approval.request event was delivered to the run owner's web client over the
+    // cloud_agent_run_event stream; this carries their decision back to the run's
+    // Hermes worker. Only the run owner may answer (spec §13).
+    const runApprovalMatch = url.pathname.match(/^\/api\/conversations\/([A-Za-z0-9_.:-]+)\/runs\/([A-Za-z0-9_-]+)\/approval$/);
+    if (req.method === "POST" && runApprovalMatch) {
+      const conversationId = runApprovalMatch[1];
+      const runId = runApprovalMatch[2];
+      if (!userIsMemberOfConversation(context.socialStore, conversationId, auth.user.id)) {
+        return writeError(res, 403, "not a member of this conversation");
+      }
+      if (!context.cloudAgentDispatcher) return writeError(res, 503, "cloud agent dispatcher unavailable");
+      const body = await readJson(req);
+      const decision = String(body.decision || "").trim();
+      const allowed = new Set(["allow_once", "allow_always", "deny"]);
+      if (!allowed.has(decision)) {
+        return writeError(res, 400, "decision must be one of: allow_once, allow_always, deny");
+      }
+      let result;
+      try {
+        result = await context.cloudAgentDispatcher.respondApproval({ userId: auth.user.id, runId, conversationId, decision });
+      } catch (error) {
+        return writeError(res, 502, `approval relay failed: ${error?.message || error}`);
+      }
+      if (!result || result.ok === false) {
+        const message = result?.error || "approval not resolved";
+        const status = message.includes("not found") ? 404 : message.includes("owner") ? 403 : 409;
+        return writeError(res, status, message);
+      }
+      return writeJson(res, 200, { ok: true, decision });
+    }
+
     // DELETE /api/conversations/:id/messages/:msgId — WeChat-style local delete: hide
     // the message from THIS user's view only, then tell their other devices to
     // drop it too. Other conversation members keep their copy; a member can never

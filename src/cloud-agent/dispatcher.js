@@ -2,6 +2,7 @@ const { parseAttachmentsFromMessage } = require("./attachment-materializer.js");
 const { createGroupOrchestrator } = require("./group-orchestrator.js");
 const { fellowForMember } = require("../shared/group-fellow-routing.js");
 const { MemberKind } = require("../shared/conversation-kinds.js");
+const { decisionToHermesChoice } = require("../shared/agent-permissions.js");
 
 function memberDisplayName(member, fellows) {
   if (member?.member_kind === MemberKind.Fellow) {
@@ -252,6 +253,35 @@ function createCloudAgentDispatcher(deps = {}) {
     }
   }
 
+  // Resolve a pending Hermes tool approval for an in-flight run. The approval.request
+  // event was broadcast to the run owner's web client (via onEvent → cloud_agent_run_event);
+  // this routes the owner's decision back to that run's Hermes worker. Only the run owner
+  // may answer — even when another group member triggered the run (spec §13).
+  async function respondApproval({ userId, runId, conversationId, decision }) {
+    const run = cloudAgentRunsStore.getRun(String(runId || ""));
+    if (!run) return { ok: false, error: "run not found" };
+    if (String(run.userId) !== String(userId || "")) {
+      return { ok: false, error: "only the run owner can respond to this approval" };
+    }
+    if (conversationId && String(run.conversationId) !== String(conversationId)) {
+      return { ok: false, error: "run does not belong to this conversation" };
+    }
+    const hermesRunId = String(run.hermesRunId || "").trim();
+    if (!hermesRunId) return { ok: false, error: "run has no hermes run id yet" };
+    if (typeof hermesRunsClient.submitApproval !== "function") {
+      return { ok: false, error: "hermes client does not support approvals" };
+    }
+    const choice = decisionToHermesChoice(decision);
+    const worker = await workerManager.ensureWorker(run.userId);
+    await hermesRunsClient.submitApproval({
+      baseUrl: worker.baseUrl,
+      apiKey: worker.apiKey,
+      runId: hermesRunId,
+      choice
+    });
+    return { ok: true, choice };
+  }
+
   async function dispatchFellow({ ownerId, fellowId, conversationId, message, members, fellows, recentMessages }) {
     const cloudBinding = runtimeBindingsStore.getEnabledBinding(ownerId, fellowId, "cloud-hermes");
     if (cloudBinding) {
@@ -352,7 +382,7 @@ function createCloudAgentDispatcher(deps = {}) {
     }
   }
 
-  return { handleUserMessage, invokeFellow, idle };
+  return { handleUserMessage, invokeFellow, respondApproval, idle };
 }
 
 module.exports = { createCloudAgentDispatcher };

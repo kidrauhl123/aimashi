@@ -46,6 +46,11 @@ function createHermesWorkerManager(options = {}) {
   const fetchImpl = options.fetch || fetch;
   const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const healthTimeoutMs = Number(options.healthTimeoutMs ?? process.env.MIA_CLOUD_HERMES_START_TIMEOUT_MS ?? 45000);
+  // Approval mode for the worker's command guard. "ask" surfaces dangerous
+  // commands as approval.request events over the runs-API (consumed by the
+  // dispatcher and shown as a web permission banner). Overridable so ops can
+  // fall back to "yolo" without a code change if a run path misbehaves.
+  const approvalsMode = String(options.approvalsMode || process.env.MIA_CLOUD_HERMES_APPROVALS_MODE || "ask").trim() || "ask";
 
   function pathsForUser(userId) {
     const id = assertSafeUserId(userId);
@@ -107,7 +112,7 @@ function createHermesWorkerManager(options = {}) {
       "    enabled: false",
       "",
       "approvals:",
-      "  mode: \"yolo\"",
+      `  mode: ${JSON.stringify(approvalsMode)}`,
       "  timeout: 60",
       "",
       "agent:",

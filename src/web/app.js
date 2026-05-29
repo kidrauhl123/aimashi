@@ -864,6 +864,28 @@ function cloudRunFor(conversationId, runId = "") {
   return run;
 }
 
+// Pull a human-readable line out of a Hermes approval.request event. The payload
+// shape varies by guard (command / reason / tool), so probe the common fields and
+// fall back to a compact JSON dump.
+function approvalPreview(event = {}) {
+  for (const key of ["command", "cmd", "preview", "reason", "detail", "description", "message"]) {
+    if (typeof event[key] === "string" && event[key].trim()) return event[key].trim();
+  }
+  const data = event.data && typeof event.data === "object" ? event.data : null;
+  if (data) {
+    for (const key of ["command", "cmd", "preview", "reason", "detail", "description", "message"]) {
+      if (typeof data[key] === "string" && data[key].trim()) return data[key].trim();
+    }
+  }
+  try {
+    const { event: _e, run_id: _r, timestamp: _t, choices: _c, ...rest } = event;
+    const json = JSON.stringify(rest);
+    return json && json !== "{}" ? json.slice(0, 400) : "";
+  } catch {
+    return "";
+  }
+}
+
 function normalizeToolStatus(status) {
   const value = String(status || "").trim();
   if (value === "complete" || value === "completed") return "completed";
@@ -999,10 +1021,25 @@ function handleCloudEvent(envelope) {
     } else if (name === "run.completed") {
       run.text = hermesEventText(event) || run.text;
       run.status = "complete";
+      run.permission = null;
     } else if (name === "run.failed") {
       run.status = "error";
+      run.permission = null;
     } else if (name === "run.cancelled") {
       run.status = "cancelled";
+      run.permission = null;
+    } else if (name === "approval.request") {
+      // Interactive tool approval: the run paused waiting for the owner. Show a
+      // banner; the decision is POSTed back so the cloud can resume the run.
+      run.permission = {
+        runId: envelope.runId || run.runId || "",
+        preview: approvalPreview(event),
+        toolName: String(event.tool || event.tool_name || event.name || "").trim(),
+        createdAt: new Date().toISOString(),
+      };
+      run.status = "running";
+    } else if (name === "approval.responded") {
+      run.permission = null;
     } else if (name === "reasoning.available" || name === "reasoning_delta") {
       run.reasoning = `${run.reasoning || ""}${hermesEventText(event)}`;
       if (run.reasoning && !run.reasoning.endsWith("\n")) run.reasoning += "\n";
@@ -1960,12 +1997,67 @@ function buildCloudAgentStreamingArticle(conversation, run) {
     expanded: true,
     scopeKey: `web-run:${run.runId || conversation.id}`,
   });
+  const permissionHtml = permissionBannerHtml(run.permission);
   return `
     <article class="message assistant streaming">
       ${avatarMarkup}
-      <div class="message-stack">${traceHtml}${textHtml}</div>
+      <div class="message-stack">${traceHtml}${textHtml}${permissionHtml}</div>
     </article>
   `;
+}
+
+// Banner shown while a run is paused waiting for the owner to approve a tool.
+// Buttons carry a decision in the shared allow_once / allow_always / deny
+// vocabulary; the click handler POSTs it back to resume the run.
+function permissionBannerHtml(permission) {
+  if (!permission || !permission.runId) return "";
+  const { PermissionDecision } = window.miaAgentPermissions || {};
+  const allowOnce = PermissionDecision?.AllowOnce || "allow_once";
+  const allowAlways = PermissionDecision?.AllowAlways || "allow_always";
+  const deny = PermissionDecision?.Deny || "deny";
+  const runId = escapeHtml(permission.runId);
+  const tool = permission.toolName ? `<strong>${escapeHtml(permission.toolName)}</strong>` : "工具";
+  const preview = permission.preview
+    ? `<pre class="permission-preview">${escapeHtml(permission.preview)}</pre>`
+    : "";
+  return `
+    <div class="permission-banner" data-permission-run="${runId}">
+      <div class="permission-head">${tool} 请求执行，需要你批准</div>
+      ${preview}
+      <div class="permission-actions">
+        <button type="button" class="permission-deny" data-permission-decision="${deny}">拒绝</button>
+        <button type="button" class="permission-allow" data-permission-decision="${allowOnce}">允许</button>
+        <button type="button" class="permission-always" data-permission-decision="${allowAlways}">始终允许</button>
+      </div>
+    </div>
+  `;
+}
+
+// Send the owner's allow/deny decision back to the cloud, which resumes the run's
+// Hermes worker. Clear the banner optimistically so the buttons can't double-fire.
+async function respondToPermission(runId, decision) {
+  if (!runId || !decision) return;
+  const conversationId = state.activeConversationId;
+  const run = state.cloudAgentRunsByConversation.get(conversationId);
+  const prior = run && run.permission && run.permission.runId === runId ? run.permission : null;
+  if (prior) {
+    run.permission = null;
+    renderActiveChat();
+  }
+  try {
+    await api(`/api/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/approval`, {
+      method: "POST",
+      body: { decision }
+    });
+  } catch (error) {
+    console.warn("[web] permission response failed:", error?.message || error);
+    // The run is still paused on the worker — restore the banner so the owner
+    // can retry instead of being stuck until Hermes' approval timeout fires.
+    if (prior && run && !run.permission) {
+      run.permission = prior;
+      if (conversationId === state.activeConversationId) renderActiveChat();
+    }
+  }
 }
 
 function renderCommandResultHtml(commandResult) {
@@ -2958,6 +3050,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 els.chat.addEventListener("click", async (event) => {
+  const permissionButton = event.target.closest("[data-permission-decision]");
+  if (permissionButton && els.chat.contains(permissionButton)) {
+    event.preventDefault();
+    await respondToPermission(
+      permissionButton.closest("[data-permission-run]")?.dataset.permissionRun || "",
+      permissionButton.dataset.permissionDecision
+    );
+    return;
+  }
+
   const copyButton = event.target.closest("[data-copy-code]");
   if (copyButton && els.chat.contains(copyButton)) {
     const code = copyButton.closest(".message-code-block")?.querySelector("code");

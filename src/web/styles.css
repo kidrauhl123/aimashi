@@ -3285,6 +3285,73 @@ p {
    Mirrors src/renderer/styles/chat.css trace block styles so web shares the
    same details/summary affordance as desktop. */
 
+.permission-banner {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, rgba(120, 120, 130, 0.28));
+  border-left: 3px solid #e0a106;
+  border-radius: 12px;
+  background: color-mix(in srgb, #e0a106 8%, var(--surface, #fff));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-banner .permission-head {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text, #1f2328);
+}
+
+.permission-banner .permission-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(120, 120, 130, 0.1);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.permission-banner .permission-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.permission-banner .permission-actions button {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(120, 120, 130, 0.28));
+  background: var(--surface, #fff);
+  color: var(--text, #1f2328);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.permission-banner .permission-actions button:hover {
+  background: rgba(120, 120, 130, 0.12);
+}
+
+.permission-banner .permission-allow {
+  border-color: #1b8e57;
+  color: #1b8e57;
+}
+
+.permission-banner .permission-always {
+  background: #1b8e57;
+  border-color: #1b8e57;
+  color: #fff;
+}
+
+.permission-banner .permission-deny {
+  color: #b4493b;
+}
+
 .trace {
   width: 100%;
   display: flex;

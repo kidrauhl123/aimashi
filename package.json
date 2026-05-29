@@ -46,7 +46,7 @@
     "dist:mac": "npm run hermes:runtime:mac-arm64 && electron-builder --mac dir && node scripts/create-mac-dmg.js"
   },
   "hermes": {
-    "version": "2026.5.7",
+    "version": "2026.5.29",
     "pythonVersion": "3.11.13",
     "pbsRelease": "20251007"
   },

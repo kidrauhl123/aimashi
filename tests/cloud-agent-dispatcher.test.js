@@ -426,3 +426,48 @@ test("explicit fellowId on invokeFellow runs that fellow regardless of routing",
     ctx.cleanup();
   }
 });
+
+test("respondApproval routes the owner's decision to the run's Hermes worker", async () => {
+  const ctx = setup();
+  const approvalCalls = [];
+  try {
+    const run = ctx.cloudAgentRunsStore.createRun({
+      userId: ctx.user.id,
+      fellowId: "mia",
+      conversationId: ctx.conversation.id,
+      triggerMessageId: "m1"
+    });
+    ctx.cloudAgentRunsStore.markRunning(run.id, "hermes_run_9");
+    const dispatcher = makeDispatcher(ctx, {
+      hermesRunsClient: {
+        async runChat() { return { runId: "hr", content: "", events: [] }; },
+        async submitApproval(args) { approvalCalls.push(args); return { resolved: 1 }; }
+      }
+    });
+
+    const ok = await dispatcher.respondApproval({ userId: ctx.user.id, runId: run.id, decision: "allow_always" });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.choice, "always");
+    assert.equal(approvalCalls.length, 1);
+    assert.equal(approvalCalls[0].runId, "hermes_run_9");
+    assert.equal(approvalCalls[0].choice, "always");
+    assert.equal(approvalCalls[0].baseUrl, "http://worker");
+
+    // Only the run owner may answer — a different member is refused without a worker call.
+    const denied = await dispatcher.respondApproval({ userId: "someone_else", runId: run.id, decision: "deny" });
+    assert.equal(denied.ok, false);
+    assert.equal(approvalCalls.length, 1);
+
+    // A run id from a different conversation is refused (no extra worker call).
+    const mismatched = await dispatcher.respondApproval({
+      userId: ctx.user.id,
+      runId: run.id,
+      conversationId: "some_other_conversation",
+      decision: "allow_once"
+    });
+    assert.equal(mismatched.ok, false);
+    assert.equal(approvalCalls.length, 1);
+  } finally {
+    ctx.cleanup();
+  }
+});
