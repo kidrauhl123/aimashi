@@ -11,9 +11,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Hermes ≥0.15 dropped the [web] extra; the runs API server (gateway/platforms/
+# api_server.py) needs aiohttp, which now lives in the [messaging]/[slack] extras.
+# Install the base package plus aiohttp directly so the API server adapter loads.
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir \
-      "hermes-agent[web] @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v${HERMES_VERSION}.tar.gz"
+      "hermes-agent @ https://github.com/NousResearch/hermes-agent/archive/refs/tags/v${HERMES_VERSION}.tar.gz" \
+      "aiohttp==3.13.3"
 
 COPY mia_plugins /opt/mia-plugins/mia_plugins
 COPY entrypoint.sh /usr/local/bin/mia-hermes-entrypoint
