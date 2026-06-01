@@ -24,7 +24,7 @@ export default function ContactsScreen() {
     ...fellows.map((f, i) => {
       const id = f.id || f.key || String(i);
       const title = f.name || String(id);
-      return { key: `fe:${id}`, title, sub: "FELLOW", avatar: resolveAvatar(id, title, f.avatarImage || "", f.avatarCrop || null) };
+      return { key: `fe:${id}`, title, sub: "Fellow", avatar: resolveAvatar(id, title, f.avatarImage || "", f.avatarCrop || null) };
     }),
   ];
   return (
@@ -56,8 +56,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
     borderBottomWidth: hairlineWidth,
-    borderBottomColor: color.hairline,
+    borderBottomColor: color.line,
   },
   col: { flex: 1, gap: 3 },
-  sub: { color: color.accent },
+  sub: {},
 });

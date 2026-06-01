@@ -4,37 +4,43 @@ import { color, radius, space } from "../theme";
 import TraceBlock from "./TraceBlock";
 import type { ChatMessage } from "../api/types";
 
-// Swiss:自己 = 信号橙底白字、锐角;对方 = 白卡 + 1px 黑描边。
+// 对齐桌面 .bubble:对方=浅灰深字、自己=靛蓝白字,圆角 18,padding 10/15。
 export default function MessageBubble({ msg }: { msg: ChatMessage }) {
   const own = msg.isOwn;
-  const textColor = own ? color.accentText : color.ink;
+  const textColor = own ? color.userBubbleText : color.ink;
   return (
-    <View
-      style={[
-        styles.bubble,
-        own ? styles.own : styles.other,
-        msg.isPending ? styles.pending : null,
-        msg.failed ? styles.failed : null,
-      ]}
-    >
-      {!own && msg.trace ? <TraceBlock trace={msg.trace} /> : null}
-      <Markdown
-        style={{
-          body: { color: textColor, margin: 0, fontSize: 15, lineHeight: 21 },
-          code_inline: { backgroundColor: own ? "rgba(255,255,255,0.2)" : color.surfaceAlt, color: textColor },
-          fence: { backgroundColor: own ? "rgba(255,255,255,0.18)" : color.surfaceAlt, color: textColor, borderWidth: 0 },
-        }}
+    <View style={[styles.row, own ? styles.rowOwn : styles.rowOther]}>
+      <View
+        style={[
+          styles.bubble,
+          own ? styles.own : styles.other,
+          msg.isPending ? styles.pending : null,
+          msg.failed ? styles.failed : null,
+        ]}
       >
-        {msg.bodyMd || ""}
-      </Markdown>
+        {!own && msg.trace ? <TraceBlock trace={msg.trace} /> : null}
+        <Markdown
+          style={{
+            body: { color: textColor, margin: 0, fontSize: 15, lineHeight: 23 },
+            code_inline: { backgroundColor: own ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.06)", color: textColor, borderWidth: 0 },
+            fence: { backgroundColor: color.codeBg, color: color.codeText, borderWidth: 0, borderRadius: 10, padding: 10 },
+            link: { color: own ? "#fff" : color.accent },
+          }}
+        >
+          {msg.bodyMd || ""}
+        </Markdown>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bubble: { maxWidth: "84%", paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.md, marginVertical: 3 },
-  own: { alignSelf: "flex-end", backgroundColor: color.accent, borderTopRightRadius: radius.none },
-  other: { alignSelf: "flex-start", backgroundColor: color.surface, borderWidth: 1, borderColor: color.rule, borderTopLeftRadius: radius.none },
-  pending: { opacity: 0.5 },
-  failed: { borderWidth: 1.5, borderColor: color.danger },
+  row: { width: "100%", marginVertical: 3 },
+  rowOwn: { alignItems: "flex-end" },
+  rowOther: { alignItems: "flex-start" },
+  bubble: { maxWidth: "78%", paddingHorizontal: 15, paddingVertical: 10, borderRadius: radius.bubble },
+  own: { backgroundColor: color.userBubble },
+  other: { backgroundColor: color.bubbleOther },
+  pending: { opacity: 0.55 },
+  failed: { borderWidth: 1, borderColor: color.danger },
 });

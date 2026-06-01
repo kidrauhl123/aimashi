@@ -1,6 +1,6 @@
 import { View, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { color, space } from "../theme";
+import { color, space, radius, hairlineWidth } from "../theme";
 import { Label, Body } from "../ui/Text";
 import Button from "../ui/Button";
 import { useApi } from "../state/clientProvider";
@@ -50,13 +50,20 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: color.surface,
-    borderTopWidth: 2,
-    borderTopColor: color.rule,
+    borderTopLeftRadius: radius.bubble,
+    borderTopRightRadius: radius.bubble,
+    borderTopWidth: hairlineWidth,
+    borderColor: color.line,
     paddingHorizontal: space.lg,
     paddingTop: space.lg,
+    shadowColor: "#141828",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 16,
   },
   markRow: { flexDirection: "row", alignItems: "center", gap: space.sm, marginBottom: space.sm },
-  mark: { width: 10, height: 10, backgroundColor: color.accent },
+  mark: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.warn },
   preview: { marginBottom: space.lg },
   actions: { flexDirection: "row", gap: space.sm },
   btn: { flex: 1, paddingHorizontal: space.xs },

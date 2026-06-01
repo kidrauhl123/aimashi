@@ -1,5 +1,5 @@
 import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle } from "react-native";
-import { color, radius, space, font } from "../theme";
+import { color, radius, space } from "../theme";
 
 type Variant = "primary" | "outline" | "ghost" | "danger";
 
@@ -12,8 +12,9 @@ interface Props {
   style?: ViewStyle;
 }
 
-// Swiss 按钮:锐利小圆角、粗体大写、信号橙 primary、黑描边 outline。
+// 按钮对齐桌面 .primary-action:靛蓝实底、圆角 12、粗体(非大写)。
 export default function Button({ label, onPress, variant = "primary", disabled, busy, style }: Props) {
+  const onAccent = variant === "primary";
   return (
     <Pressable
       onPress={onPress}
@@ -30,29 +31,26 @@ export default function Button({ label, onPress, variant = "primary", disabled, 
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={variant === "primary" ? color.accentText : color.ink} />
+        <ActivityIndicator color={onAccent ? color.accentText : color.accent} />
       ) : (
-        <Text style={[styles.label, variant === "primary" ? styles.labelOnAccent : styles.labelInk]}>{label}</Text>
+        <Text style={[styles.label, onAccent ? styles.labelOnAccent : variant === "danger" ? styles.labelDanger : styles.labelInk]}>
+          {label}
+        </Text>
       )}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  base: {
-    height: 48,
-    borderRadius: radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: space.lg,
-  },
+  base: { height: 46, borderRadius: radius.md, alignItems: "center", justifyContent: "center", paddingHorizontal: space.lg },
   primary: { backgroundColor: color.accent },
-  outline: { backgroundColor: color.surface, borderWidth: 1.5, borderColor: color.rule },
+  outline: { backgroundColor: color.surface, borderWidth: 1, borderColor: color.line },
   ghost: { backgroundColor: "transparent" },
-  danger: { backgroundColor: color.surface, borderWidth: 1.5, borderColor: color.danger },
-  disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.85 },
-  label: { fontFamily: font.display, fontSize: 14, letterSpacing: 0.8, textTransform: "uppercase" },
+  danger: { backgroundColor: color.surfaceMuted },
+  disabled: { opacity: 0.45 },
+  pressed: { opacity: 0.88 },
+  label: { fontSize: 15, fontWeight: "700" },
   labelOnAccent: { color: color.accentText },
   labelInk: { color: color.ink },
+  labelDanger: { color: color.danger },
 });

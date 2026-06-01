@@ -93,16 +93,16 @@ export default function ChatScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: color.bg },
+  root: { flex: 1, backgroundColor: color.chatBg },
   list: { flex: 1 },
   composer: {
     flexDirection: "row",
     gap: space.sm,
     paddingHorizontal: space.md,
     paddingTop: space.sm,
-    backgroundColor: color.bg,
+    backgroundColor: color.surface,
     borderTopWidth: hairlineWidth,
-    borderTopColor: color.rule,
+    borderTopColor: color.line,
   },
   input: { flex: 1 },
   send: { paddingHorizontal: space.lg },

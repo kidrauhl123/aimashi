@@ -5,7 +5,7 @@ import { buildConversationListItems } from "../logic/conversationList";
 import Avatar from "../components/Avatar";
 import ConnBanner from "../components/ConnBanner";
 import { BodyStrong, Sub } from "../ui/Text";
-import { color, space, font, hairlineWidth } from "../theme";
+import { color, space, hairlineWidth } from "../theme";
 import type { MessagesStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<MessagesStackParamList, "Conversations">;
@@ -56,12 +56,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
     borderBottomWidth: hairlineWidth,
-    borderBottomColor: color.hairline,
+    borderBottomColor: color.line,
     backgroundColor: color.bg,
   },
-  pressed: { backgroundColor: color.surfaceAlt },
+  pressed: { backgroundColor: color.surfaceMuted },
   textCol: { flex: 1, minWidth: 0, gap: 2 },
   sub: { marginTop: 1 },
-  badge: { backgroundColor: color.accent, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: "center", justifyContent: "center" },
-  badgeText: { color: color.accentText, fontSize: 12, fontFamily: font.semibold },
+  badge: { backgroundColor: color.accent, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  badgeText: { color: color.accentText, fontSize: 12, fontWeight: "600" },
 });
