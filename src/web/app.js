@@ -1552,7 +1552,10 @@ function sessionTitleForConversation(conversation) {
 }
 
 function sessionConversationsForConversation(conversation) {
-  return sessionHistory.sessionConversationsForConversation(conversation, state.conversations, { messageCache: state.messageCache });
+  return sessionHistory.sessionConversationsForConversation(conversation, state.conversations, {
+    messageCache: state.messageCache,
+    activeConversationId: state.activeConversationId
+  });
 }
 
 function updateCurrentSessionTitle(title) {

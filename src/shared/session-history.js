@@ -74,10 +74,35 @@
     if (conversationType(conversation, conversation.id || "") !== "fellow") return [conversation];
     const key = fellowKey(conversation);
     if (!key) return [conversation];
+    // Only surface sessions that actually hold a conversation, plus whichever
+    // one is open right now (a freshly created session has no messages yet but
+    // must still show while the user is in it). This hides the empty "新对话"
+    // drafts — e.g. the ones a failed/retried create left behind — without
+    // deleting anything: a session reappears the moment it gets a first message.
+    //
+    // Emptiness is judged by updated_at === created_at (a first message bumps
+    // updated_at) rather than the message cache, because the cache is only
+    // pre-warmed for a capped number of conversations — relying on it would
+    // wrongly hide real sessions whose messages just weren't fetched yet.
+    const activeId = String(options.activeConversationId || "");
     return (Array.isArray(conversations) ? conversations : [])
       .filter((candidate) => conversationType(candidate, candidate?.id || "") === "fellow")
       .filter((candidate) => fellowKey(candidate) === key)
+      .filter((candidate) =>
+        conversationHasContent(candidate, options.messageCache)
+        || String(candidate?.id || "") === activeId)
       .sort((a, b) => compareConversationActivity(a, b, options.messageCache));
+  }
+
+  // A session has content if a message bumped its updated_at past created_at,
+  // or if the (best-effort) message cache already holds messages for it. Either
+  // signal alone is enough — the timestamp check works even when the cache is
+  // cold, the cache check covers records whose timestamps somehow match.
+  function conversationHasContent(conversation, messageCache) {
+    if (hasCachedMessages(conversation, messageCache)) return true;
+    const created = String(conversation?.created_at || conversation?.createdAt || "").trim();
+    const updated = String(conversation?.updated_at || conversation?.updatedAt || "").trim();
+    return Boolean(created && updated && updated !== created);
   }
 
   function preferredFellowSidebarConversation(current, candidate, options = {}) {

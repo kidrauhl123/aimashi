@@ -1529,7 +1529,8 @@ function cloudSessionTitle(conversation) {
 
 function cloudSessionConversationsForConversation(conversation) {
   return sessionHistory.sessionConversationsForConversation(conversation, window.miaSocial?.moduleState?.conversations || [], {
-    messageCache: window.miaSocial?.moduleState?.messageCache
+    messageCache: window.miaSocial?.moduleState?.messageCache,
+    activeConversationId: window.miaSocial?.getActiveConversationId?.()
   });
 }
 
