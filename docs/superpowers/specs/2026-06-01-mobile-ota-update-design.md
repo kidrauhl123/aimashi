@@ -1,7 +1,12 @@
 # Mobile 自更新设计 · Web OTA + APK 自更新
 
+> ⚠️ **已被取代(2026-06-01)**:手机端方向改为 React Native + Expo(见
+> `2026-06-01-mobile-rn-app-design.md`)。Expo 自带 `expo-updates`(JS 层 OTA)+
+> EAS Build(出包)+ `expo-notifications`(推送),本 Capacitor 专属的自托管 OTA
+> 方案不再实施。保留本文件仅作历史记录。
+
 日期:2026-06-01
-状态:设计待确认
+状态:已取代(superseded)
 依赖:`2026-06-01-mobile-view-design.md`(独立 mobile 视图 + Capacitor 壳已实现)
 
 ## 目标
