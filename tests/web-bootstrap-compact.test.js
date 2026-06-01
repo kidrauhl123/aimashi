@@ -11,6 +11,6 @@ test("web bootstrap requests compact identity payloads before rendering conversa
   assert.match(appSource, /api\("\/api\/me\/fellows\?compact=1"\)/);
 });
 
-test("web app shell cache-busts the compact bootstrap app bundle", () => {
-  assert.match(appHtml, /src="\.\.\/app\.js\?v=20260601-web-bootstrap-compact"/);
+test("web app shell cache-busts the avatar identity app bundle", () => {
+  assert.match(appHtml, /src="\.\.\/app\.js\?v=20260601-avatar-identity"/);
 });
