@@ -26,3 +26,18 @@ test("缺字段降级", () => {
   expect(items[0].avatar.image).toBe("");
   expect(items[0].avatar.text).toBe("dm");
 });
+
+test("旧预设头像在移动端会降级为统一文字头像", () => {
+  const items = buildConversationListItems({
+    conversations: [
+      {
+        id: "fellow::kongling",
+        name: "空铃",
+        identity: { avatar: { image: "./assets/avatars/12.png", crop: { x: 10 }, color: "#65aadd", text: "空铃" } },
+      },
+    ],
+  });
+  expect(items[0].avatar.image).toBe("");
+  expect(items[0].avatar.crop).toBeNull();
+  expect(items[0].avatar.text).toBe("空铃");
+});

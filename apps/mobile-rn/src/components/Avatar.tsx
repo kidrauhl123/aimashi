@@ -1,13 +1,12 @@
 import { Image, View, Text, StyleSheet } from "react-native";
 import type { AvatarDescriptor } from "../api/types";
-import { theme } from "../theme";
+import { normalizeAvatarDescriptor } from "../logic/avatar";
 
 export default function Avatar({ title, avatar, size = 42 }: { title: string; avatar?: AvatarDescriptor; size?: number }) {
-  const text = avatar?.text || Array.from(String(title || "?").trim()).slice(0, 2).join("") || "?";
-  const image = String(avatar?.image || "").trim();
+  const resolved = normalizeAvatarDescriptor(title, avatar);
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: avatar?.color || theme.accent }]}>
-      {image ? <Image source={{ uri: image }} style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]} /> : <Text style={styles.letter}>{text}</Text>}
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: resolved.color }]}>
+      {resolved.image ? <Image source={{ uri: resolved.image }} style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]} /> : <Text style={styles.letter}>{resolved.text}</Text>}
     </View>
   );
 }
