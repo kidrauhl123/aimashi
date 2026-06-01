@@ -296,10 +296,16 @@ test("scripts/build-cloud-release.js copies cloud shared modules into the api tr
     /copyFile\(["']src\/shared\/skill-safety\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']skill-safety\.js["']\)\)/,
     "build-cloud-release must copy skill-safety.js for api skill package modules"
   );
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/avatar-resolve\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']avatar-resolve\.js["']\)\)/,
+    "build-cloud-release must copy avatar-resolve.js because api/server.js resolves member identities"
+  );
   assert.match(build, /api\/src\/shared\/conversation-kinds\.js/);
   assert.match(build, /api\/src\/shared\/engine-contracts\.js/);
   assert.match(build, /api\/src\/shared\/group-fellow-routing\.js/);
   assert.match(build, /api\/src\/shared\/skill-safety\.js/);
+  assert.match(build, /api\/src\/shared\/avatar-resolve\.js/);
 });
 
 test("scripts/build-cloud-release.js ships the git-versioned skill catalog", () => {

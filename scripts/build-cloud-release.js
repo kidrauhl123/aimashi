@@ -341,6 +341,7 @@ function verifyRelease() {
     "api/src/cloud-agent/dispatcher.js",
     "api/src/shared/conversation-kinds.js",
     "api/src/shared/engine-contracts.js",
+    "api/src/shared/avatar-resolve.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
     "api/src/shared/agent-permissions.js",
@@ -397,6 +398,7 @@ function verifyRelease() {
     "api/src/cloud-agent/dispatcher.js",
     "api/src/shared/conversation-kinds.js",
     "api/src/shared/engine-contracts.js",
+    "api/src/shared/avatar-resolve.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
     "api/src/shared/agent-permissions.js",
@@ -556,6 +558,7 @@ function main() {
   copyDir("src/cloud-agent", path.join(apiDir, "src", "cloud-agent"));
   copyFile("src/shared/conversation-kinds.js", path.join(apiDir, "src", "shared", "conversation-kinds.js"));
   copyFile("src/shared/engine-contracts.js", path.join(apiDir, "src", "shared", "engine-contracts.js"));
+  copyFile("src/shared/avatar-resolve.js", path.join(apiDir, "src", "shared", "avatar-resolve.js"));
   copyFile("src/shared/group-fellow-routing.js", path.join(apiDir, "src", "shared", "group-fellow-routing.js"));
   copyFile("src/shared/skill-safety.js", path.join(apiDir, "src", "shared", "skill-safety.js"));
   copyFile("src/shared/agent-permissions.js", path.join(apiDir, "src", "shared", "agent-permissions.js"));
