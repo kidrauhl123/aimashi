@@ -7,6 +7,7 @@
   const { MemberKind, SenderKind } = (typeof window !== "undefined" && window.miaConversationKinds) || require("../../shared/conversation-kinds");
 
   let ctx = null; // set by attach()
+  const pendingMemberFetches = new Set();
 
   function attach(internalCtx) {
     ctx = internalCtx;
@@ -175,14 +176,21 @@
   }
 
   async function fetchAndCacheConversationMembers(conversationId) {
-    if (!window.mia || !window.mia.social) return;
+    if (!conversationId || !ctx) return;
+    if (ctx.conversationMembersCache?.has(conversationId)) return;
+    if (pendingMemberFetches.has(conversationId)) return;
+    if (!global.mia || !global.mia.social || typeof global.mia.social.getConversation !== "function") return;
+    pendingMemberFetches.add(conversationId);
     try {
-      const res = await window.mia.social.getConversation(conversationId);
+      const res = await global.mia.social.getConversation(conversationId);
       if (res.ok && res.data && Array.isArray(res.data.members)) {
         ctx.conversationMembersCache.set(conversationId, res.data.members);
+        if (ctx.deps && typeof ctx.deps.render === "function") ctx.deps.render();
       }
     } catch (err) {
       console.warn("[social-groups] fetchAndCacheConversationMembers failed:", conversationId, err?.message || err);
+    } finally {
+      pendingMemberFetches.delete(conversationId);
     }
   }
 

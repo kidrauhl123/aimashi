@@ -6,8 +6,9 @@ const vm = require("node:vm");
 
 const ROOT = path.join(__dirname, "..");
 
-function loadSocialGroups() {
+function loadSocialGroups(options = {}) {
   const delegated = [];
+  const renderCalls = [];
   const mockEl = () => ({
     className: "",
     _html: "",
@@ -31,7 +32,7 @@ function loadSocialGroups() {
           messageCache: new Map([["g_1", { messages: [], maxSeq: 0 }]]),
           friends: []
         },
-        deps: null,
+        deps: options.deps || { render: () => renderCalls.push("render") },
         conversationMembersCache: new Map(),
         escapeHtml: (v) => String(v || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"),
         renderMsgBody: (v) => String(v || ""),
@@ -66,7 +67,7 @@ function loadSocialGroups() {
   });
   const src = fs.readFileSync(path.join(ROOT, "src/renderer/social/social-groups.js"), "utf8");
   vm.runInContext(src, context);
-  return { groups: mockWindow.miaSocialGroups, delegated };
+  return { groups: mockWindow.miaSocialGroups, delegated, renderCalls, mockWindow };
 }
 
 test("sendInActiveGroupConversation delegates to the unified social send path", async () => {
@@ -111,4 +112,23 @@ test("buildGroupMessageArticle renders persisted fellow trace_json", () => {
   assert.match(article.innerHTML, /trace/);
   assert.match(article.innerHTML, /分析需求/);
   assert.match(article.innerHTML, /search/);
+});
+
+test("fetchAndCacheConversationMembers rerenders after sidebar member cache fills", async () => {
+  const { groups, renderCalls, mockWindow } = loadSocialGroups();
+  mockWindow.mia.social.getConversation = async (conversationId) => ({
+    ok: true,
+    data: {
+      members: [
+        { member_kind: "user", member_ref: "u_me", identity: { displayName: "我", avatar: { image: "", crop: null } } },
+        { member_kind: "fellow", member_ref: "kongling", fellow_name: "空铃" }
+      ],
+      conversation: { id: conversationId }
+    }
+  });
+
+  await groups.fetchAndCacheConversationMembers("g_1");
+
+  assert.equal(mockWindow.miaSocial._internalCtx.conversationMembersCache.get("g_1").length, 2);
+  assert.deepEqual(renderCalls, ["render"]);
 });

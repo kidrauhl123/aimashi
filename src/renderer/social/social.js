@@ -1378,7 +1378,11 @@
           : conversation.id?.startsWith("g_") || conversation.id?.startsWith("g-") ? "group"
           : null);
       if (conversationType === "group") {
-        const memberCount = (_conversationMembersCache.get(conversation.id) || []).length;
+        const cachedMembers = _conversationMembersCache.get(conversation.id);
+        if (!_conversationMembersCache.has(conversation.id)) {
+          _fetchAndCacheConversationMembers(conversation.id);
+        }
+        const memberCount = (cachedMembers || []).length;
         return {
           type: "group-conversation",
           key: conversation.id,

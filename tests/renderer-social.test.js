@@ -627,6 +627,29 @@ test("renderSidebarRows includes group conversations with type group-conversatio
   assert.equal(fellowRow.type, "private-conversation");
 });
 
+test("renderSidebarRows fetches missing group members so sidebar avatars can hydrate", () => {
+  const s = loadSocial();
+  const fetched = [];
+  s.__mockWindow.miaSocialGroups = {
+    fetchAndCacheConversationMembers(conversationId) {
+      fetched.push(conversationId);
+    }
+  };
+  s.moduleState.myUserId = "u_me";
+  s.moduleState.conversations = [
+    { id: "g_missing", type: "group", updatedAt: "2026-05-21T21:00:00.000Z", name: "Squad" },
+    { id: "g_cached", type: "group", updatedAt: "2026-05-21T20:00:00.000Z", name: "Cached" }
+  ];
+  s._internalCtx.conversationMembersCache.set("g_cached", [
+    { member_kind: "user", member_ref: "u_me", identity: { displayName: "我", avatar: { image: "", crop: null } } }
+  ]);
+
+  const rows = s.renderSidebarRows();
+
+  assert.deepEqual(rows.map((row) => row.type), ["group-conversation", "group-conversation"]);
+  assert.deepEqual(fetched, ["g_missing"]);
+});
+
 test("sendInActiveGroupConversation uses the unified cloud-conversation send path", async () => {
   const s = loadSocial();
   const posted = [];
