@@ -2,7 +2,7 @@
 // 不直接 fetch / new WebSocket,网络一律走 window.miaCloudClient。
 (function () {
   "use strict";
-  const DEFAULT_API_BASE = "https://app.mia.example"; // TODO 部署时改为真实生产域名
+  const DEFAULT_API_BASE = "https://aiweb.buytb01.com"; // 生产 cloud(可在登录页改服务器)
   const SS_KEY = "mia.mobile.session";
   const $ = (id) => document.getElementById(id);
 
