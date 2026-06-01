@@ -9,3 +9,10 @@ vendor/hermes-runtime/
 test-results/
 .DS_Store
 npm-debug.log*
+
+# RN app build artifacts
+apps/mobile-rn/node_modules/
+apps/mobile-rn/.expo/
+apps/mobile-rn/android/
+apps/mobile-rn/ios/
+apps/mobile-rn/dist/
