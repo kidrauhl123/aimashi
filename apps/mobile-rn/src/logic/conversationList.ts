@@ -1,6 +1,19 @@
 import type { AvatarDescriptor, Conversation, Fellow } from "../api/types";
-import { normalizeAvatarDescriptor, resolveAvatar } from "./avatar";
+import { normalizeAvatarDescriptor, resolveAvatar, resolveAvatarForContact } from "./avatar";
 import { sidebarConversations, conversationListTitle, conversationType, fellowKey } from "./sessionHistory";
+
+// 与桌面 fellowAvatarFor 一致:fellow 行的头像从 fellow 档案解析
+// (真实 avatarImage + 按 fellow 身份哈希取色 + 两字符回退)。
+function fellowAvatarFor(c: Conversation, fellows: Fellow[]): AvatarDescriptor {
+  const key = fellowKey(c);
+  const fellow = fellows.find((f) => String(f.key || f.id || "") === key);
+  return resolveAvatarForContact({
+    id: fellow?.id || fellow?.key || key,
+    displayName: fellow?.name || c.name || key,
+    avatarImage: fellow?.avatarImage || "",
+    avatarCrop: fellow?.avatarCrop || null,
+  });
+}
 
 export interface ConversationListItem {
   id: string;
@@ -35,15 +48,20 @@ export function buildConversationListItems(deps: {
   aggregated.sort((a, b) => activityTime(b) - activityTime(a));
   return aggregated.map((c) => {
     const title = conversationListTitle(c, fellows);
-    // 头像稳定 id:fellow 用 fellowKey(跨 session 不变),其余用会话 id。
-    const avatarId = conversationType(c) === "fellow" ? fellowKey(c) || c.id : c.id;
-    const identityAvatar = c.identity?.avatar ? normalizeAvatarDescriptor(title, c.identity.avatar) : null;
+    let avatar: AvatarDescriptor;
+    if (conversationType(c) === "fellow") {
+      avatar = fellowAvatarFor(c, fellows); // 同桌面:从 fellow 档案取真实头像
+    } else if (c.identity?.avatar) {
+      avatar = normalizeAvatarDescriptor(title, c.identity.avatar); // 服务端已解析(DM/群)
+    } else {
+      avatar = resolveAvatar(c.id, title);
+    }
     return {
       id: c.id,
       title,
       subtitle: String(c.last_message_text || ""),
       unread: Number(unread[c.id]) || 0,
-      avatar: identityAvatar || resolveAvatar(avatarId, title),
+      avatar,
       raw: c,
     };
   });

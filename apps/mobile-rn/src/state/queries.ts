@@ -38,9 +38,10 @@ export function useConversationMembers(conversationId: string) {
 
 export function useFellows() {
   const api = useApi();
+  // 非 compact:带 avatarImage,列表/联系人头像才能和桌面一致显示真实头像。
   return useQuery<Fellow[]>({
     queryKey: ["fellows"],
-    queryFn: () => api.api("/api/me/fellows?compact=1").then((d) => d.fellows || []),
+    queryFn: () => api.api("/api/me/fellows").then((d) => d.fellows || []),
   });
 }
 

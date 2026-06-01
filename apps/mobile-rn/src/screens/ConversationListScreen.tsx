@@ -5,7 +5,7 @@ import { buildConversationListItems } from "../logic/conversationList";
 import Avatar from "../components/Avatar";
 import ConnBanner from "../components/ConnBanner";
 import { BodyStrong, Sub } from "../ui/Text";
-import { color, space, hairlineWidth } from "../theme";
+import { color, space } from "../theme";
 import type { MessagesStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<MessagesStackParamList, "Conversations">;
@@ -55,8 +55,6 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
-    borderBottomWidth: hairlineWidth,
-    borderBottomColor: color.line,
     backgroundColor: color.bg,
   },
   pressed: { backgroundColor: color.surfaceMuted },

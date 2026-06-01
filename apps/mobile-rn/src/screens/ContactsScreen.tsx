@@ -4,7 +4,7 @@ import Avatar from "../components/Avatar";
 import type { AvatarDescriptor } from "../api/types";
 import { resolveAvatar } from "../logic/conversationList";
 import { BodyStrong, Label } from "../ui/Text";
-import { color, space, hairlineWidth } from "../theme";
+import { color, space } from "../theme";
 
 interface Row {
   key: string;
@@ -55,8 +55,6 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
-    borderBottomWidth: hairlineWidth,
-    borderBottomColor: color.line,
   },
   col: { flex: 1, gap: 3 },
   sub: {},
