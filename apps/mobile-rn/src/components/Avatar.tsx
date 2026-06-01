@@ -1,16 +1,19 @@
-import { View, Text, StyleSheet } from "react-native";
+import { Image, View, Text, StyleSheet } from "react-native";
+import type { AvatarDescriptor } from "../api/types";
 import { theme } from "../theme";
 
-export default function Avatar({ title, size = 42 }: { title: string; size?: number }) {
-  const letter = (String(title || "?").trim()[0] || "?").toUpperCase();
+export default function Avatar({ title, avatar, size = 42 }: { title: string; avatar?: AvatarDescriptor; size?: number }) {
+  const text = avatar?.text || Array.from(String(title || "?").trim()).slice(0, 2).join("") || "?";
+  const image = String(avatar?.image || "").trim();
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={styles.letter}>{letter}</Text>
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: avatar?.color || theme.accent }]}>
+      {image ? <Image source={{ uri: image }} style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]} /> : <Text style={styles.letter}>{text}</Text>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  avatar: { backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" },
+  avatar: { alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  image: { resizeMode: "cover" },
   letter: { color: "#fff", fontSize: 16, fontWeight: "600" },
 });

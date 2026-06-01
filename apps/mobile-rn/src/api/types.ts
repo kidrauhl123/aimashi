@@ -23,6 +23,7 @@ export interface Conversation {
   last_activity_at?: string;
   updated_at?: string;
   created_at?: string;
+  identity?: { avatar?: AvatarDescriptor };
 }
 
 export interface Member {
@@ -35,11 +36,23 @@ export interface Fellow {
   id?: string;
   key?: string;
   name?: string;
+  avatarImage?: string;
+  avatarCrop?: Record<string, unknown> | null;
 }
 
 export interface Friend {
   id?: string;
   username?: string;
+  account?: string;
+  avatarImage?: string;
+  avatarCrop?: Record<string, unknown> | null;
+}
+
+export interface AvatarDescriptor {
+  image: string;
+  crop: Record<string, unknown> | null;
+  color: string;
+  text: string;
 }
 
 export interface WsEnvelope {

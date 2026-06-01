@@ -29,7 +29,7 @@ export default function ConversationListScreen({ navigation }: Props) {
             style={styles.row}
             onPress={() => navigation.navigate("Chat", { conversationId: item.id, title: item.title })}
           >
-            <Avatar title={item.title} />
+            <Avatar title={item.title} avatar={item.avatar} />
             <View style={styles.textCol}>
               <Text style={styles.title} numberOfLines={1}>
                 {item.title}
