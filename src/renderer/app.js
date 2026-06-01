@@ -1544,7 +1544,7 @@ async function renameCloudSessionConversation(conversation) {
   window.miaSocial?.upsertFellowConversation?.(response.data?.conversation || response.conversation || { ...conversation, name: title.trim() });
 }
 
-async function selectCloudSessionConversation(conversation) {
+async function selectCloudSessionConversation(conversation, { skipMessageLoad = false } = {}) {
   if (!conversation?.id) return;
   window.miaSocial?.setActiveConversationId?.(conversation.id);
   state.sessionMenuOpen = false;
@@ -1552,6 +1552,12 @@ async function selectCloudSessionConversation(conversation) {
   state.forceScrollToBottom = true;
   const cache = window.miaSocial?.moduleState?.messageCache;
   if (cache && !cache.has(conversation.id)) cache.set(conversation.id, { messages: [], maxSeq: 0 });
+  // A freshly created session has no messages yet, so skip the (network)
+  // listConversationMessages round-trip — the empty cache set above is correct.
+  if (skipMessageLoad) {
+    render();
+    return;
+  }
   try {
     const res = await window.mia.social.listConversationMessages(conversation.id, 0, 100);
     const messages = (res?.ok ? res.data?.messages : res?.messages) || [];
@@ -2130,19 +2136,40 @@ async function createNewCloudSessionForActive(conversation) {
   });
   const fellowKey = payload.fellowKey;
   if (!fellowKey || !window.mia?.social?.ensureFellowSessionConversation) return;
-  const response = await window.mia.social.ensureFellowSessionConversation(payload.sessionId, {
+
+  // Optimistic create: the cloud conversation id is deterministic
+  // (`fellow:<fellowKey>:<sessionId>`), so build the conversation locally and
+  // switch into it with zero wait, then ensure it on the cloud in the
+  // background. ensureFellowSessionConversation is idempotent, so a slow or
+  // failed call is safe — we keep the local session and the first sent message
+  // re-ensures it.
+  const now = new Date().toISOString();
+  const optimisticConversation = {
+    id: `fellow:${fellowKey}:${payload.sessionId}`,
+    type: "fellow",
+    name: payload.title,
+    decorations: { fellowKey, sessionId: payload.sessionId, runtimeKind: payload.runtimeKind },
+    created_at: now,
+    updated_at: now
+  };
+  window.miaSocial?.upsertFellowConversation?.(optimisticConversation);
+  await selectCloudSessionConversation(optimisticConversation, { skipMessageLoad: true });
+
+  window.mia.social.ensureFellowSessionConversation(payload.sessionId, {
     fellowKey,
     title: payload.title,
     runtimeKind: payload.runtimeKind
+  }).then((response) => {
+    if (response?.ok) {
+      const createdConversation = response.data?.conversation || response.conversation;
+      if (createdConversation?.id) window.miaSocial?.upsertFellowConversation?.(createdConversation);
+    } else {
+      console.warn("[renderer] ensureFellowSessionConversation failed:", response?.error || "unknown");
+      appendTransientChat("assistant", "会话云端同步失败，发消息时会自动重试。");
+    }
+  }).catch((error) => {
+    console.warn("[renderer] ensureFellowSessionConversation error:", error?.message || error);
   });
-  if (!response?.ok) {
-    alert(`新建会话失败：${response?.error || "未知错误"}`);
-    return;
-  }
-  const createdConversation = response.data?.conversation || response.conversation;
-  if (!createdConversation?.id) return;
-  window.miaSocial?.upsertFellowConversation?.(createdConversation);
-  await selectCloudSessionConversation(createdConversation);
 }
 
 function fellowByKey(fellowKey) {

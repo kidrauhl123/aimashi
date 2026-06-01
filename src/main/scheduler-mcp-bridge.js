@@ -88,12 +88,27 @@ function createSchedulerMcpBridge(deps = {}) {
     };
   }
 
+  // Conversation history must NOT be shared with the user's own Codex CLI:
+  // linking these makes every Fellow turn append to (and reload) the same
+  // sessions pool the user fills via their terminal, which bloats a single
+  // thread to hundreds of thousands of tokens — slow turns and "new session"
+  // timeouts while Codex scans a giant session_index. Mia tracks its own
+  // (engine, fellow, session) → thread id map in agent-session-store, so it
+  // never needs the shared sessions/history to resume. Auth, model cache and
+  // sqlite state are still linked so the user's existing login is reused.
+  const SESSION_STATE_ENTRIES = new Set([
+    "sessions",
+    "history.jsonl",
+    "session_index.jsonl"
+  ]);
+
   function linkUserCodexState(userCodexHome, miaCodexHome) {
     if (!fsImpl.existsSync(userCodexHome)) return;
     let entries = [];
     try { entries = fsImpl.readdirSync(userCodexHome); } catch { return; }
     for (const name of entries) {
       if (name === "config.toml") continue;
+      if (SESSION_STATE_ENTRIES.has(name)) continue;
       const target = path.join(userCodexHome, name);
       const link = path.join(miaCodexHome, name);
       let existing = null;
