@@ -1,19 +1,50 @@
 import { View, FlatList, Pressable, StyleSheet } from "react-native";
+import { useQueries } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useConversations, useFellows } from "../state/queries";
+import { useConversations, useFellows, useFriends } from "../state/queries";
+import { useApi } from "../state/clientProvider";
+import { useAuth } from "../state/auth";
 import { buildConversationListItems } from "../logic/conversationList";
-import Avatar from "../components/Avatar";
+import { conversationType } from "../logic/sessionHistory";
+import ConversationAvatar from "../components/ConversationAvatar";
 import ConnBanner from "../components/ConnBanner";
 import { BodyStrong, Sub } from "../ui/Text";
 import { color, space } from "../theme";
+import type { Member } from "../api/types";
 import type { MessagesStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<MessagesStackParamList, "Conversations">;
 
 export default function ConversationListScreen({ navigation }: Props) {
+  const api = useApi();
+  const { session } = useAuth();
   const { data: conversations = [], isLoading, refetch, isRefetching } = useConversations();
   const { data: fellows = [] } = useFellows();
-  const items = buildConversationListItems({ conversations, fellows, unreadByConversation: {} });
+  const { data: friends = [] } = useFriends();
+
+  // dm / group 需要成员才能解析对方头像 / 群拼贴 —— 按需补拉(react-query 缓存)。
+  const memberConvs = conversations.filter((c) => {
+    const t = conversationType(c);
+    return t === "dm" || t === "group";
+  });
+  const memberResults = useQueries({
+    queries: memberConvs.map((c) => ({
+      queryKey: ["members", c.id],
+      queryFn: () => api.api(`/api/conversations/${encodeURIComponent(c.id)}`).then((d) => (d.members || []) as Member[]),
+      staleTime: 60_000,
+    })),
+  });
+  const membersByConv: Record<string, Member[]> = {};
+  memberConvs.forEach((c, i) => {
+    const m = memberResults[i]?.data;
+    if (m) membersByConv[c.id] = m;
+  });
+
+  const self = session?.user
+    ? { id: session.user.id, username: session.user.username, avatarImage: session.user.avatarImage }
+    : undefined;
+
+  const items = buildConversationListItems({ conversations, fellows, friends, self, membersByConv, unreadByConversation: {} });
 
   return (
     <View style={styles.root}>
@@ -29,7 +60,7 @@ export default function ConversationListScreen({ navigation }: Props) {
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => navigation.navigate("Chat", { conversationId: item.id, title: item.title })}
           >
-            <Avatar title={item.title} avatar={item.avatar} />
+            <ConversationAvatar tiles={item.tiles} />
             <View style={styles.textCol}>
               <BodyStrong numberOfLines={1}>{item.title}</BodyStrong>
               <Sub numberOfLines={1} style={styles.sub}>{item.subtitle}</Sub>

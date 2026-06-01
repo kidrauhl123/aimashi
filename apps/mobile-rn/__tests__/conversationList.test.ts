@@ -10,12 +10,12 @@ test("按最后活动倒序 + 未读 + 末句", () => {
   });
   expect(items[0].id).toBe("fellow::bob");
   expect(items[0].unread).toBe(0);
-  expect(items[0].avatar.image).toBe("");
-  expect(items[0].avatar.text).toBe("Bo");
+  expect(items[0].tiles[0].image).toBe("");
+  expect(items[0].tiles[0].text).toBe("Bo");
   expect(items[1].id).toBe("dm:a");
   expect(items[1].unread).toBe(3);
   expect(items[1].subtitle).toBe("hi");
-  expect(items[1].avatar.text).toBe("Al");
+  expect(items[1].tiles[0].text).toBe("Al");
 });
 
 test("缺字段降级", () => {
@@ -23,21 +23,40 @@ test("缺字段降级", () => {
   expect(items[0].title).toBe("dm:x");
   expect(items[0].subtitle).toBe("");
   expect(items[0].unread).toBe(0);
-  expect(items[0].avatar.image).toBe("");
-  expect(items[0].avatar.text).toBe("dm");
+  expect(items[0].tiles[0].image).toBe("");
+  expect(items[0].tiles[0].text).toBe("dm");
 });
 
-test("旧预设头像在移动端会降级为统一文字头像", () => {
+test("群头像取成员拼贴 mosaic", () => {
   const items = buildConversationListItems({
-    conversations: [
-      {
-        id: "fellow::kongling",
-        name: "空铃",
-        identity: { avatar: { image: "./assets/avatars/12.png", crop: { x: 10 }, color: "#65aadd", text: "空铃" } },
-      },
-    ],
+    conversations: [{ id: "g_team", type: "group", name: "团队" }],
+    self: { id: "u1", username: "我" },
+    friends: [{ id: "u2", username: "Bob" }],
+    fellows: [{ id: "claude", name: "Claude" }],
+    membersByConv: {
+      g_team: [
+        { member_kind: "user", member_ref: "u1" } as any,
+        { member_kind: "user", member_ref: "u2" } as any,
+        { member_kind: "fellow", member_ref: "claude" } as any,
+      ],
+    },
   });
-  expect(items[0].avatar.image).toBe("");
-  expect(items[0].avatar.crop).toBeNull();
-  expect(items[0].avatar.text).toBe("空铃");
+  expect(items[0].tiles.length).toBe(3); // 三个成员拼贴
+  expect(items[0].tiles.map((t) => t.text)).toEqual(["我", "Bo", "Cl"]);
+});
+
+test("dm 头像取对方用户(非自己)", () => {
+  const items = buildConversationListItems({
+    conversations: [{ id: "dm:u2", type: "dm" }],
+    self: { id: "u1", username: "我" },
+    friends: [{ id: "u2", username: "Bob" }],
+    membersByConv: {
+      "dm:u2": [
+        { member_kind: "user", member_ref: "u1" } as any,
+        { member_kind: "user", member_ref: "u2" } as any,
+      ],
+    },
+  });
+  expect(items[0].tiles.length).toBe(1);
+  expect(items[0].tiles[0].text).toBe("Bo"); // 对方 Bob,不是自己
 });

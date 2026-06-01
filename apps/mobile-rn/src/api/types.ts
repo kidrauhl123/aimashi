@@ -19,6 +19,7 @@ export interface Conversation {
   name?: string;
   title?: string;
   type?: string;
+  avatar?: string; // 群可能有存储的头像图
   fellow_id?: string;
   fellowKey?: string;
   decorations?: { fellowKey?: string; fellowName?: string; runtimeKind?: string };
