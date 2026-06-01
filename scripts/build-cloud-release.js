@@ -374,6 +374,7 @@ function verifyRelease() {
     "api/src/cloud-agent/dispatcher.js",
     "api/src/shared/conversation-kinds.js",
     "api/src/shared/engine-contracts.js",
+    "api/src/shared/member-color.js",
     "api/src/shared/avatar-resolve.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
@@ -394,6 +395,7 @@ function verifyRelease() {
     "web/icon-192.png",
     "web/icon-512.png",
     "web/manifest.webmanifest",
+    "web/shared/member-color.js",
     "web/shared/fellow-runtime-control.js",
     "web/shared/agent-permissions.js",
     "smoke-cloud.js",
@@ -431,6 +433,7 @@ function verifyRelease() {
     "api/src/cloud-agent/dispatcher.js",
     "api/src/shared/conversation-kinds.js",
     "api/src/shared/engine-contracts.js",
+    "api/src/shared/member-color.js",
     "api/src/shared/avatar-resolve.js",
     "api/src/shared/group-fellow-routing.js",
     "api/src/shared/skill-safety.js",
@@ -601,6 +604,7 @@ function main() {
   copyDir("src/cloud-agent", path.join(apiDir, "src", "cloud-agent"));
   copyFile("src/shared/conversation-kinds.js", path.join(apiDir, "src", "shared", "conversation-kinds.js"));
   copyFile("src/shared/engine-contracts.js", path.join(apiDir, "src", "shared", "engine-contracts.js"));
+  copyFile("src/shared/member-color.js", path.join(apiDir, "src", "shared", "member-color.js"));
   copyFile("src/shared/avatar-resolve.js", path.join(apiDir, "src", "shared", "avatar-resolve.js"));
   copyFile("src/shared/group-fellow-routing.js", path.join(apiDir, "src", "shared", "group-fellow-routing.js"));
   copyFile("src/shared/skill-safety.js", path.join(apiDir, "src", "shared", "skill-safety.js"));
@@ -617,6 +621,7 @@ function main() {
   copyFile("src/shared/contact.js", path.join(webDir, "shared", "contact.js"));
   copyFile("src/shared/engine-contracts.js", path.join(webDir, "shared", "engine-contracts.js"));
   copyFile("src/shared/conversation-kinds.js", path.join(webDir, "shared", "conversation-kinds.js"));
+  copyFile("src/shared/member-color.js", path.join(webDir, "shared", "member-color.js"));
   copyFile("src/shared/avatar-media.js", path.join(webDir, "shared", "avatar-media.js"));
   copyFile("src/shared/avatar-resolve.js", path.join(webDir, "shared", "avatar-resolve.js"));
   copyFile("src/shared/session-history.js", path.join(webDir, "shared", "session-history.js"));

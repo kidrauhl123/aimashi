@@ -168,14 +168,34 @@ test("scripts/build-cloud-release.js copies shared/avatar-resolve.js into the we
   );
 });
 
+test("scripts/build-cloud-release.js copies shared/member-color.js for web avatar fallback colors", () => {
+  const build = fs.readFileSync(path.join(ROOT, "scripts/build-cloud-release.js"), "utf8");
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/member-color\.js["'][^)]+["']shared["'][^)]+["']member-color\.js["']\)/,
+    "build-cloud-release must copy src/shared/member-color.js to web/shared/member-color.js"
+  );
+  assert.match(
+    build,
+    /["']web\/shared\/member-color\.js["']/,
+    "verifyRelease must assert web/shared/member-color.js exists instead of allowing nginx to serve HTML fallback"
+  );
+});
+
 test("src/web/app/index.html loads shared/avatar-resolve.js before contact.js and app.js", () => {
   const html = fs.readFileSync(path.join(ROOT, "src/web/app/index.html"), "utf8");
+  const memberColorIdx = html.indexOf("shared/member-color.js");
   const resolveIdx = html.indexOf("shared/avatar-resolve.js");
   const contactIdx = html.indexOf("shared/contact.js");
   const appIdx = html.indexOf("../app.js");
+  assert.ok(memberColorIdx >= 0, "index.html must reference shared/member-color.js");
   assert.ok(resolveIdx >= 0, "index.html must reference shared/avatar-resolve.js");
   assert.ok(contactIdx >= 0, "index.html must reference shared/contact.js");
   assert.ok(appIdx >= 0, "index.html must load app.js");
+  assert.ok(
+    memberColorIdx < resolveIdx,
+    "shared/member-color.js must load before avatar-resolve.js so fallback colors are stable"
+  );
   assert.ok(
     resolveIdx < contactIdx,
     "shared/avatar-resolve.js must load before shared/contact.js so the identity-hash fallback is available when resolveContact runs"
@@ -332,8 +352,14 @@ test("scripts/build-cloud-release.js copies cloud shared modules into the api tr
     /copyFile\(["']src\/shared\/avatar-resolve\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']avatar-resolve\.js["']\)\)/,
     "build-cloud-release must copy avatar-resolve.js because api/server.js resolves member identities"
   );
+  assert.match(
+    build,
+    /copyFile\(["']src\/shared\/member-color\.js["'],\s*path\.join\(apiDir,\s*["']src["'],\s*["']shared["'],\s*["']member-color\.js["']\)\)/,
+    "build-cloud-release must copy member-color.js because avatar-resolve.js requires it on the API"
+  );
   assert.match(build, /api\/src\/shared\/conversation-kinds\.js/);
   assert.match(build, /api\/src\/shared\/engine-contracts\.js/);
+  assert.match(build, /api\/src\/shared\/member-color\.js/);
   assert.match(build, /api\/src\/shared\/group-fellow-routing\.js/);
   assert.match(build, /api\/src\/shared\/skill-safety\.js/);
   assert.match(build, /api\/src\/shared\/avatar-resolve\.js/);
