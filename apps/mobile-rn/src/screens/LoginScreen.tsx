@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
+import { View, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
 import { createCloudClient } from "../api/client";
 import { useAuth, DEFAULT_API_BASE } from "../state/auth";
-import { theme } from "../theme";
+import { color, space } from "../theme";
+import { Brand, Sub, Label } from "../ui/Text";
+import Input from "../ui/Input";
+import Button from "../ui/Button";
 
 export default function LoginScreen() {
   const { setSession } = useAuth();
@@ -31,49 +34,43 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <View style={styles.panel}>
-        <Text style={styles.h1}>Mia</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="服务器(默认生产)"
-          autoCapitalize="none"
-          inputMode="url"
-          value={server}
-          onChangeText={setServer}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="用户名"
-          autoCapitalize="none"
-          value={username}
-          onChangeText={setUsername}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="密码"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        <Pressable style={[styles.btn, styles.primary]} disabled={busy} onPress={() => submit(false)}>
-          <Text style={styles.primaryText}>{busy ? "…" : "登录"}</Text>
-        </Pressable>
-        <Pressable style={styles.btn} disabled={busy} onPress={() => submit(true)}>
-          <Text style={styles.btnText}>创建账号</Text>
-        </Pressable>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View style={styles.brandRow}>
+          <View style={styles.mark} />
+          <Brand>MIA</Brand>
+        </View>
+        <Sub style={styles.tagline}>多 AI 伙伴工作台</Sub>
+
+        <View style={styles.field}>
+          <Label>服务器</Label>
+          <Input placeholder={DEFAULT_API_BASE} autoCapitalize="none" inputMode="url" value={server} onChangeText={setServer} />
+        </View>
+        <View style={styles.field}>
+          <Label>用户名</Label>
+          <Input placeholder="用户名" autoCapitalize="none" value={username} onChangeText={setUsername} />
+        </View>
+        <View style={styles.field}>
+          <Label>密码</Label>
+          <Input placeholder="密码" secureTextEntry value={password} onChangeText={setPassword} />
+        </View>
+
+        {error ? <Sub style={styles.error}>{error}</Sub> : null}
+
+        <View style={styles.actions}>
+          <Button label="登录" busy={busy} onPress={() => submit(false)} />
+          <Button label="创建账号" variant="outline" disabled={busy} onPress={() => submit(true)} />
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg, justifyContent: "center", padding: 24 },
-  panel: { gap: 12 },
-  h1: { fontSize: 30, fontWeight: "700", textAlign: "center", marginBottom: 8, color: theme.text },
-  input: { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.line, borderRadius: 10, padding: 12, fontSize: 15 },
-  btn: { borderWidth: 1, borderColor: theme.line, borderRadius: 10, padding: 12, alignItems: "center", backgroundColor: theme.card },
-  btnText: { color: theme.text },
-  primary: { backgroundColor: theme.accent, borderColor: theme.accent },
-  primaryText: { color: "#fff", fontWeight: "600" },
-  error: { color: theme.danger, fontSize: 13, minHeight: 18 },
+  root: { flex: 1, backgroundColor: color.bg, justifyContent: "center", padding: space.xl },
+  panel: { gap: space.md },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  mark: { width: 28, height: 28, backgroundColor: color.accent },
+  tagline: { marginBottom: space.lg },
+  field: { gap: space.xs },
+  error: { color: color.danger },
+  actions: { gap: space.sm, marginTop: space.sm },
 });

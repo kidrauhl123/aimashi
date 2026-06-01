@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, TextInput, Pressable, Text, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
+import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -10,7 +10,9 @@ import { buildPendingMessage } from "../logic/optimisticSend";
 import { normalizeServerRow, mergeMessage } from "../logic/normalizeMessage";
 import MessageBubble from "../components/MessageBubble";
 import ApprovalSheet from "../components/ApprovalSheet";
-import { theme } from "../theme";
+import Input from "../ui/Input";
+import Button from "../ui/Button";
+import { color, space, hairlineWidth } from "../theme";
 import type { ChatMessage } from "../api/types";
 import type { MessagesStackParamList } from "../navigation/types";
 
@@ -74,8 +76,8 @@ export default function ChatScreen({ route }: Props) {
         contentContainerStyle={{ padding: 12 }}
         renderItem={({ item }) => <MessageBubble msg={item} />}
       />
-      <View style={[styles.composer, { paddingBottom: 8 + insets.bottom }]}>
-        <TextInput
+      <View style={[styles.composer, { paddingBottom: space.sm + insets.bottom }]}>
+        <Input
           style={styles.input}
           placeholder="输入消息…"
           value={text}
@@ -83,9 +85,7 @@ export default function ChatScreen({ route }: Props) {
           onSubmitEditing={send}
           returnKeyType="send"
         />
-        <Pressable style={styles.send} onPress={send}>
-          <Text style={styles.sendText}>发送</Text>
-        </Pressable>
+        <Button label="发送" style={styles.send} onPress={send} />
       </View>
       <ApprovalSheet />
     </KeyboardAvoidingView>
@@ -93,10 +93,17 @@ export default function ChatScreen({ route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
+  root: { flex: 1, backgroundColor: color.bg },
   list: { flex: 1 },
-  composer: { flexDirection: "row", gap: 8, paddingHorizontal: 10, paddingTop: 8, backgroundColor: theme.card, borderTopWidth: 1, borderTopColor: theme.line },
-  input: { flex: 1, backgroundColor: theme.bg, borderWidth: 1, borderColor: theme.line, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
-  send: { backgroundColor: theme.accent, borderRadius: 10, paddingHorizontal: 16, justifyContent: "center" },
-  sendText: { color: "#fff", fontWeight: "600" },
+  composer: {
+    flexDirection: "row",
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
+    backgroundColor: color.bg,
+    borderTopWidth: hairlineWidth,
+    borderTopColor: color.rule,
+  },
+  input: { flex: 1 },
+  send: { paddingHorizontal: space.lg },
 });

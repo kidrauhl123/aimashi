@@ -1,10 +1,11 @@
-import { View, Text, FlatList, Pressable, StyleSheet } from "react-native";
+import { View, FlatList, Pressable, StyleSheet } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useConversations, useFellows } from "../state/queries";
 import { buildConversationListItems } from "../logic/conversationList";
 import Avatar from "../components/Avatar";
 import ConnBanner from "../components/ConnBanner";
-import { theme } from "../theme";
+import { BodyStrong, Sub } from "../ui/Text";
+import { color, space, font, hairlineWidth } from "../theme";
 import type { MessagesStackParamList } from "../navigation/types";
 
 type Props = NativeStackScreenProps<MessagesStackParamList, "Conversations">;
@@ -22,26 +23,20 @@ export default function ConversationListScreen({ navigation }: Props) {
         keyExtractor={(it) => it.id}
         onRefresh={refetch}
         refreshing={isRefetching}
-        ListEmptyComponent={
-          <Text style={styles.empty}>{isLoading ? "加载中…" : "还没有会话"}</Text>
-        }
+        ListEmptyComponent={<Sub style={styles.empty}>{isLoading ? "加载中…" : "还没有会话"}</Sub>}
         renderItem={({ item }) => (
           <Pressable
-            style={styles.row}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => navigation.navigate("Chat", { conversationId: item.id, title: item.title })}
           >
             <Avatar title={item.title} avatar={item.avatar} />
             <View style={styles.textCol}>
-              <Text style={styles.title} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={styles.sub} numberOfLines={1}>
-                {item.subtitle}
-              </Text>
+              <BodyStrong numberOfLines={1}>{item.title}</BodyStrong>
+              <Sub numberOfLines={1} style={styles.sub}>{item.subtitle}</Sub>
             </View>
             {item.unread ? (
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{item.unread}</Text>
+                <Sub style={styles.badgeText}>{item.unread}</Sub>
               </View>
             ) : null}
           </Pressable>
@@ -52,21 +47,21 @@ export default function ConversationListScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
-  empty: { textAlign: "center", color: theme.muted, marginTop: 40 },
+  root: { flex: 1, backgroundColor: color.bg },
+  empty: { textAlign: "center", marginTop: 48 },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.line,
-    backgroundColor: theme.card,
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderBottomWidth: hairlineWidth,
+    borderBottomColor: color.hairline,
+    backgroundColor: color.bg,
   },
-  textCol: { flex: 1, minWidth: 0 },
-  title: { fontWeight: "600", color: theme.text },
-  sub: { color: theme.muted, fontSize: 13 },
-  badge: { backgroundColor: theme.accent, borderRadius: 11, minWidth: 20, height: 20, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
-  badgeText: { color: "#fff", fontSize: 12 },
+  pressed: { backgroundColor: color.surfaceAlt },
+  textCol: { flex: 1, minWidth: 0, gap: 2 },
+  sub: { marginTop: 1 },
+  badge: { backgroundColor: color.accent, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: "center", justifyContent: "center" },
+  badgeText: { color: color.accentText, fontSize: 12, fontFamily: font.semibold },
 });

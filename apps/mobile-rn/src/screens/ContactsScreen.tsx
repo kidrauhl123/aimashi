@@ -1,9 +1,10 @@
-import { View, Text, FlatList, StyleSheet } from "react-native";
+import { View, FlatList, StyleSheet } from "react-native";
 import { useFellows, useFriends } from "../state/queries";
 import Avatar from "../components/Avatar";
 import type { AvatarDescriptor } from "../api/types";
 import { resolveAvatar } from "../logic/conversationList";
-import { theme } from "../theme";
+import { BodyStrong, Label } from "../ui/Text";
+import { color, space, hairlineWidth } from "../theme";
 
 interface Row {
   key: string;
@@ -23,7 +24,7 @@ export default function ContactsScreen() {
     ...fellows.map((f, i) => {
       const id = f.id || f.key || String(i);
       const title = f.name || String(id);
-      return { key: `fe:${id}`, title, sub: "Fellow", avatar: resolveAvatar(id, title, f.avatarImage || "", f.avatarCrop || null) };
+      return { key: `fe:${id}`, title, sub: "FELLOW", avatar: resolveAvatar(id, title, f.avatarImage || "", f.avatarCrop || null) };
     }),
   ];
   return (
@@ -31,13 +32,13 @@ export default function ContactsScreen() {
       style={styles.root}
       data={rows}
       keyExtractor={(r) => r.key}
-      ListEmptyComponent={<Text style={styles.empty}>暂无联系人</Text>}
+      ListEmptyComponent={<Label style={styles.empty}>暂无联系人</Label>}
       renderItem={({ item }) => (
         <View style={styles.row}>
           <Avatar title={item.title} avatar={item.avatar} />
           <View style={styles.col}>
-            <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.sub}>{item.sub}</Text>
+            <BodyStrong>{item.title}</BodyStrong>
+            <Label style={styles.sub}>{item.sub}</Label>
           </View>
         </View>
       )}
@@ -46,10 +47,17 @@ export default function ContactsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
-  empty: { textAlign: "center", color: theme.muted, marginTop: 40 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderBottomWidth: 1, borderBottomColor: theme.line, backgroundColor: theme.card },
-  col: { flex: 1 },
-  title: { fontWeight: "600", color: theme.text },
-  sub: { color: theme.muted, fontSize: 13 },
+  root: { flex: 1, backgroundColor: color.bg },
+  empty: { textAlign: "center", marginTop: 48 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderBottomWidth: hairlineWidth,
+    borderBottomColor: color.hairline,
+  },
+  col: { flex: 1, gap: 3 },
+  sub: { color: color.accent },
 });
