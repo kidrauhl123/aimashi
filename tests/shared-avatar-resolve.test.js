@@ -139,3 +139,11 @@ test("resolveAvatarForContact: a former preset image is normalized to text fallb
   assert.equal(r.crop, null);
   assert.equal(r.text, "空铃");
 });
+
+test("hasAvatarIdentityFields distinguishes compact payloads from explicit empty avatars", () => {
+  assert.equal(avatarResolve.hasAvatarIdentityFields({ id: "u1", username: "alice" }), false);
+  assert.equal(avatarResolve.hasAvatarIdentityFields({ id: "u1", avatarImage: "" }), true);
+  assert.equal(avatarResolve.hasAvatarIdentityFields({ id: "u1", avatarCrop: null }), true);
+  assert.equal(avatarResolve.hasAvatarIdentityFields({ id: "u1", avatar_image: "" }), true);
+  assert.equal(avatarResolve.hasAvatarIdentityFields(null), false);
+});

@@ -2657,6 +2657,7 @@
     getUnreadForConversation,
     getTotalConversationUnread,
     getConversationMembers,
+    otherUserForConversation,
     friendById,
     _internalCtx
   };

@@ -64,6 +64,24 @@ test("fellow directory treats a cloud-mirrored device fellow as one desktop-runt
   assert.deepEqual(fellows[0].sourceKinds, ["cloud", "desktop"]);
 });
 
+test("fellow directory keeps cloud real avatar when local mirror only has a legacy preset", () => {
+  const { listOwnedFellows } = require(directoryPath);
+
+  const fellows = listOwnedFellows({
+    cloudFellows: [
+      { id: "kongling", name: "空铃 Cloud", avatarImage: "data:image/png;base64,real", avatarCrop: { x: 50, y: 50, zoom: 1 } }
+    ],
+    localFellows: [
+      { key: "kongling", name: "空铃 Local", avatarImage: "./assets/avatars/12.png", avatarCrop: { x: 47, y: 17, zoom: 1.8 } }
+    ]
+  });
+
+  assert.equal(fellows.length, 1);
+  assert.equal(fellows[0].name, "空铃 Local");
+  assert.equal(fellows[0].avatarImage, "data:image/png;base64,real");
+  assert.deepEqual(fellows[0].avatarCrop, { x: 50, y: 50, zoom: 1 });
+});
+
 test("fellow directory attaches as a browser global", () => {
   const source = fs.readFileSync(directoryPath, "utf8");
   const window = {};

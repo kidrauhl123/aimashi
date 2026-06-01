@@ -348,7 +348,7 @@ test("cloud can serve bundled web assets without exposing path traversal", async
     const index = await rawFetch(baseUrl, "/");
     assert.equal(index.status, 200);
     assert.match(index.headers.get("content-type") || "", /text\/html/);
-    assert.match(await index.text(), /<title>Mia Agent Workspace<\/title>/);
+    assert.match(await index.text(), /<title>Mia — 把一群 AI 当同事用<\/title>/);
 
     const appShell = await rawFetch(baseUrl, "/app/");
     assert.equal(appShell.status, 200);

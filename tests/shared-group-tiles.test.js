@@ -48,6 +48,51 @@ test("group tile falls back to enriched member-row fields for cross-owner fellow
   }]);
 });
 
+test("compact owned fellow does not hide the enriched member-row avatar", () => {
+  const members = [
+    {
+      member_kind: "fellow",
+      member_ref: "craft",
+      identity: {
+        displayName: "匠妹",
+        avatar: { image: "data:video/mp4;base64,real", crop: { start: 0, duration: 3 } }
+      },
+      fellow_avatar_image: "legacy-copy.png"
+    }
+  ];
+  const tiles = resolveGroupMemberTiles(members, {
+    fellows: [{ id: "craft", name: "匠妹" }]
+  });
+  assert.deepEqual(tiles, [{
+    image: "data:video/mp4;base64,real",
+    crop: { start: 0, duration: 3 },
+    color: memberAccentColor("craft"),
+    text: "匠妹"
+  }]);
+});
+
+test("compact self profile does not hide the enriched member-row avatar", () => {
+  const members = [
+    {
+      member_kind: "user",
+      member_ref: "user_me",
+      identity: {
+        displayName: "755439",
+        avatar: { image: "data:image/gif;base64,self", crop: { x: 50, y: 50, zoom: 1 } }
+      }
+    }
+  ];
+  const tiles = resolveGroupMemberTiles(members, {
+    self: { id: "user_me", username: "755439" }
+  });
+  assert.deepEqual(tiles, [{
+    image: "data:image/gif;base64,self",
+    crop: { x: 50, y: 50, zoom: 1 },
+    color: memberAccentColor("user_me"),
+    text: "75"
+  }]);
+});
+
 test("group tile falls back to shared text avatar when neither ctx.fellows nor member row carries an image", () => {
   const members = [{ member_kind: "fellow", member_ref: "unknown-fellow" }];
   const tiles = resolveGroupMemberTiles(members, { fellows: [] });

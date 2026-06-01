@@ -694,6 +694,29 @@ async function bootstrap() {
   renderConversationList();
   renderActiveChat();
   renderSettings();
+  hydrateFullIdentities().catch(() => {});
+}
+
+async function hydrateFullIdentities() {
+  if (!state.token) return;
+  const [meResult, fellowsResult] = await Promise.allSettled([
+    api("/api/me"),
+    api("/api/me/fellows")
+  ]);
+  let changed = false;
+  if (meResult.status === "fulfilled") {
+    state.user = meResult.value.user || meResult.value || state.user;
+    changed = true;
+  }
+  if (fellowsResult.status === "fulfilled") {
+    state.fellows = Array.isArray(fellowsResult.value.fellows) ? fellowsResult.value.fellows : state.fellows;
+    changed = true;
+  }
+  if (!changed) return;
+  renderUserAvatar();
+  renderConversationList();
+  renderActiveChat();
+  renderSettings();
 }
 
 // (applyWorkspace + activeWorkspaceConversation removed in Phase 4 cutover.)
@@ -1176,6 +1199,27 @@ function fellowByKey(key) {
   return state.fellows.find((fellow) => String(fellow.id || fellow.key || "") === wanted) || null;
 }
 
+function hasAvatarIdentityFields(record) {
+  if (typeof avatarResolve.hasAvatarIdentityFields === "function") {
+    return avatarResolve.hasAvatarIdentityFields(record);
+  }
+  return Boolean(record && typeof record === "object" && (
+    Object.prototype.hasOwnProperty.call(record, "avatarImage")
+      || Object.prototype.hasOwnProperty.call(record, "avatarCrop")
+      || Object.prototype.hasOwnProperty.call(record, "avatar_image")
+      || Object.prototype.hasOwnProperty.call(record, "avatar_crop")
+  ));
+}
+
+function userAvatarForContact(user, id, displayName) {
+  return avatarResolve.resolveAvatarForContact({
+    id: id || user?.id || user?.account || displayName || "",
+    displayName: displayName || user?.displayName || user?.username || user?.account || user?.id || "",
+    avatarImage: user?.avatarImage || "",
+    avatarCrop: user?.avatarCrop || null
+  });
+}
+
 // Locate the most authoritative metadata for a fellow shown in this
 // conversation, then hand it to shared/avatar-resolve.js so the result is a
 // unified {image, crop, color, text}. Resolution order:
@@ -1186,8 +1230,11 @@ function fellowByKey(key) {
 function fellowAvatarFor(conversation, fellowKey) {
   const wanted = String(fellowKey || "");
   if (!wanted) return null;
-  const owned = state.fellows.find((f) => String(f.id || f.key || "") === wanted);
-  if (owned) {
+  const owned = fellowByKey(wanted);
+  const members = state.conversationMembersCache.get(conversation?.id) || [];
+  const member = members.find((m) => m.member_kind === MemberKind.Fellow && m.member_ref === wanted);
+  const ownedHasAvatarFields = hasAvatarIdentityFields(owned);
+  if (owned && ownedHasAvatarFields) {
     return avatarResolve.resolveAvatarForContact({
       id: wanted,
       displayName: owned.name || owned.displayName || wanted,
@@ -1196,16 +1243,22 @@ function fellowAvatarFor(conversation, fellowKey) {
       color: owned.color
     });
   }
-  const members = state.conversationMembersCache.get(conversation?.id) || [];
-  const member = members.find((m) => m.member_kind === MemberKind.Fellow && m.member_ref === wanted);
   if (member) {
     const identityAvatar = member.identity?.avatar || {};
     return avatarResolve.resolveAvatarForContact({
       id: wanted,
-      displayName: member.identity?.displayName || member.fellow_name || wanted,
+      displayName: owned?.name || owned?.displayName || member.identity?.displayName || member.fellow_name || wanted,
       avatarImage: identityAvatar.image || member.fellow_avatar_image,
       avatarCrop: identityAvatar.crop || member.fellow_avatar_crop,
       color: member.fellow_color
+    });
+  }
+  if (owned) {
+    return avatarResolve.resolveAvatarForContact({
+      id: wanted,
+      displayName: owned.name || owned.displayName || wanted,
+      avatarImage: "",
+      avatarCrop: null
     });
   }
   return avatarResolve.resolveAvatarForContact({ id: wanted });
@@ -1628,12 +1681,12 @@ function combinedConversationItems() {
       const parts = r.id.split(":");
       const otherId = parts[1] === state.user?.id ? parts[2] : parts[1];
       const friend = friendById(otherId);
-      if (friend) {
-        avatar = friend.avatarImage || "";
-        avatarCrop = friend.avatarCrop || null;
-        color = friend.avatarColor || "";
-        avatarText = avatarResolve.identityDisplayText(friend.username || friend.account || friend.id, otherId);
-      }
+      const displayName = friend?.displayName || friend?.username || friend?.account || otherId || "好友";
+      const resolved = userAvatarForContact(friend, otherId, displayName);
+      avatar = resolved.image;
+      avatarCrop = resolved.crop;
+      color = resolved.color;
+      avatarText = resolved.text;
     } else if (isFellow) {
       const fellowKey = r.decorations?.fellowKey || (r.id?.split(":")[2] || "");
       const fa = fellowAvatarFor(r, fellowKey);
@@ -2151,10 +2204,11 @@ function renderActiveChat() {
         const parts = conversation.id.split(":");
         const otherId = parts[1] === state.user?.id ? parts[2] : parts[1];
         const friend = friendById(otherId);
-        peerAvatar = friend?.avatarImage || "";
-        peerCrop = friend?.avatarCrop || null;
-        peerColor = friend?.avatarColor || "";
-        peerText = avatarResolve.identityDisplayText(friend?.username || friend?.account || title, otherId);
+        const resolved = userAvatarForContact(friend, otherId, friend?.displayName || friend?.username || friend?.account || title);
+        peerAvatar = resolved.image;
+        peerCrop = resolved.crop;
+        peerColor = resolved.color;
+        peerText = resolved.text;
       } else {
         const fa = fellowAvatarFor(conversation, fellowKeyForConversation(conversation));
         peerAvatar = fa?.image || "";

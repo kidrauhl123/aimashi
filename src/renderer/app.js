@@ -333,12 +333,29 @@ function typingLabelForActiveRun(social, conversation) {
   // Only group conversations need to identify the speaker — DM / fellow chats
   // already have the fellow's name in the header itself.
   if (conversation?.type !== "group") return "";
-  const personas = state.runtime?.fellows || state.runtime?.personas || [];
+  const personas = allOwnedFellowsForIdentity(state.runtime?.fellows || state.runtime?.personas || []);
   const owned = personas.find((p) => (p.key || p.id) === fellowId);
   if (owned?.name) return owned.name;
   const members = social?.getConversationMembers?.(conversation.id) || [];
   const member = members.find((m) => m.member_kind === MemberKind.Fellow && m.member_ref === fellowId);
   return member?.fellow_name || fellowId;
+}
+
+function allOwnedFellowsForIdentity(personas = []) {
+  const runtime = state.runtime || {};
+  if (window.miaFellowManager?.allOwnedFellows) {
+    return window.miaFellowManager.allOwnedFellows();
+  }
+  const cloudFellows = window.miaSocial?.moduleState?.fellows || [];
+  const localFellows = [
+    ...((Array.isArray(personas) && personas.length) ? personas : []),
+    ...(Array.isArray(runtime.fellows) ? runtime.fellows : []),
+    ...(Array.isArray(runtime.personas) ? runtime.personas : [])
+  ];
+  if (window.miaFellowDirectory?.listOwnedFellows) {
+    return window.miaFellowDirectory.listOwnedFellows({ cloudFellows, localFellows, runtime });
+  }
+  return [...cloudFellows, ...localFellows];
 }
 
 // Reconcile #activeChatMeta with the active cloud-agent run state. While the
@@ -519,7 +536,7 @@ function groupTilesCtx(personas) {
   return {
     self,
     friends: social?.moduleState?.friends || [],
-    fellows: personas || []
+    fellows: allOwnedFellowsForIdentity(personas || [])
     // shared/avatar-resolve.js owns the "no avatarImage → text fallback"
     // behavior now, so consumers don't need any local fallback table.
   };
@@ -534,8 +551,7 @@ function groupTilesCtx(personas) {
 function conversationCardSpecFromRow(row, personas) {
   if (!row) return null;
   const social = window.miaSocial;
-  const avatarHelper = window.miaAvatar;
-  const userProfile = state.runtime?.user || {};
+  const identityFellows = allOwnedFellowsForIdentity(personas || []);
 
   // ── cloud private conversation (DM with a friend OR fellow session) ─────────────
   //     Same card shape; the only branch is "who's the other party" — a
@@ -548,8 +564,8 @@ function conversationCardSpecFromRow(row, personas) {
     let name, avatar;
     if (isFellow) {
       const fellowKey = conversation.decorations?.fellowKey || (conversation.id?.split(":")[2] || "");
-      const fellow = personas.find((p) => (p.id || p.key) === fellowKey);
-      name = sessionHistory.fellowDisplayTitle(conversation, personas, "对话");
+      const fellow = identityFellows.find((p) => (p.id || p.key) === fellowKey);
+      name = sessionHistory.fellowDisplayTitle(conversation, identityFellows, "对话");
       avatar = window.miaAvatarResolve.resolveAvatarForContact({
         id: fellowKey,
         displayName: name || fellow?.name || fellowKey,
@@ -679,9 +695,9 @@ function paintActiveCloudConversationHeader(conversation, { personas, social }) 
   const avatarEl = els.activeChatAvatar;
   const nameEl = els.activeChatName;
   const metaEl = els.activeChatMeta;
-  const userProfile = state.runtime?.user || {};
   const avatarHelper = window.miaAvatar;
   const groupAvatarHelper = window.miaGroupAvatar;
+  const identityFellows = allOwnedFellowsForIdentity(personas || []);
   // id-prefix fallback for pre-v7 cloud deployments that don't yet return
   // conversation.type. social.renderSidebarRows already normalizes this; mirror it
   // here so a conversation loaded outside the sidebar pipeline (active conversation loaded
@@ -713,33 +729,34 @@ function paintActiveCloudConversationHeader(conversation, { personas, social }) 
 
   if (conversationType === "fellow") {
     const fellowKey = conversation.decorations?.fellowKey || (conversation.id?.split(":")[2] || "");
-    const fellow = (personas || []).find((p) => (p.id || p.key) === fellowKey);
+    const fellow = identityFellows.find((p) => (p.id || p.key) === fellowKey);
     if (avatarEl) {
       avatarEl.removeAttribute("data-count");
       avatarEl.className = "profile-avatar";
       avatarHelper.applyFellowAvatar(avatarEl, fellow || { key: fellowKey, name: conversation.name });
     }
-    setText(nameEl, sessionHistory.fellowDisplayTitle(conversation, personas, "对话"));
+    setText(nameEl, sessionHistory.fellowDisplayTitle(conversation, identityFellows, "对话"));
     if (metaEl) metaEl.textContent = "私聊";
     return;
   }
 
   // DM
-  const otherId = (() => {
-    const parts = String(conversation.id || "").split(":");
-    if (parts[0] !== "dm") return "";
-    return parts[1] === userProfile.id ? parts[2] : parts[1];
-  })();
-  const friend = social?.friendById?.(otherId);
-  const displayName = friend?.username || friend?.account || otherId || "好友";
+  const otherUser = social?.otherUserForConversation?.(conversation) || {};
+  const otherId = otherUser.id || "";
+  const displayName = otherUser.displayName || otherUser.username || otherUser.account || otherId || "好友";
+  const avatar = window.miaAvatarResolve.resolveAvatarForContact({
+    id: otherId || otherUser.account || displayName,
+    displayName,
+    avatarImage: otherUser.avatarImage || "",
+    avatarCrop: otherUser.avatarCrop || null
+  });
   if (avatarEl) {
     avatarEl.removeAttribute("data-count");
     avatarEl.className = "profile-avatar";
-    if (friend) {
-      avatarHelper.applyAvatarMedia(avatarEl, friend.avatarImage, friend.avatarCrop, friend.avatarColor || "#5e5ce6");
+    if (typeof avatarHelper.paintAvatar === "function") {
+      avatarHelper.paintAvatar(avatarEl, avatar);
     } else {
-      const letter = (displayName[0] || "?").toUpperCase();
-      avatarHelper.applyAvatar(avatarEl, letter, "#111827", "");
+      avatarHelper.applyAvatarMedia(avatarEl, avatar.image, avatar.crop, avatar.color, avatar.text);
     }
   }
   setText(nameEl, displayName);

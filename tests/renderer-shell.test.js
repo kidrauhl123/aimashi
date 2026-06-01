@@ -381,6 +381,17 @@ test("contacts merge local fellows with owned cloud fellows", () => {
   assert.match(appSource, /const contactKeys = new Set/);
 });
 
+test("cloud conversation headers use the shared avatar identity path", () => {
+  const appSource = fs.readFileSync(path.join(root, "src/renderer/app.js"), "utf8");
+  const socialSource = fs.readFileSync(path.join(root, "src/renderer/social/social.js"), "utf8");
+
+  assert.match(socialSource, /otherUserForConversation/);
+  assert.match(appSource, /function allOwnedFellowsForIdentity/);
+  assert.match(appSource, /social\?\.otherUserForConversation\?\.\(conversation\)/);
+  assert.match(appSource, /miaAvatarResolve\.resolveAvatarForContact/);
+  assert.match(appSource, /avatarHelper\.paintAvatar\(avatarEl,\s*avatar\)/);
+});
+
 test("contact detail shows engine logo and fellow device label", () => {
   const mainSource = fs.readFileSync(path.join(root, "src/main.js"), "utf8");
   const fellowManagerSource = fs.readFileSync(path.join(root, "src/renderer/fellow/fellow-manager.js"), "utf8");

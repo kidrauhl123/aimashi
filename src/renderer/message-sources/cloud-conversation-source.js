@@ -26,9 +26,14 @@
   function createCloudConversationSource({ conversation, messages, members, ctx }) {
     const { normalizeSpec } = spec();
     const { resolveContact, ContactKind } = contact();
-    const { resolveAvatarForContact } = avatarResolve();
+    const { resolveAvatarForContact, hasAvatarIdentityFields } = avatarResolve();
     const selfId = ctx.self?.id || "";
     const memberArr = Array.isArray(members) ? members : [];
+
+    function fellowRecord(ref) {
+      return (Array.isArray(ctx.fellows) ? ctx.fellows : [])
+        .find((f) => f && (f.key === ref || f.id === ref)) || null;
+    }
 
     function authorForMessage(m) {
       if (m.sender_kind === SenderKind.User) {
@@ -53,8 +58,10 @@
         // "(${ownerUsername})" before but users found it noisy ("不要括号
         // 展示其主人"). If we need owner context later it belongs in the
         // contact card, not the message label.
+        const rawFellow = fellowRecord(m.sender_ref);
         const localFellow = resolveContact({ kind: ContactKind.Fellow, ref: m.sender_ref }, ctx);
-        const ownedByMe = Boolean(localFellow.displayName && localFellow.displayName !== m.sender_ref);
+        const ownedByMe = Boolean(rawFellow);
+        const ownAvatarIsHydrated = Boolean(rawFellow && hasAvatarIdentityFields?.(rawFellow));
         let displayName;
         if (ownedByMe) {
           displayName = localFellow.displayName;
@@ -73,14 +80,15 @@
         }
         // Avatar priority mirrors displayName: own fellow first, then the
         // server-canonical member identity, then legacy member fields. An
-        // empty avatar stays empty and renders as shared text fallback.
-        const avatar = (!ownedByMe && member?.identity?.avatar)
+        // explicit empty avatar stays empty and renders as shared text fallback;
+        // compact own-fellow rows do not hide server-enriched member identity.
+        const avatar = (!ownAvatarIsHydrated && member?.identity?.avatar)
           ? member.identity.avatar
           : resolveAvatarForContact({
               id: m.sender_ref,
               displayName,
-              avatarImage: ownedByMe ? localFellow.avatar?.image : member?.fellow_avatar_image,
-              avatarCrop: ownedByMe ? localFellow.avatar?.crop : member?.fellow_avatar_crop
+              avatarImage: ownAvatarIsHydrated ? rawFellow.avatarImage : member?.fellow_avatar_image,
+              avatarCrop: ownAvatarIsHydrated ? rawFellow.avatarCrop : member?.fellow_avatar_crop
             });
         return {
           kind: ContactKind.Fellow,

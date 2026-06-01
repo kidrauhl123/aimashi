@@ -11,6 +11,13 @@ test("web bootstrap requests compact identity payloads before rendering conversa
   assert.match(appSource, /api\("\/api\/me\/fellows\?compact=1"\)/);
 });
 
+test("web bootstrap hydrates full avatar identities after the compact first paint", () => {
+  assert.match(appSource, /function hydrateFullIdentities\(/);
+  assert.match(appSource, /api\("\/api\/me"\)/);
+  assert.match(appSource, /api\("\/api\/me\/fellows"\)/);
+  assert.match(appSource, /hydrateFullIdentities\(\)\.catch/);
+});
+
 test("web app shell cache-busts the avatar identity app bundle", () => {
-  assert.match(appHtml, /src="\.\.\/app\.js\?v=20260601-avatar-identity"/);
+  assert.match(appHtml, /src="\.\.\/app\.js\?v=20260601-avatar-root"/);
 });

@@ -50,6 +50,19 @@
     };
   }
 
+  function hasAvatarIdentityFields(record) {
+    const resolver = avatarResolver();
+    if (resolver && typeof resolver.hasAvatarIdentityFields === "function") {
+      return resolver.hasAvatarIdentityFields(record);
+    }
+    return Boolean(record && typeof record === "object" && (
+      Object.prototype.hasOwnProperty.call(record, "avatarImage")
+        || Object.prototype.hasOwnProperty.call(record, "avatarCrop")
+        || Object.prototype.hasOwnProperty.call(record, "avatar_image")
+        || Object.prototype.hasOwnProperty.call(record, "avatar_crop")
+    ));
+  }
+
   function resolveGroupMemberTiles(members, ctx = {}) {
     if (!Array.isArray(members)) return [];
     const { self, friends, fellows } = ctx;
@@ -59,27 +72,29 @@
       const kind = m.member_kind;
       const ref = String(m.member_ref || "");
       if (kind === "user") {
+        const identityAvatar = m.identity?.avatar || {};
         // Self is just another user-kind member; no "boss" position. We
         // still look up self separately because the friend list never
         // includes the viewer. Color is derived from the id by the resolver;
         // no per-contact color field is consulted.
         if (self && ref === self.id) {
+          const hasSelfAvatar = hasAvatarIdentityFields(self);
           out.push(resolveTile({
             id: self.id,
-            displayName: self.displayName || self.username || self.account || self.id,
-            avatarImage: self.avatarImage,
-            avatarCrop: self.avatarCrop
+            displayName: self.displayName || self.username || self.account || m.identity?.displayName || self.id,
+            avatarImage: hasSelfAvatar ? self.avatarImage : identityAvatar.image,
+            avatarCrop: hasSelfAvatar ? self.avatarCrop : identityAvatar.crop
           }));
           continue;
         }
         const friend = (friends || []).find((f) => f.id === ref);
         const hasFriend = Boolean(friend);
-        const identityAvatar = m.identity?.avatar || {};
+        const hasFriendAvatar = hasAvatarIdentityFields(friend);
         out.push(resolveTile({
           id: ref,
           displayName: friend?.displayName || friend?.username || friend?.account || m.identity?.displayName || ref,
-          avatarImage: hasFriend ? friend.avatarImage : identityAvatar.image,
-          avatarCrop: hasFriend ? friend.avatarCrop : identityAvatar.crop
+          avatarImage: hasFriend && hasFriendAvatar ? friend.avatarImage : identityAvatar.image,
+          avatarCrop: hasFriend && hasFriendAvatar ? friend.avatarCrop : identityAvatar.crop
         }));
         continue;
       }
@@ -91,12 +106,13 @@
         // stable text fallback when neither side has an image.
         const fellow = (fellows || []).find((f) => (f.id || f.key) === ref);
         const hasFellow = Boolean(fellow);
+        const hasFellowAvatar = hasAvatarIdentityFields(fellow);
         const identityAvatar = m.identity?.avatar || {};
         out.push(resolveTile({
           id: ref,
           displayName: fellow?.name || fellow?.displayName || m.identity?.displayName || m.fellow_name || ref,
-          avatarImage: hasFellow ? fellow.avatarImage : (identityAvatar.image || m.fellow_avatar_image),
-          avatarCrop: hasFellow ? fellow.avatarCrop : (identityAvatar.crop || m.fellow_avatar_crop)
+          avatarImage: hasFellow && hasFellowAvatar ? fellow.avatarImage : (identityAvatar.image || m.fellow_avatar_image),
+          avatarCrop: hasFellow && hasFellowAvatar ? fellow.avatarCrop : (identityAvatar.crop || m.fellow_avatar_crop)
         }));
         continue;
       }

@@ -605,6 +605,11 @@ test("src/web/app.js resolves fellow avatars via conversationMembersCache when t
   );
   assert.match(
     helperMatch[0],
+    /hasAvatarIdentityFields/,
+    "fellowAvatarFor must distinguish compact owned fellow rows from explicit empty avatar rows"
+  );
+  assert.match(
+    helperMatch[0],
     /fellow_avatar_image/,
     "fellowAvatarFor must read the server-enriched fellow_avatar_image field"
   );

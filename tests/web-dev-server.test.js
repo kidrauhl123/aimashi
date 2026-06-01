@@ -47,7 +47,7 @@ test("web dev server serves shared source modules used by the /app shell", async
   try {
     const index = await fetch(`${baseUrl}/`);
     assert.equal(index.status, 200);
-    assert.match(await index.text(), /landing\.css/);
+    assert.match(await index.text(), /assets\/mia\.css/);
 
     const app = await fetch(`${baseUrl}/app/`);
     assert.equal(app.status, 200);

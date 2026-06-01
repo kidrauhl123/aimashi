@@ -61,6 +61,24 @@
     return isLegacyPresetAvatarSrc(value) ? "" : value;
   }
 
+  function hasOwn(obj, key) {
+    return Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+  }
+
+  // Compact identity payloads deliberately omit avatarImage/avatarCrop to keep
+  // first paint small. An explicit empty avatar, however, still includes the
+  // field and must win over stale member-row media. Callers use this only to
+  // distinguish "not hydrated yet" from "hydrated and intentionally empty";
+  // resolveAvatarForContact remains the single fallback/color/text authority.
+  function hasAvatarIdentityFields(record) {
+    return Boolean(record && typeof record === "object" && (
+      hasOwn(record, "avatarImage")
+        || hasOwn(record, "avatarCrop")
+        || hasOwn(record, "avatar_image")
+        || hasOwn(record, "avatar_crop")
+    ));
+  }
+
   function canonicalAvatarSrc(src) {
     return normalizeAvatarImage(src);
   }
@@ -187,6 +205,7 @@
     defaultAvatarAssets,
     isLegacyPresetAvatarSrc,
     normalizeAvatarImage,
+    hasAvatarIdentityFields,
     identityDisplayText,
     canonicalAvatarSrc,
     avatarPresetBySrc,

@@ -3,6 +3,8 @@
 
   const memberColor = (typeof globalThis !== "undefined" && globalThis.miaMemberColor)
     || (typeof require === "function" ? require("../../shared/member-color.js") : { memberAccentColor: () => "#5e5ce6" });
+  const avatarResolve = (typeof globalThis !== "undefined" && globalThis.miaAvatarResolve)
+    || (typeof require === "function" ? require("../../shared/avatar-resolve.js") : { normalizeAvatarImage: (v) => String(v || "") });
 
   function firstNonEmpty(...values) {
     for (const value of values) {
@@ -86,7 +88,7 @@
       name: firstNonEmpty(input.name, input.displayName, input.username, key),
       bio: normalizedBio(input),
       color: memberColor.memberAccentColor(key),
-      avatarImage: input.avatarImage || input.avatar_image || "",
+      avatarImage: avatarResolve.normalizeAvatarImage(input.avatarImage || input.avatar_image || ""),
       avatarCrop: input.avatarCrop || input.avatar_crop || null,
       personaText: input.personaText || input.persona_text || "",
       agentEngine,
@@ -103,7 +105,7 @@
     if (!existing) return incoming;
     if (!incoming) return existing;
     const sourceKinds = [...new Set([...(existing.sourceKinds || []), ...(incoming.sourceKinds || [])])];
-    return {
+    const merged = {
       ...existing,
       ...incoming,
       sourceKinds,
@@ -111,6 +113,17 @@
       canConfigureCapabilities: existing.canConfigureCapabilities !== false && incoming.canConfigureCapabilities !== false,
       canDelete: incoming.canDelete !== false
     };
+    const existingHasCloud = (existing.sourceKinds || []).includes("cloud");
+    const incomingIsDesktopOnly = (incoming.sourceKinds || []).includes("desktop")
+      && !(incoming.sourceKinds || []).includes("cloud");
+    if (existingHasCloud && incomingIsDesktopOnly) {
+      merged.avatarImage = existing.avatarImage || "";
+      merged.avatarCrop = existing.avatarCrop || null;
+    } else if (existing.avatarImage && !incoming.avatarImage) {
+      merged.avatarImage = existing.avatarImage;
+      merged.avatarCrop = existing.avatarCrop || null;
+    }
+    return merged;
   }
 
   function listOwnedFellows({ cloudFellows = [], localFellows = [], runtime = {} } = {}) {

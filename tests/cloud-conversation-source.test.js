@@ -86,6 +86,32 @@ test("CloudConversationSource hydrates own fellow avatar from ctx.fellows", () =
   assert.equal(spec.avatar.image, "data:codex-pic");
 });
 
+test("CloudConversationSource uses member identity avatar when owned fellow context is compact", () => {
+  const src = loadSource();
+  const conversation = { id: "g_conversation_compact" };
+  const messages = [{ id: "msg_compact", sender_kind: "fellow", sender_ref: "craft", body_md: "yo", created_at: "", seq: 1 }];
+  const members = [{
+    member_kind: "fellow",
+    member_ref: "craft",
+    owner_id: "user_me",
+    identity: {
+      displayName: "匠妹",
+      avatar: { image: "data:video/mp4;base64,real", crop: { start: 0, duration: 3 } }
+    },
+    fellow_avatar_image: "legacy-copy.png"
+  }];
+  const ctx = {
+    self: { id: "user_me", username: "me" },
+    fellows: [{ key: "craft", name: "匠妹" }],
+    friends: []
+  };
+  const source = src.createCloudConversationSource({ conversation, messages, members, ctx });
+  const spec = source.listMessages()[0];
+  assert.equal(spec.authorName, "匠妹");
+  assert.equal(spec.avatar.image, "data:video/mp4;base64,real");
+  assert.deepEqual(spec.avatar.crop, { start: 0, duration: 3 });
+});
+
 test("CloudConversationSource falls back to stable fellow text avatar", () => {
   const src = loadSource();
   const conversation = { id: "fellow:user_me:mia", type: "fellow", name: "Mia", decorations: { fellowKey: "mia" } };
