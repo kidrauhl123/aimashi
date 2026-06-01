@@ -1,218 +1,265 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#f7f4ff">
-    <meta name="apple-mobile-web-app-title" content="Mia">
-    <meta
-      name="description"
-      content="Mia 是多 AI 伙伴桌面工作台，用舒服的聊天 GUI 管理 Claude Code、Codex、Hermes、多端同步和本机权限。"
-    >
-    <title>Mia Agent Workspace</title>
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
-    <link rel="stylesheet" href="./styles.css">
-    <link rel="stylesheet" href="./landing.css?v=20260528-role-avatars">
-  </head>
-  <body class="landing-body" data-page="landing">
-    <div class="landing-progress" aria-hidden="true"><span></span></div>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f5f1">
+<meta name="apple-mobile-web-app-title" content="Mia">
+<meta name="description" content="Mia 把一群 AI 当同事用：在一个聊天 GUI 里调度 Claude Code、Codex、Hermes，多端同步、本机权限可控。">
+<title>Mia — 把一群 AI 当同事用</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="stylesheet" href="./assets/mia.css?v=20260601-promo">
+</head>
+<body>
 
-    <header class="landing-nav">
-      <a class="landing-brand" href="/" aria-label="Mia 首页">
-        <span class="brand-mark" aria-hidden="true">M</span>
-        <span>Mia</span>
+<!-- ============ NAV ============ -->
+<nav class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <span>Mia</span>
+    </a>
+    <div class="nav-links">
+      <a class="nav-cta" href="#top">下载</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero" id="top">
+  <div class="wrap hero-inner">
+    <div class="hero-copy">
+    <p class="hero-sub reveal">MIA</p>
+    <div class="eyebrow reveal" style="--d:.08s">Multiple Intelligent Agents</div>
+    <div class="hero-ctas reveal" style="--d:.18s">
+      <a class="btn btn-primary" href="/downloads/mia-macos-arm64-latest.dmg" download="Mia-macOS-Apple-Silicon.dmg">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 3c-1.3 0-2.7.8-3.5 1.9C12.3 6 11.7 7.5 11.9 9c1.4.1 2.8-.7 3.6-1.8.8-1.1 1.3-2.6 1-4.2zM19 16.4c0 1.8-1.6 3.7-2.9 4.6-.7.5-1.5.5-2.4.1-.9-.4-1.7-.4-2.6 0-1.1.5-1.7.4-2.4-.1C4.4 18.9 3.8 13 6.4 10.6c1-1 2.4-1.4 3.6-.9 1 .4 1.6.4 2.7 0 1.4-.6 2.9-.4 4 .6-2.3 1.4-1.9 4.6.3 6.1z"/></svg>
+        下载 macOS 版
       </a>
-      <nav class="landing-nav-links" aria-label="Mia website">
-        <a href="#product">产品</a>
-        <a href="#download">下载</a>
-      </nav>
-      <a class="landing-nav-action" href="/app/">打开 Mia Web</a>
-    </header>
+      <a class="btn btn-ghost" href="/app/">
+        打开网页版
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7m0 0H8m9 0v9"/></svg>
+      </a>
+    </div>
+    </div>
 
-    <main class="landing-page">
-      <section id="product" class="hero-section" aria-labelledby="landingTitle">
-        <div class="hero-copy" data-reveal>
-          <p class="hero-kicker">Multi-Agent Workspace</p>
-          <h1 id="landingTitle">Mia AI 伙伴工作台</h1>
-          <p class="hero-lede">在一个舒服的聊天 GUI 里管理多个 Fellow，连接 Claude Code、Codex 和 Hermes，并在桌面与 Web 间同步。</p>
-          <div class="hero-actions">
-            <a class="landing-primary" href="/downloads/mia-macos-arm64-latest.dmg" download="Mia-macOS-Apple-Silicon.dmg">
-              下载 macOS Apple Silicon
-            </a>
-            <a class="landing-secondary" href="/app/">打开 Mia Web</a>
+    <div class="hero-product reveal" style="--d:.2s">
+    <div class="miawin" id="heroWin">
+      <div class="miawin-grid">
+        <!-- rail -->
+        <div class="mw-rail">
+          <div class="mw-traffic"><i></i><i></i><i></i></div>
+          <div class="mw-rail-avatar">B</div>
+          <div class="mw-rail-div"></div>
+          <div class="mw-rail-btn on">
+            <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <em>4</em>
+          </div>
+          <div class="mw-rail-btn">
+            <svg viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"/></svg>
+          </div>
+          <div class="mw-rail-btn">
+            <svg viewBox="0 0 24 24"><path d="M12 7v14 M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+          </div>
+          <div class="mw-rail-btn">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18 M8 3v4 M16 3v4"/></svg>
+          </div>
+          <div class="mw-rail-sp"></div>
+        </div>
+
+        <!-- conversation list -->
+        <div class="mw-list">
+          <div class="mw-search"><span>⌕</span>搜索</div>
+          <div class="mw-rows">
+            <div class="mw-row on">
+              <div class="mw-av av av--teal"><svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/></svg></div>
+              <div class="mw-row-main">
+                <div class="mw-row-top"><span class="mw-name-wrap"><span class="mw-name">小柯</span><span class="mw-role">工程</span></span><span class="mw-time">现在</span></div>
+                <div class="mw-prev">好的,我来跑一下测试 →</div>
+              </div>
+            </div>
+            <div class="mw-row">
+              <div class="mw-av av av--indigo"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="M20.5 20.5 16 16"/></svg></div>
+              <div class="mw-row-main">
+                <div class="mw-row-top"><span class="mw-name-wrap"><span class="mw-name">阿研</span><span class="mw-role">调研</span></span><span class="mw-time">2 分钟</span></div>
+                <div class="mw-row-top"><span class="mw-prev">竞品报告已经整理好了…</span><span class="mw-badge">2</span></div>
+              </div>
+            </div>
+            <div class="mw-row">
+              <div class="mw-av av av--violet"><svg viewBox="0 0 24 24"><path d="M5 20V13"/><path d="M10 20V6"/><path d="M15 20v-9"/><path d="M20 20V9"/></svg></div>
+              <div class="mw-row-main">
+                <div class="mw-row-top"><span class="mw-name">数据小组</span><span class="mw-time">10:24</span></div>
+                <div class="mw-prev">本周转化率涨了 12%</div>
+              </div>
+            </div>
+            <div class="mw-row">
+              <div class="mw-av av av--rose"><svg viewBox="0 0 24 24"><path d="M12 4l1.7 4.8L18.5 10l-4.8 1.7L12 16.5l-1.7-4.8L5.5 10l4.8-1.7z"/></svg></div>
+              <div class="mw-row-main">
+                <div class="mw-row-top"><span class="mw-name-wrap"><span class="mw-name">小映</span><span class="mw-role">创意</span></span><span class="mw-time">昨天</span></div>
+                <div class="mw-prev">三版封面方案都发你了 🎨</div>
+              </div>
+            </div>
+            <div class="mw-row">
+              <div class="mw-av av av--amber"><svg viewBox="0 0 24 24"><path d="M14.5 5.5l4 4"/><path d="M4 20l1-4L16 5a2.12 2.12 0 0 1 3 3L8 19l-4 1z"/></svg></div>
+              <div class="mw-row-main">
+                <div class="mw-row-top"><span class="mw-name-wrap"><span class="mw-name">老周</span><span class="mw-role">写作</span></span><span class="mw-time">昨天</span></div>
+                <div class="mw-prev">公众号推文初稿在这</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="product-scene" aria-label="Mia 产品界面预览" data-parallax data-reveal>
-          <div class="signal-mesh" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
+        <!-- chat -->
+        <div class="mw-chat">
+          <div class="mw-top">
+            <div class="mw-av av av--teal"><svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/></svg></div>
+            <div>
+              <div class="mw-top-name">小柯 <span class="mw-role">工程</span> <span class="mw-tag">Fellow</span></div>
+              <div class="mw-top-meta">Codex · 当前设备运行</div>
+            </div>
           </div>
-          <div class="preview-gallery" aria-label="Mia 群聊和私聊界面预览">
-            <section class="product-window preview-window group-window" aria-label="Mia group chat workspace">
-              <div class="window-toolbar">
-                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
-                <strong>群聊协作</strong>
-                <b data-stage-status>3 Fellows online</b>
-              </div>
-              <div class="app-shell-preview">
-                <aside class="app-rail" aria-label="Mia navigation preview">
-                  <span class="rail-avatar user-avatar" aria-hidden="true"></span>
-                  <i class="is-active"></i>
-                  <i></i>
-                  <b></b>
-                </aside>
-                <section class="conversation-list" aria-label="Fellow and conversation list preview">
-                  <div class="conversation-search">
-                    <span aria-hidden="true"></span>
-                    <strong>搜索</strong>
-                    <b aria-hidden="true">+</b>
-                  </div>
-                  <article class="conversation-item active">
-                    <span class="conversation-avatar avatar-group" aria-hidden="true"></span>
-                    <div>
-                      <strong>发布项目组</strong>
-                      <small>内容策划、前端工程师、翻译编辑已就位...</small>
-                    </div>
-                    <time>17:36</time>
-                  </article>
-                  <article class="conversation-item">
-                    <span class="conversation-avatar avatar-strategy" aria-hidden="true"></span>
-                    <div>
-                      <strong>内容策划</strong>
-                      <small>首屏卖点已经收好，等你看...</small>
-                    </div>
-                    <time>15:15</time>
-                  </article>
-                  <article class="conversation-item">
-                    <span class="conversation-avatar avatar-engineer" aria-hidden="true"></span>
-                    <div>
-                      <strong>前端工程师</strong>
-                      <small>本机命令准备好，执行前会确认...</small>
-                    </div>
-                    <time>14:20</time>
-                  </article>
-                </section>
-                <section class="chat-preview" aria-label="Mia group chat preview">
-                  <div class="chat-preview-head">
-                    <span class="conversation-avatar avatar-group" aria-hidden="true"></span>
-                    <div class="chat-title">
-                      <strong data-stage-title>发布项目组</strong>
-                      <small data-stage-subtitle>群聊 · Claude Code / Codex / Hermes</small>
-                    </div>
-                  </div>
-                  <div class="chat-transcript">
-                    <div class="message-row own">
-                      <p>明早发布页上线，大家怎么分工？</p>
-                      <span class="conversation-avatar user-avatar" aria-hidden="true"></span>
-                    </div>
-                    <div class="message-row agent">
-                      <span class="conversation-avatar avatar-strategy" aria-hidden="true"></span>
-                      <p>我负责卖点和页面节奏。</p>
-                    </div>
-                    <div class="message-row agent">
-                      <span class="conversation-avatar avatar-engineer" aria-hidden="true"></span>
-                      <p>我负责代码和发布检查。</p>
-                    </div>
-                    <div class="message-row agent">
-                      <span class="conversation-avatar avatar-editor" aria-hidden="true"></span>
-                      <p>我先补一版中英文草稿。</p>
-                    </div>
-                  </div>
-                  <div class="composer-preview" aria-label="Mia group composer preview">
-                    <div>
-                      <span aria-hidden="true">+</span>
-                      <strong>在群聊里调度多个伙伴</strong>
-                      <b aria-hidden="true">↗</b>
-                    </div>
-                    <p>
-                      <i class="engine-logo claude" aria-hidden="true"></i>
-                      <span>Claude Code</span>
-                      <i class="engine-logo codex" aria-hidden="true"><img src="./assets/engine-icons/codex-color.svg" alt=""></i>
-                      <span>Codex</span>
-                      <i class="engine-logo hermes" aria-hidden="true"></i>
-                      <span>Hermes</span>
-                    </p>
-                  </div>
-                </section>
-              </div>
-            </section>
-
-            <section class="product-window preview-window private-window" aria-label="Mia private chat workspace">
-              <div class="window-toolbar">
-                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
-                <strong>私聊跟进</strong>
-                <b>Synced</b>
-              </div>
-              <div class="app-shell-preview">
-                <aside class="app-rail" aria-label="Mia private navigation preview">
-                  <span class="rail-avatar user-avatar" aria-hidden="true"></span>
-                  <i></i>
-                  <i class="is-active"></i>
-                  <b></b>
-                </aside>
-                <section class="chat-preview" aria-label="Mia private chat preview">
-                  <div class="chat-preview-head">
-                    <span class="conversation-avatar avatar-assistant" aria-hidden="true"></span>
-                    <div class="chat-title">
-                      <strong>发布助理</strong>
-                      <small>私聊 · 桌面 + Web 同步</small>
-                    </div>
-                  </div>
-                  <div class="chat-transcript">
-                    <div class="message-row own">
-                      <p>帮我把刚才的方案收一下。</p>
-                      <span class="conversation-avatar user-avatar" aria-hidden="true"></span>
-                    </div>
-                    <div class="message-row agent">
-                      <span class="conversation-avatar avatar-assistant" aria-hidden="true"></span>
-                      <p>已整理成待办：文案、代码、截图、发布检查。</p>
-                    </div>
-                    <div class="message-row own compact">
-                      <p>执行</p>
-                      <span class="conversation-avatar user-avatar" aria-hidden="true"></span>
-                    </div>
-                    <div class="message-row agent">
-                      <span class="conversation-avatar avatar-assistant" aria-hidden="true"></span>
-                      <p>需要本机命令，我会先弹出确认，再把结果同步回来。</p>
-                    </div>
-                  </div>
-                  <div class="composer-preview" aria-label="Mia private composer preview">
-                    <div>
-                      <span aria-hidden="true">+</span>
-                      <strong>输入消息，Enter 发送</strong>
-                      <b aria-hidden="true">↗</b>
-                    </div>
-                    <p>
-                      <i class="engine-logo codex" aria-hidden="true"><img src="./assets/engine-icons/codex-color.svg" alt=""></i>
-                      <span>Codex</span>
-                      <em>Ask</em>
-                    </p>
-                  </div>
-                </section>
-              </div>
-            </section>
+          <div class="mw-body" id="heroBody"><!-- messages injected by JS --></div>
+          <div class="mw-composer">
+            <div class="mw-composer-row">
+              <span class="plus">+</span>
+              <span class="field" id="heroField">输入消息,Enter 发送…</span>
+              <span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H9M17 7v8"/></svg></span>
+            </div>
+            <div class="mw-composer-foot">
+              <span class="mw-chip"><svg viewBox="0 0 24 24" width="12" height="12" fill="#d97706" style="flex:none"><path clip-rule="evenodd" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"></path></svg>Claude Opus 4.8</span>
+              <span>·</span><span>Medium</span>
+              <span>·</span><span class="mw-chip">Ask</span>
+            </div>
           </div>
         </div>
-      </section>
+      </div>
+    </div>
 
-      <section id="download" class="download-section" aria-labelledby="downloadTitle">
-        <div class="download-copy" data-reveal>
-          <p class="section-kicker">Get started</p>
-          <h2 id="downloadTitle">下载 Mia</h2>
-          <p>当前提供 macOS Apple Silicon 版本。Web 端可以直接进入对话，本机 Agent 能力由桌面端提供。</p>
-          <div class="hero-actions">
-            <a class="landing-primary" href="/downloads/mia-macos-arm64-latest.dmg" download="Mia-macOS-Apple-Silicon.dmg">
-              下载 Apple Silicon
-            </a>
-            <a class="landing-secondary" href="/app/">打开 Mia Web</a>
+    <div class="miawin-mobile-note" style="text-align:center;color:var(--ink-3);font-size:14px;padding:20px;">
+      在更大的屏幕上查看完整的 Mia 工作台演示 →
+    </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============ COLLAB + CONTROL (merged) ============ -->
+<section class="block" id="group">
+  <div class="wrap">
+    <div class="section-head center reveal" style="margin-bottom:8px;">
+      <span class="kicker">协作 · 掌控</span>
+      <h2 class="h2" style="margin:0 auto;">它们分工干活,你只管把关。</h2>
+    </div>
+
+    <div class="duo">
+      <div class="duo-col reveal">
+        <div class="duo-cap"><b>@ 谁就谁来</b><span>一个群里,多个伙伴分工接力。</span></div>
+        <div class="demo-card" id="groupDemo">
+          <div class="demo-head">
+            <div class="demo-stack">
+              <div class="mw-av av av--teal"><svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/></svg></div>
+              <div class="mw-av av av--indigo"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="M20.5 20.5 16 16"/></svg></div>
+              <div class="mw-av av av--violet"><svg viewBox="0 0 24 24"><path d="M5 20V13"/><path d="M10 20V6"/><path d="M15 20v-9"/><path d="M20 20V9"/></svg></div>
+            </div>
+            <div>
+              <div class="demo-head-title">改版上线小组</div>
+              <div class="demo-head-meta">你 + 3 位 Fellow · 目标:周五前上线</div>
+            </div>
+          </div>
+          <div class="demo-body" id="groupBody"><!-- injected --></div>
+        </div>
+      </div>
+
+      <div class="duo-col reveal" style="--d:.1s">
+        <div class="duo-cap"><b>动手前先问你一句</b><span>敏感操作要你点头,不点就不动。</span></div>
+        <div class="demo-card">
+          <div class="demo-head">
+            <div class="mw-av av av--teal" style="width:36px;height:36px"><svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/></svg></div>
+            <div>
+              <div class="demo-head-title">小柯 · 工程</div>
+              <div class="demo-head-meta">请求执行一条命令</div>
+            </div>
+          </div>
+          <div class="demo-body" style="min-height:auto;padding:22px;gap:16px;" id="permDemo">
+            <div class="mw-msg">
+              <div class="mw-av av av--teal"><svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4"/><path d="M15 8l4 4-4 4"/></svg></div>
+              <div class="mw-bubble">测试都过了,我把改动提交一下?</div>
+            </div>
+            <div class="mw-perm" id="permBanner">
+              <div class="mw-perm-head">
+                <span class="pulse"></span>
+                <span class="mw-perm-kick">需要你的允许</span>
+                <span class="mw-perm-meta">小柯 · Bash</span>
+              </div>
+              <div class="mw-perm-cmd">$ git commit -am "feat: 新版落地页"</div>
+              <div class="mw-perm-actions">
+                <span class="ghost">拒绝</span>
+                <button class="mw-pbtn">仅这次</button>
+                <button class="mw-pbtn primary" id="permAllow">允许</button>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <script src="./landing.js?v=20260528-role-avatars" defer></script>
-  </body>
+<!-- ============ SYNC + ENGINES (merged) ============ -->
+<section class="block tint" id="sync">
+  <div class="wrap">
+    <div class="section-head center reveal" style="margin-bottom:6px;">
+      <span class="kicker">随处可用 · 自由选模型</span>
+      <h2 class="h2" style="margin:0 auto;">在哪都接着上次聊,用哪个模型你定。</h2>
+    </div>
+
+    <div class="combo">
+      <div class="combo-row reveal">
+        <div class="combo-label"><b>多端同步</b><span>账号、好友、群聊云端同步。</span></div>
+        <div class="combo-cards">
+          <div class="mini-card">
+            <div class="mini-icon"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8 M12 17v4"/></svg></div>
+            <div><h4>桌面 App</h4></div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20 M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg></div>
+            <div><h4>网页版</h4></div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-icon"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="3"/><path d="M11 18h2"/></svg></div>
+            <div><h4>手机端</h4></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="combo-row reveal" style="--d:.1s">
+        <div class="combo-label"><b>多引擎兼容</b><span>按事挑人,不被单一模型绑住。</span></div>
+        <div class="combo-cards">
+          <div class="mini-card">
+            <div class="mini-logo hermes"><img src="./assets/icons/hermes.svg" alt="Hermes"></div>
+            <div><h4>Hermes</h4></div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-logo"><svg viewBox="0 0 24 24" width="22" height="22" fill="#d97706"><path clip-rule="evenodd" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"></path></svg></div>
+            <div><h4>Claude Code</h4></div>
+          </div>
+          <div class="mini-card">
+            <div class="mini-logo"><img src="./assets/icons/codex.svg" alt="Codex"></div>
+            <div><h4>Codex</h4></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="wrap">
+    <a class="brand" href="#top"><span>Mia</span></a>
+    <span>© 2026 Mia</span>
+  </div>
+</footer>
+
+<script src="./assets/mia.js?v=20260601-promo"></script>
+</body>
 </html>
